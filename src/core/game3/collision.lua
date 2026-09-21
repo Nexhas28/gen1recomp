@@ -144,12 +144,15 @@ function Collision.installWarps(mapDef)
   for _, w in ipairs((mapDef and mapDef.warps) or {}) do
     local x, y = tonumber(w.x), tonumber(w.y)
     if x and y then
+      -- An unreadable behavior (tileset attrs stopped before this mid) means the
+      -- behavior is *unknown*, not "not a warp". Treat it like a live warp
+      -- behavior so the warp is not silently dropped.
+      local beh = Collision.behavior(x, y)
+      local repair = beh == nil or Collision.isWarpMetatileBehavior(beh)
       local cur = nil
       if Collision._grid and Collision._widthCells > 0 then
         local i = y * Collision._widthCells + x + 1
         cur = Collision._grid[i]
-        local beh = Collision.behavior(x, y)
-        local repair = beh == nil or Collision.isWarpMetatileBehavior(beh)
         -- pokefirered/src/field_control_avatar.c:860
         if beh ~= nil and repair and cur == 0x00 then
           local ScriptColl = require("src.core.game3.scripting.collision")
@@ -168,8 +171,13 @@ function Collision.installWarps(mapDef)
           end
         end
       end
-      -- In pret, a warp in map header is only active if the metatile behavior is a warp behavior
-      if isWarpBehavior(cur) then
+      -- In pret, a warp in map header only fires on a walkable cell whose
+      -- metatile behavior is a warp behavior. When the behavior table cannot
+      -- answer for this mid the behavior is unknown, so a walkable cell must
+      -- still index its warp -- otherwise the player is trapped indoors
+      -- (Celadon Condominiums exit mats, #2366). Solid cells keep the #2297
+      -- guard: only unreadable or live-warp behaviors may open them.
+      if isWarpBehavior(cur) or (repair and cur == 0x00) then
         Collision._warps[y * 1024 + x] = w
       end
     end
