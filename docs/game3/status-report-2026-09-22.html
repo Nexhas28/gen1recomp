@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gen 3 (FireRed) Fix-Wave — Status Report — 2026-09-22</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#e6edf3; --dim:#9da7b1;
+          --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --purple:#bc8cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.55 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif; padding:32px 20px 80px; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:19px; margin:38px 0 12px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .sub { color:var(--dim); margin-bottom:22px; font-size:13px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:18px 0 6px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .kpi .n { font-size:26px; font-weight:700; }
+  .kpi .l { font-size:12px; color:var(--dim); margin-top:2px; }
+  .g{color:var(--green)} .a{color:var(--amber)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple)}
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:14px; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#21262d; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:1px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .ok{background:#1a3a24;color:var(--green)} .work{background:#3a2e12;color:var(--amber)}
+  .wait{background:#1c2a3f;color:var(--blue)} .block{background:#3d1a1a;color:var(--red)}
+  .done{background:#272141;color:var(--purple)}
+  code { background:#21262d; padding:1px 6px; border-radius:5px; font-size:13px; color:#d2a8ff; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:12px 0; }
+  ul { margin:8px 0; padding-left:22px; } li { margin:4px 0; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .two{grid-template-columns:1fr;} }
+  .foot { color:var(--dim); font-size:12px; margin-top:40px; border-top:1px solid var(--line); padding-top:12px; }
+  .good { border-left:3px solid var(--green); }
+  .warn { border-left:3px solid var(--amber); }
+  .bad  { border-left:3px solid var(--red); }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>🔥 Gen&nbsp;3 (FireRed) Fix-Wave — Status Report</h1>
+<div class="sub">Team <b>G1R_Deluxe_Gen3</b> · lead OpenCode · generated 2026-09-22 · source: gen3-review-v3.html (210 findings) + team docs in <code>docs/game3/</code> · scope: <b>FireRed only</b> (user decision: no Emerald/Ruby clones)</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="n g">16</div><div class="l">Tasks completed</div></div>
+  <div class="kpi"><div class="n b">6</div><div class="l">Lanes active now</div></div>
+  <div class="kpi"><div class="n g">272/273</div><div class="l">Game3 suites passing (T6 gate)</div></div>
+  <div class="kpi"><div class="n g">EXIT 0</div><div class="l">Full gate — all18 tiers + new T6</div></div>
+  <div class="kpi"><div class="n p">210</div><div class="l">Review findings triaged</div></div>
+  <div class="kpi"><div class="n a">1</div><div class="l">Gate-red suite (fix in flight)</div></div>
+</div>
+
+<h2>1 · Health scoreboard</h2>
+<table>
+<tr><th>Metric</th><th>Baseline (start)</th><th>Now</th><th>Δ</th></tr>
+<tr><td>Full test gate (<code>./scripts/test.sh</code>)</td><td class="r">exit 1 (no .git → privacy gate fail)</td><td class="g">exit 0 — all 18 tiers + <b>new T6 tier (273 game3 suites, ×8 parallel)</b></td><td><span class="pill ok">GREEN</span></td></tr>
+<tr><td>273-suite sweep — PASS</td><td>145</td><td><b>248</b> (checkpoint) · TSB gate run: <b>all 23 known-failure names now pass</b></td><td class="g">+103–127</td></tr>
+<tr><td>273-suite sweep — FAIL</td><td>19 → 25 (post-exposure)</td><td><b>3</b> (checkpoint) → <b>1</b> after TSB P2 (routed fix)</td><td class="g">−22 to −24</td></tr>
+<tr><td>Partials / skips (external artifacts)</td><td>63 / 45</td><td>16 / 5 (v113 re-import + pret clone + pack configs)</td><td class="g">−87</td></tr>
+<tr><td>Engine tier / modkit</td><td>617 / 37</td><td><b>624 / 624</b> · modkit 37/37 · lint gate 0</td><td class="g">+7 suites</td></tr>
+<tr><td>Review findings verified</td><td>0 of 210</td><td>Wave1: 44 re-checked (34 valid / 10 stale) · Wave2: 74 classified (53 verified / 6 invalid / <b>14 confirmed bugs</b> / 4 wrong fixes struck)</td><td class="g">118 classified</td></tr>
+<tr><td>Refactor queue (64 cards)</td><td>0</td><td><b>64/64 actioned</b> — 22 DONE + 4 partial + 38 blocked-by-ownership (2 files now carved out)</td><td class="g">lane complete</td></tr>
+<tr><td>Git / PR</td><td>no .git · PR open</td><td>repo initialized, HEAD = <code>1ace9283</code> (upstream dev tip), privacy gate 3/3 · <b>PR #2393 MERGED by maintainer</b> · follow-up PR drafted, <b>0 pushes (user-GO rule)</b></td><td class="g">aligned</td></tr>
+<tr><td>pret grounding</td><td>none local</td><td>clone <code>~/dev/pokefirered @ c75f3523</code> · mandate active · 12 cited files re-verified, <b>zero drift</b></td><td class="g">authoritative</td></tr>
+</table>
+
+<h2>2 · Lane status (all teammates on MiMo 2.6)</h2>
+<table>
+<tr><th>Lane</th><th>Status</th><th>Current work</th><th>Done so far</th></tr>
+<tr><td><b>FireRed Finisher</b></td><td><span class="pill work">WORKING</span></td><td>Priority ladder: CableClub park-rework (gate-red fix) → T6 day-care guard (in hand, new test written) → RSE handoff patches → E10 wiring (20 ops) →135-finding queue tail (worst-25 first, W2 notes authoritative)</td><td>0xa8/0xa9 operand desync fix (pret-cited,9 suites green) · special_trade/CableClub-VM/region_map-marker findings landed · items3+4 of ladder landed · batch1:9 queue rows (7 already-fixed,2 report claims overturned by pret)</td></tr>
+<tr><td><b>Refactor &amp; Cleanup</b></td><td><span class="pill work">WORKING</span></td><td>Carve execution: <code>map.lua</code> B9 (conditional — must prove half-fix clears defect or revert) · <code>commands.lua</code> X9 (zero-caller + pret protocol)</td><td>All64 cards actioned · O5 <code>P.Cos2</code> deleted (pret never calls it either; all anim + parity suites green) · carve proposal audited (35 justified exclusions)</td></tr>
+<tr><td><b>Gen3 Platform Architect</b></td><td><span class="pill work">WORKING</span></td><td>E10 seam-design for6 unresolved opcodes (setmysteryeventstatus, gotonative, create/turnvobject, load/unloadhelp)</td><td>Per-game <code>profile.lua</code> + firered profile (80/80) · mod-API version dispatch T7.1 · font provider T5.1a · <code>cache_paths</code> + <code>Versions.game</code> T6.3a · <b>capability-flag registry T3.1a (265/265)</b> with cross-repo 404/200 proof · seams design doc (993 lines,26 tickets) · scope-ack: FireRed only</td></tr>
+<tr><td><b>QA &amp; Test Engineer</b></td><td><span class="pill work">WORKING</span></td><td>Pret citation + expectation audit across all game3 suites (start:4 flagged citations; classify match/stale/contradicted)</td><td>Baseline + full sweep docs · v113 re-import (+75 PASS) · artifact conversions (+28 PASS) · checkpoint sweep (zero regressions) · town_map 10-icons pret fix · O5 test precondition</td></tr>
+<tr><td><b>Test Suite Builder</b></td><td><span class="pill work">WORKING</span></td><td><b>Phase 3:</b> building your6 scenario suites (capture, menus, battle AI, move usage, event triggering, overworld navigation) — zero scenario/e2e suites existed before</td><td>Phase1:2 G1 stale stubs fixed (pinning contract intact10/10) · <b>Phase2: T6 gate tier live</b> —273 suites in <code>test.sh</code>, known-failure ceiling, no name-based skips</td></tr>
+<tr><td><b>FRLG Gap Auditor</b></td><td><span class="pill done">MISSION DONE</span> (idle)</td><td>Standing by for post-fix verification once Finisher's14 confirmed bugs land</td><td>Triage doc (773 lines, all210 findings + file-ownership table) · verification waves1+2 (118 rows classified) · E10 opcode spec (26 unwired — report said63, was stale;20 wired-ready) · T6 guard settled (script-layer, pret-cited) · C1 trap patched</td></tr>
+<tr><td><b>PR &amp; Upstream Steward</b></td><td><span class="pill wait">FROZEN</span></td><td>Awaiting "wave frozen" → hands branch + commit range + final title/body → <b>your GO</b> opens the PR</td><td>Git layout + remotes (Nexhas28↔bryanthaboi) · privacy-gate fix · pret clone · trial merge (zero conflicts) · HEAD fast-forward to <code>1ace9283</code> · follow-up PR draft (human prose, pret-cited)</td></tr>
+</table>
+
+<h2>3 · What now works (highlights)</h2>
+<div class="two">
+<div class="card good"><b>Bugs fixed &amp; protected against</b>
+<ul>
+<li><b>20 suite field wipe</b> — objects.lua cluster A (branch restore, zero-edit)</li>
+<li><b>Knock Off</b> — corrected to true FRLG semantics (battler-only + send-out mask, pret <code>battle_script_commands.c:2730-2752</code>); report's fix was Gen4+ and would have broken it</li>
+<li><b>2 more report claims overturned by pret</b> (Thick Fat C4, Liquid Ooze C5) — bad fixes prevented</li>
+<li>Safari AI flee (no-pack mirror), special_events Q1–Q4,0xa8/0xa9 operand desync, CableClub VM deadlock, region_map import marker</li>
+<li>Wave-2 surfaced <b>14 pret-cited confirmed bugs</b> queued with authoritative W2 notes</li>
+</ul></div>
+<div class="card good"><b>Infrastructure that didn't exist before</b>
+<ul>
+<li><b>T6 gate tier</b> — the273 game3 suites now run in CI-gate fashion (were invisible)</li>
+<li>v113 cache re-import (auto-discovered), pret local clone, anim/audio pack configs</li>
+<li>Git repo + remotes + excludes; upstream merge verified clean; HEAD = dev tip</li>
+<li>RSE groundwork (design only, parked): profile seam, capability flags, font provider, version dispatch,26-ticket wave plan</li>
+<li>Anti-conflict file-ownership table (177 rows) — held under real concurrent load</li>
+</ul></div>
+</div>
+
+<h2>4 · Remaining items</h2>
+<table>
+<tr><th>#</th><th>Item</th><th>Owner</th><th>Status</th></tr>
+<tr><td>1</td><td><b>Gate-red suite</b> <code>game3_stitchimp_code_roots:86</code> — rework CableClub gate: park while records Screen open, release only in no-screen fallback (adjudicated, pret-grounded)</td><td>Finisher</td><td><span class="pill work">IN FLIGHT</span></td></tr>
+<tr><td>2</td><td>T6 day-care guard — wire2 withdraw handlers (helper written)</td><td>Finisher</td><td><span class="pill work">IN PROGRESS</span></td></tr>
+<tr><td>3</td><td><b>E10 wiring batch</b> —20 wired-ready opcodes (spec ready; skip6 seam ops)</td><td>Finisher</td><td><span class="pill wait">QUEUED</span></td></tr>
+<tr><td>4</td><td><b>14 confirmed bugs</b> from Wave2: E6/E7/E8 (VarGet/raw word), H5/H6 (TT stash, species-0 gift), P2 (Rapid Spin), P5 (Thief guard scope), Q9, R3, U6/U8/U9, X1 (fishing steps) + queue tail of the137-lane (worst-25 order)</td><td>Finisher</td><td><span class="pill wait">QUEUED</span></td></tr>
+<tr><td>5</td><td><b>Parked RSE handoff patches</b> (FireRed-relevant): T0.2 schema round-trip · T1.1 options profile · T1.2 map-id prefixes · T3.1b item gates · T3.2 natives filter · T3.4 extractor list · T6.2/T6.3b</td><td>Finisher (when reached)</td><td><span class="pill wait">PARKED</span></td></tr>
+<tr><td>6</td><td><b>6 scenario suites</b> (your Phase3 request): capture · menus · battle AI · move usage · event triggering · overworld navigation</td><td>Test Suite Builder</td><td><span class="pill work">BUILDING</span></td></tr>
+<tr><td>7</td><td>Pret citation audit table across test suites (catch more town_map-style stale expectations)</td><td>QA</td><td><span class="pill work">RUNNING</span></td></tr>
+<tr><td>8</td><td>E10 seam decisions for6 remaining opcodes → design doc for Finisher</td><td>Architect</td><td><span class="pill work">RUNNING</span></td></tr>
+<tr><td>9</td><td>Carve: map.lua B9 (conditional proof) + commands.lua X9 (zero-caller protocol)</td><td>Refactor</td><td><span class="pill work">RUNNING</span></td></tr>
+<tr><td>10</td><td>35 deferred refactor cards — blocked until Finisher clears their files (by design)</td><td>Refactor</td><td><span class="pill block">BLOCKED (by design)</span></td></tr>
+<tr><td>11</td><td>K8/K9 perf items — need in-game visual evidence (headless can't verify)</td><td>—</td><td><span class="pill block">NEEDS IN-GAME</span></td></tr>
+<tr><td>12</td><td><b>Freeze → PR handoff:</b> steward sends branch + commit range + final title/body → <b>user GO</b> → new PR <code>Nexhas28 → bryanthaboi:dev</code></td><td>Lead → User</td><td><span class="pill wait">AWAITING FREEZE</span></td></tr>
+</table>
+
+<h2>5 · Decisions for you</h2>
+<div class="card warn"><ul>
+<li><b>devkitARM install — OPEN:</b> the6 pret-blocked suites (revision_view, alt_layouts, braille, chrome_keys, condominiums, heal_locations) need retail-layout ROMs. Proven: modern-toolchain builds compile fine but fail on address-layout, so <b>only devkitARM + agbcc</b> converts them. Answer <code>install it</code> or <code>skip</code>. Doesn't block freeze.</li>
+<li><b>PR GO — pending freeze:</b> nothing leaves this machine without your explicit GO. Draft title/body already written (human prose, pret-cited).</li>
+<li>Scope confirmed: FireRed only; RSE stays planned-groundwork in <code>rse-seams.md</code> (4 items labeled <code>[pret-unverified]</code>).</li>
+</ul></div>
+
+<h2>6 · Risks &amp; notes</h2>
+<div class="card bad"><ul>
+<li><b>Upstream moves daily</b> — HEAD currently = dev tip <code>1ace9283</code>; re-fetch + conflict check at freeze (last trial merge: zero conflicts, all22 risk files clean).</li>
+<li><b>Provider outage episode (resolved):</b> deepseek-stamped slots dropped messages twice; all teammates now on <b>MiMo 2.6</b> (standing rule), no work lost — everything reconstructable from tasks/docs.</li>
+<li><b>~60 in-flight files</b> uncommitted (by design — single commit batch at handoff, user-GO).</li>
+<li>Headless caveat: visual/perf items (K8/K9) and in-game feel need a real game run eventually.</li>
+</ul></div>
+
+<div class="foot">
+Sources: docs/game3/review-v3-triage.md (210 findings, W1+W2 notes) · game3-suite-sweep-v3.md + v113 (+checkpoint) · test-baseline-v3.md · game3-artifact-conversions-v3.md · rse-seams.md (993 lines) · e10-opcode-spec.md · upstream-merge-trial.md · team task board (16 completed / 6 active). pret authority: github.com/pret/pokefirered @ c75f3523 (local clone). Push/PR rule: user GO only.
+</div>
+</div></body>
+</html>

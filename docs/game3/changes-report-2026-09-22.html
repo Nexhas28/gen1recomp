@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gen 3 FireRed — What Changed — 2026-09-22</title>
+<style>
+  :root { --bg:#f6f8fa; --card:#ffffff; --line:#d8dee4; --txt:#1f2328; --dim:#59636e;
+          --green:#1a7f37; --amber:#9a6700; --red:#cf222e; --blue:#0969da; --purple:#8250df; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font:17px/1.65 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+         padding:48px 20px 90px; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-size:34px; margin:0 0 6px; letter-spacing:-.5px; }
+  .sub { color:var(--dim); font-size:15px; margin-bottom:8px; }
+  h2 { font-size:24px; margin:52px 0 6px; letter-spacing:-.3px; }
+  h2 .cnt { color:var(--dim); font-weight:400; font-size:16px; }
+  .lede { color:var(--dim); font-size:15px; margin:0 0 18px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin:26px 0 8px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; text-align:center; }
+  .kpi .n { font-size:26px; font-weight:700; }
+  .kpi .l { font-size:12.5px; color:var(--dim); margin-top:3px; line-height:1.35; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:720px){ .grid{grid-template-columns:1fr;} }
+  .item { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .item h3 { margin:0 0 6px; font-size:16.5px; }
+  .item p { margin:0; font-size:15px; }
+  .meta { color:var(--dim); font-size:13px; margin-top:8px; }
+  .meta code { background:#eff1f3; padding:1px 6px; border-radius:6px; font-size:12.5px; color:#6639ba; }
+  details { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:0; margin:12px 0; overflow:hidden; }
+  summary { cursor:pointer; padding:15px 20px; font-weight:600; font-size:17px; list-style:none; }
+  summary::before { content:"▸ "; color:var(--dim); }
+  details[open] summary::before { content:"▾ "; }
+  details[open] summary { border-bottom:1px solid var(--line); }
+  .rows { padding:6px 20px 14px; }
+  .row { padding:11px 0; border-bottom:1px solid #eaeef2; }
+  .row:last-child { border-bottom:none; }
+  .row b { font-size:15.5px; }
+  .row .d { font-size:14.5px; color:#3d444d; margin-top:2px; }
+  .row .m { font-size:13px; color:var(--dim); margin-top:3px; }
+  .row .m code { background:#eff1f3; padding:1px 6px; border-radius:6px; font-size:12.5px; color:#6639ba; }
+  .tag { display:inline-block; font-size:11.5px; font-weight:700; border-radius:999px; padding:2px 10px; vertical-align:2px; margin-left:8px; }
+  .t-fix { background:#dafbe1; color:var(--green); }
+  .t-new { background:#ddf4ff; color:var(--blue); }
+  .t-no  { background:#ffebe9; color:var(--red); }
+  .t-doc { background:#fbedff; color:var(--purple); }
+  ul.plain { padding-left:22px; margin:10px 0 0; }
+  ul.plain li { margin:9px 0; }
+  ul.plain li b { font-size:16px; }
+  ul.plain .m { font-size:13px; color:var(--dim); }
+  .ok { color:var(--green); font-weight:700; }
+  .foot { color:var(--dim); font-size:13px; margin-top:56px; border-top:1px solid var(--line); padding-top:16px; }
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>What changed in the Gen&nbsp;3 FireRed wave</h1>
+<div class="sub">104 changes · every fix verified against the pret decompilation · full test gate green · 2026-09-22</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="n">~30</div><div class="l">bugs fixed</div></div>
+  <div class="kpi"><div class="n">33</div><div class="l">test files<br>(14 brand-new)</div></div>
+  <div class="kpi"><div class="n">279/279</div><div class="l">suites passing<br>in the gate</div></div>
+  <div class="kpi"><div class="n">17</div><div class="l">false alarms<br>we did <i>not</i> "fix"</div></div>
+  <div class="kpi"><div class="n">9</div><div class="l">working docs<br>committed</div></div>
+</div>
+
+<h2>The ten changes that matter most</h2>
+<p class="lede">Plain English first — file and source detail underneath each one.</p>
+<div class="grid">
+
+  <div class="item"><h3>Knock Off works like FireRed now <span class="tag t-fix">fixed</span></h3>
+    <p>The move hides the held item for the battle only — the Pokémon keeps it afterwards, exactly as the original game does. The review's suggested fix would have deleted it forever (that's a later-generation mechanic).</p>
+    <div class="meta"><code>secondary.lua</code> · pret <code>battle_script_commands.c:2730</code> · all item suites green</div></div>
+
+  <div class="item"><h3>Field crashes: 20 broken suites → all green <span class="tag t-fix">fixed</span></h3>
+    <p>One stale file (<code>objects.lua</code>) made every map-object test crash. Restoring the current branch version cleared all 20 at once, plus 11 neighbouring field tests.</p>
+    <div class="meta">zero-edit restore · 31 suites green</div></div>
+
+  <div class="item"><h3>The test gate now runs <i>everything</i> <span class="tag t-new">new</span></h3>
+    <p>Before: 279 top-level game tests ran nowhere. Now they run inside <code>./scripts/test.sh</code> as tier <b>T6</b> — 8 at a time, with per-suite logs and automatic failure classification.</p>
+    <div class="meta"><code>scripts/test.sh</code> · gate exit 0 · 279/279</div></div>
+
+  <div class="item"><h3>Six end-to-end scenario suites <span class="tag t-new">new</span></h3>
+    <p>Capture, menus, battle AI, move usage, events and overworld navigation — full play-through style checks. 222 assertions, every expected value cited to pret.</p>
+    <div class="meta"><code>tests/game3_scenario_*.lua</code> · green ×2 each</div></div>
+
+  <div class="item"><h3>Script commands read their data correctly <span class="tag t-fix">fixed</span></h3>
+    <p>Money, random numbers, warps, weather and tile flags now read their operands exactly like FireRed — several scripts were silently reading the wrong bytes before.</p>
+    <div class="meta">5 opcode layouts + operand clusters · pret <code>scrcmd.c</code> · 12/12 suites</div></div>
+
+  <div class="item"><h3>Steal moves respect the battle type <span class="tag t-fix">fixed</span></h3>
+    <p>Thief/Trick now only block opponent steals in normal trainer battles — Link, Battle Tower, e-Reader and Secret Base battles work as intended.</p>
+    <div class="meta"><code>secondary.lua · special.lua</code> · pret <code>:2610-2622</code></div></div>
+
+  <div class="item"><h3>Trainer Tower save bug prevented <span class="tag t-fix">fixed</span></h3>
+    <p>Gift-mon payloads now validate species and level before delivery, and save-slot paths are checked (<code>../evil</code> style paths are rejected) — closing two real hole-punch paths.</p>
+    <div class="meta"><code>mystery_gift.lua · SaveData</code> · gift + save suites green</div></div>
+
+  <div class="item"><h3>Day-care can't swallow your last Pokémon <span class="tag t-fix">fixed</span></h3>
+    <p>Both day-care withdrawal NPCs now check for a full party exactly like the original scripts do (the review's "send overflow to the PC" idea was wrong and was struck).</p>
+    <div class="meta"><code>natives_daycare.lua</code> · pret script cites · 4 suites green</div></div>
+
+  <div class="item"><h3>18 more script opcodes supported <span class="tag t-new">new</span></h3>
+    <p>16 FireRed no-ops plus <code>gettime</code> and <code>choosecontestmon</code> now execute instead of stalling — with a written spec for every opcode.</p>
+    <div class="meta"><code>ops_a.lua</code> · spec in <code>e10-opcode-spec.md</code> · 11 suites green</div></div>
+
+  <div class="item"><h3>Maps, objects and fishing tuned to pret <span class="tag t-fix">fixed</span></h3>
+    <p>Map reloads drop stale caches, object "clone" tiles decode properly, fishing odds follow the real round-based formula, and Whirlpool is no longer treated as an HM.</p>
+    <div class="meta"><code>map · extract_map_events · field · pokemon</code> · field suites green</div></div>
+
+</div>
+
+<h2>Everything else, by area <span class="cnt">(tap to expand)</span></h2>
+
+<details><summary>Battle engine <span class="cnt">(7 more)</span></summary><div class="rows">
+  <div class="row"><b>Rapid Spin frees exactly one hazard per use</b><span class="tag t-fix">fixed</span>
+    <div class="d">It previously cleared all of wrap / leech seed / spikes at once; the original uses one if/else chain. The test expectation was updated to match with the source order cited.</div>
+    <div class="m">pret <code>battle_script_commands.c:8435-8474</code> · move_effects + special_moves green ×2</div></div>
+  <div class="row"><b>Switch AI scores STAB for the Pokémon being sent in</b><span class="tag t-fix">fixed</span>
+    <div class="d">It was scoring the mon that just left, so AI switch decisions were wrong.</div>
+    <div class="m"><code>engine.lua</code> · baton_pass + switch suites green</div></div>
+  <div class="row"><b>Growl targets both sides, as listed in the data</b><span class="tag t-fix">fixed</span>
+    <div class="m">curated move rows now carry the target field · pret <code>battle_moves.h</code></div></div>
+  <div class="row"><b>Operand sizes for object-priority commands corrected</b><span class="tag t-fix">fixed</span>
+    <div class="d">Two opcodes read one byte too few — scripts using them would desync.</div>
+    <div class="m"><code>opcodes.lua</code> · pret <code>scrcmd.c:1122-1140</code> · 9 suites green</div></div>
+  <div class="row"><b>Safari Zone flee works without the ROM AI pack</b><span class="tag t-fix">fixed</span>
+    <div class="m">inline mirror of the safari flee script · 69/0 green</div></div>
+  <div class="row"><b>Cable Club records screen no longer deadlocks</b><span class="tag t-fix">fixed</span>
+    <div class="d">The VM now parks while the screen is open and releases when it closes — a three-phase test pins both halves.</div>
+    <div class="m">pret <code>cable_club.inc:566-575</code> · green ×2</div></div>
+  <div class="row"><b>Trainer Tower / party stash behaves exactly like pret</b><span class="tag t-no">investigated — no change needed</span>
+    <div class="d">The review wanted the stash cleared on load; pret deliberately doesn't do that, so the "fix" was reverted and the reasoning documented instead.</div>
+    <div class="m">pret <code>load_save.c:170</code> · verdict recorded in e10 spec §5.9</div></div>
+</div></details>
+
+<details><summary>Scripting, natives &amp; events <span class="cnt">(6 more)</span></summary><div class="rows">
+  <div class="row"><b>Trade sequence message bug fixed</b><span class="tag t-fix">fixed</span>
+    <div class="d">A special called a function that didn't exist, so the compatibility line never appeared.</div>
+    <div class="m"><code>natives_events.lua</code> · pret <code>field_specials.c:120</code></div></div>
+  <div class="row"><b>Icefall Cave cracked-ice + bike/surf state fixed</b><span class="tag t-fix">fixed</span>
+    <div class="d">Four special-event bugs: a duplicate opcode alias, the cracked-ice flag, and ForcePlayerOntoBike / StartSurfing writing to the wrong state.</div>
+    <div class="m">pret <code>field_tasks.c:152</code>, <code>field_specials.c:97/1513</code> · all green</div></div>
+  <div class="row"><b>Money commands honour their disable byte</b><span class="tag t-fix">fixed</span>
+    <div class="m">pret <code>scrcmd.c:1798-1830</code> · coins + rewards suites</div></div>
+  <div class="row"><b>Day-care egg + withdrawal guards</b><span class="tag t-fix">fixed</span>
+    <div class="m">shared party-full helper across 3 call sites · pret script cites</div></div>
+  <div class="row"><b>StartMenu missing "has first Pokémon" gate</b><span class="tag t-doc">logged for wave 2</span>
+    <div class="m">pret <code>start_menu.c:217-218</code> · staged with test extension</div></div>
+  <div class="row"><b>Trainer-Tower "secret base battle" opcode</b><span class="tag t-no">false alarm</span>
+    <div class="d">No FireRed script ever calls it (only e-reader, which is handled) — recorded for the Ruby/Emerald work instead.</div>
+    <div class="m">grep evidence in triage row Q9</div></div>
+</div></details>
+
+<details><summary>Field, save data, importer &amp; architecture <span class="cnt">(7 more)</span></summary><div class="rows">
+  <div class="row"><b>Map reload cache invalidation</b><span class="tag t-fix">fixed</span>
+    <div class="d">Re-entering a map showed stale world data; now the cache clears on every load, proven with a before/after reproduction.</div>
+    <div class="m"><code>map.lua</code> · pret <code>overworld.c:759/792</code> · 10 suites + gate ×2</div></div>
+  <div class="row"><b>Dead-code sweep on battle helpers</b><span class="tag t-fix">fixed</span>
+    <div class="d">The review called 12 functions dead — 8 were live (kept), exactly 4 truly unused ones deleted with grep proof.</div>
+    <div class="m"><code>commands.lua</code> −18 lines · 19 suites green</div></div>
+  <div class="row"><b>Object clone tiles decode correctly</b><span class="tag t-fix">fixed</span>
+    <div class="m">kind byte + clone union · pret <code>fieldmap.h:110-130</code></div></div>
+  <div class="row"><b>Fishing odds follow the real round formula</b><span class="tag t-fix">fixed</span>
+    <div class="m">+4 first round, +1 after · pret <code>field_player_avatar.c:1740-1765</code></div></div>
+  <div class="row"><b>Importer writes its completion marker on the fast path</b><span class="tag t-fix">fixed</span>
+    <div class="d">Fresh imports were missing a marker file, so a region-map test could never pass.</div>
+    <div class="m"><code>RomExtractorGen3.lua</code> · hardening test added</div></div>
+  <div class="row"><b>Save version round-trip + slot-path validation</b><span class="tag t-fix">fixed</span>
+    <div class="d">Save schema writes and re-reads its version; slot names must match <code>slotN</code> or they're rejected (path-traversal closed).</div>
+    <div class="m">new engine suites 9/9 · <code>../evil</code> probe returns nil</div></div>
+  <div class="row"><b>Ruby/Emerald groundwork (inactive, FireRed-default)</b><span class="tag t-new">new</span>
+    <div class="d">Per-game profile, capability flags for FireRed-only features, font provider, version-aware mod dispatch, cache/version resolvers — all default to FireRed and change no behaviour today.</div>
+    <div class="m">6 new modules · engine 624/624 · design in <code>rse-seams.md</code></div></div>
+</div></details>
+
+<details><summary>Tests, gate &amp; quality <span class="cnt">(6 more)</span></summary><div class="rows">
+  <div class="row"><b>14 brand-new suites</b><span class="tag t-new">new</span>
+    <div class="d">6 scenario suites (capture, menus, battle AI, moves, events, overworld — 222 checks) + 8 engine suites for the new modules.</div></div>
+  <div class="row"><b>19 existing suites repaired</b><span class="tag t-fix">fixed</span>
+    <div class="d">Stale call signatures, missing save stubs, an out-of-date icon count (9 → 10, confirmed in pret), and 11 drifted line citations — one of which hid a wrong value (Oran Berry 133 → 139).</div>
+    <div class="m">all green ×2 · audit: 862 citations checked, <b>0 contradicted</b></div></div>
+  <div class="row"><b>T6 gate tier</b><span class="tag t-new">new</span>
+    <div class="d">Runs all 279 top-level suites in CI style: parallel ×8, logs kept on failure, and every failure labelled (assertion / crash / killed-worker) so a red build explains itself.</div></div>
+  <div class="row"><b>Gate flake investigated to ground</b><span class="tag t-fix">fixed</span>
+    <div class="d">~1,500 test executions, zero reproductions; the tier's own log-deletion bug was the reason nobody could inspect it — now fixed.</div></div>
+  <div class="row"><b>pret citation audit</b><span class="tag t-doc">doc</span>
+    <div class="d">Every expected value in the test suite traced to the pret decompilation: 851 match, 11 corrected, 0 wrong.</div>
+    <div class="m"><code>pret-citation-audit-v3.md</code></div></div>
+  <div class="row"><b>Final gate at freeze</b><div class="d"><span class="ok">exit 0 — all tiers passed.</span> Engine 624/624 · T6 279/279 · Gen2 146/146 · modkit 37/37 · luacheck clean across 978 files.</div></div>
+</div></details>
+
+<details><summary>Refactor &amp; cleanup <span class="cnt">(4 bullets)</span></summary><div class="rows">
+  <div class="row"><b>Animation data de-duplicated</b>
+    <div class="d">Shared trig helpers across generations, one picture-size table instead of three, 720 dead template fields removed, one dead function deleted (pret has zero callers of it too).</div></div>
+  <div class="row"><b>Dead code removed</b>
+    <div class="d">Unused world-render path, battle chrome helpers, adapter methods — each with caller-count proof before deletion.</div></div>
+  <div class="row"><b>Allocation hot-spots cooled</b>
+    <div class="d">OAM buffer reuse, per-tile scratch pooling, font advance hoisting, per-frame sort work reduced.</div></div>
+  <div class="row"><b>38 items deliberately deferred</b>
+    <div class="d">Files being edited by the fix lanes at the same time — released one-by-one with proof instead of risking collisions. All tracked in the triage ledger.</div></div>
+</div></details>
+
+<h2>What we deliberately did <i>not</i> change</h2>
+<ul class="plain">
+  <li><b>17 "bugs" that weren't bugs.</b> The review's claims were checked against source first — stale findings were killed before anyone spent time, and 6 of the review's <i>suggested fixes</i> were struck because they contradicted pret (including the Knock Off one).</li>
+  <li><b>Two investigations ended in "leave it alone."</b> The Trainer-Tower stash and the gift opcode both have no pret-equivalent change — documented with evidence rather than force-fitted.</li>
+  <li><b>Ruby / Sapphire / Emerald work.</b> Design docs only, per your scope call; FireRed stays the priority.</li>
+</ul>
+
+<h2>What's still queued (wave 2 — after the PR)</h2>
+<ul class="plain">
+  <li><b>~100 verified smaller fixes</b> from the review's list, in priority order.</li>
+  <li><b>Handoff patches</b> for the architecture seams (item gates, natives filter, extractor list).</li>
+  <li><b>StartMenu "first Pokémon" gate</b> + its test extension.</li>
+  <li><b>Optional:</b> installing devkitARM would unlock 6 more pret-comparison suites (currently skipped).</li>
+</ul>
+
+<div class="foot">
+104 change entries · +1,678/−1,204 lines changed + 2,520 lines added in new files · 9 working docs committed · package: branch <code>nexhas28/gen3-review-v3-fixes</code> → <code>bryanthaboi:dev</code>, awaiting GO. Every behavioural claim above is cited to github.com/pret/pokefirered (local clone c75f3523); full evidence in docs/game3/review-v3-triage.md.
+</div>
+</div></body>
+</html>
