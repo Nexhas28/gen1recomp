@@ -4173,6 +4173,9 @@ function RomImporter:gamepadpressed(_, button)
       elseif self._profileRenamePrompt then self._profileRenamePrompt = nil; self:_disarmTextInput(); return
       elseif self._profileSavePrompt then self._profileSavePrompt = nil; self:_disarmTextInput(); return
       elseif self._settingsText then self._settingsText = nil; self:_disarmTextInput(); return
+      -- B leaves Settings the way Escape does (keypressed): a pad-only
+      -- console had no way out but the pointer.
+      elseif self._settings then self:_closeSettings(); return
       end
     elseif button == "dpup" or action == "dpup" then
       if okKit then Kit.navigate("up") end
@@ -4205,6 +4208,9 @@ function RomImporter:gamepadpressed(_, button)
       elseif self._profileRenamePrompt then self._profileRenamePrompt = nil; self:_disarmTextInput(); return
       elseif self._profileSavePrompt then self._profileSavePrompt = nil; self:_disarmTextInput(); return
       elseif self._settingsText then self._settingsText = nil; self:_disarmTextInput(); return
+      -- B leaves Settings the way Escape does (keypressed): a pad-only
+      -- console had no way out but the pointer.
+      elseif self._settings then self:_closeSettings(); return
       end
     elseif button == "dpup" or button == "dpdown"
         or button == "dpleft" or button == "dpright" then
