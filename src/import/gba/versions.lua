@@ -43,7 +43,7 @@ Versions.ROM_SIZE = 16777216
 -- v115: LeafGreen profiles, edition-specific title assets and Deoxys stats.
 -- v121: chrome/fonts/japanese_{normal,small}_* and japanese_widths.lua, the
 --       cart's Japanese fonts, for text a Japanese translation mod prints.
-Versions.CACHE_VERSION = 126
+Versions.CACHE_VERSION = 127
 Versions.NATIVE_VERSION = 6
 Versions.OW_VERSION = 3
 Versions.ANIM_VERSION = 1
@@ -132,7 +132,7 @@ Versions.EVOLUTION_TABLE = 0x259754       -- gEvolutionTable
 Versions.EVOS_PER_MON = 5
 Versions.EVOLUTION_ENTRY_SIZE = 8         -- method,u16 param,u16 target,u16 pad
 Versions.TMHM_LEARNSETS = 0x252BC8        -- sTMHMLearnsets (u32 lo + u32 hi)
-Versions.TMHM_MOVES = 0x45A5A4            -- sTMHMMoves[58] u16
+Versions.TMHM_MOVES = 0x45A5A4            -- sTMHMMoves_Duplicate[58] u16
 Versions.TMHM_COUNT = 58                  -- 50 TM + 8 HM
 Versions.POKEDEX_ENTRIES = 0x44E850       -- gPokedexEntries (national index)
 Versions.POKEDEX_ENTRY_SIZE = 36

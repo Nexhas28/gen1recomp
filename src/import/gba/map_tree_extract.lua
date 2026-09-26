@@ -50,6 +50,20 @@ local function simplify_events(ev)
     return { objects = {}, warps = {}, bgEvents = {}, coordEvents = {} }
   end
   local function slim_obj(o)
+    local t = o.cloneTarget
+    if t then
+      return {
+        localId = o.localId,
+        graphicsId = o.graphicsId,
+        kind = o.kind,
+        x = o.x,
+        y = o.y,
+        targetLocalId = t.localId,
+        targetMapNum = t.mapNum,
+        targetMapGroup = t.mapGroup,
+        flag = o.flag,
+      }
+    end
     return {
       localId = o.localId,
       graphicsId = o.graphicsId,
