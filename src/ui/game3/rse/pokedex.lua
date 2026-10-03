@@ -1,4 +1,5 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
+local Strings = require("src.core.Strings")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
 local Pal = require("src.core.game3.pal_fade")
@@ -935,7 +936,12 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
   out[#out + 1] = { text = RomText.plain("gText_NumberClear01") .. string.format("%03d", num), x = 0x60, y = 0x19 }
   local sp = Pokedex.speciesOf(nat)
   out[#out + 1] = { text = sp ~= 0 and pokemon().name(sp) or Gfx.manifest().tenDashes, x = 0x84, y = 0x19 }
-  local category = owned and ((e.category or "") .. " " .. RomText.plain("gText_Pokemon")) or RomText.plain("gText_5MarksPokemon")
+  local category
+  if owned then
+    category = Strings(e.category or "") .. " " .. RomText.plain("gText_Pokemon")
+  else
+    category = RomText.plain("gText_5MarksPokemon")
+  end
   out[#out + 1] = { text = category, x = 0x64, y = 0x29 }
   out[#out + 1] = { text = RomText.plain("gText_HTHeight"), x = 0x60, y = 0x39 }
   out[#out + 1] = { text = RomText.plain("gText_WTWeight"), x = 0x60, y = 0x49 }
@@ -946,7 +952,7 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
     out[#out + 1] = { text = RomText.plain("gText_UnkHeight"), x = 0x81, y = 0x39 }
     out[#out + 1] = { text = RomText.plain("gText_UnkWeight"), x = 0x81, y = 0x49 }
   end
-  local desc = owned and (e.description or "") or ""
+  local desc = owned and Strings(e.description or "") or ""
   local w = 0
   for line in (desc .. "\n"):gmatch("(.-)\n") do w = math.max(w, FrlgFont.measure(line) or 0) end
   out[#out + 1] = { text = desc, x = w < 240 and math.floor((240 - w) / 2) or 0, y = 95 }
