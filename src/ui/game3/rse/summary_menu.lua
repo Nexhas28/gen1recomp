@@ -5,6 +5,7 @@ local RomText = require("src.core.game3.rom_text")
 local Pokemon = require("src.core.game3.pokemon")
 local ItemsData = require("src.core.game3.items_data")
 local SummaryData = require("src.core.game3.summary_data")
+local Strings = require("src.core.Strings")
 
 local RseSummary = {}
 
@@ -416,7 +417,7 @@ local function drawInfo(m, Sm, mon, egg)
     dynamic = {
       [0] = RomText.ir("sMemoNatureTextColor"), [1] = RomText.ir("sMemoMiscTextColor"),
       [2] = RomText.at("gNatureNamePointers", natureId), [3] = tostring(metLevel == 0 and 5 or metLevel),
-      [4] = secName or "", [5] = RomText.ir("gText_EmptyString5"),
+      [4] = secName and Strings(secName) or "", [5] = RomText.ir("gText_EmptyString5"),
     },
   })
 end

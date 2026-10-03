@@ -82,6 +82,44 @@ local function contestMoveDescription()
   return view.win[10].text
 end
 
+-- pokeemerald/src/region_map.c:1568
+Mapsec.pack = function()
+  return { count = 1, sections = { [0] = { name = "LITTLEROOT TOWN" } } }
+end
+
+-- pokeemerald/src/pokemon_summary_screen.c:3116: the trainer memo's met
+-- location is a map section name.
+local RseSummary = require("src.ui.game3.rse.summary_menu")
+local PalText = require("src.ui.game3.rse.pal_text")
+local drawInfo
+for i = 1, 60 do
+  local name, value = debug.getupvalue(RseSummary.draw, i)
+  if not name then break end
+  if name == "drawInfo" then drawInfo = value; break end
+end
+assert(drawInfo, "RSE summary info page drawer")
+RomText.ir = function() return {} end
+RomText.at = function() return {} end
+PalText.width = function() return 0 end
+Pokemon.types = function() return {} end
+Pokemon.speciesOf = function() return 252 end
+SummaryData.nature = function() return 0 end
+local function metLocation()
+  local shown
+  local draw = PalText.draw
+  PalText.draw = function(_, _, _, ctx)
+    if ctx and ctx.dynamic then shown = ctx.dynamic[4] end
+  end
+  local w = { left = 0, top = 0, paletteNum = 0 }
+  local m = { palette = {}, textColors = {}, windows = {}, pageWindows = { info = { w, w, w, w } } }
+  local describe = SummaryData.abilityDescription
+  SummaryData.abilityDescription = function() return "" end
+  drawInfo(m, { _playerState = { name = "MAY", trainerId = 1 } },
+    { species = 252, ability = 9, otName = "MAY", otId = 1, metLevel = 5, metLocation = 0 }, false)
+  PalText.draw, SummaryData.abilityDescription = draw, describe
+  return shown
+end
+
 -- A modded ability past the built-in id table resolves to a key from its name.
 local Adapter = require("src.core.game3.battle.adapter")
 Pokemon._abilityNames[200] = "NEW SKILL"
@@ -109,6 +147,11 @@ assert(FactoryCommon.categoryText(252) == "Wood Gecko gText_Pokemon",
   "the Battle Factory keeps its English category without translations")
 assert(contestMoveDescription() == "Startles the audience.",
   "the contest move window keeps its English effect text without translations")
+assert(Mapsec.name(0) == "LITTLEROOT TOWN",
+  "a map section keeps its English name without translations")
+assert(Mapsec.name(99) == "", "an unknown map section has no name")
+assert(metLocation() == "LITTLEROOT TOWN",
+  "the RSE summary keeps the English met location without translations")
 assert(adapterAbilityKey() == "NEW_SKILL", "the battle adapter keys an unlisted ability by its ROM name")
 
 Strings.load({ strings = {
@@ -117,6 +160,7 @@ Strings.load({ strings = {
   ["Startles the audience."] = "Surprend le public.",
   ["Wood Gecko"] = "Gecko des bois",
   ["A small gecko."] = "Un petit gecko.",
+  ["LITTLEROOT TOWN"] = "BOURG-EN-VOL",
   ["NEW SKILL"] = "NOUVEAU TALENT",
 } })
 assert(Pokemon.abilityName(9) == "STATIQUE",
@@ -141,6 +185,10 @@ assert(FactoryCommon.categoryText(252) == "Gecko des bois gText_Pokemon",
   "the Battle Factory translates the category like the Pokédex")
 assert(contestMoveDescription() == "Surprend le public.",
   "the contest move window translates the effect text like the summary")
+assert(Mapsec.name(0) == "BOURG-EN-VOL",
+  "the Emerald map section name goes through the registry")
+assert(metLocation() == "BOURG-EN-VOL",
+  "the RSE summary translates the met location like the region map")
 assert(Pokemon.abilityName(200) == "NOUVEAU TALENT", "the display name is translated")
 assert(adapterAbilityKey() == "NEW_SKILL",
   "the battle adapter keeps keying on the ROM name when the display name is translated")

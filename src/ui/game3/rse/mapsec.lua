@@ -1,4 +1,5 @@
 local MapSections = require("src.import.gba.rse.map_sections_extract")
+local Strings = require("src.core.Strings")
 
 local Mapsec = {}
 
@@ -43,9 +44,11 @@ function Mapsec.entry(sec)
 end
 
 -- pokeemerald/src/region_map.c:1568
+-- Every caller displays the name, so it goes through Strings() here, keyed by
+-- the English name like FireRed's region map.
 function Mapsec.name(sec)
   local e = Mapsec.entry(sec)
-  return e and e.name or ""
+  return e and e.name and Strings(e.name) or ""
 end
 
 -- pokeemerald/src/map_name_popup.c:403
