@@ -1593,8 +1593,57 @@ function tasks.switchFromSize(s)
   end
 end
 
+-- The search screen's strings, by the labels the script cache keys them
+-- under (a mod's text overrides land there); the chrome pack keeps English
+-- copies without their labels, the fallback.
+local function cartText(key, fallback)
+  if key and RomText.has(key) then return RomText.plain(key) end
+  return fallback
+end
+
+-- pokeemerald/src/pokedex.c:1330: { description, title } of each option.
+local TYPE_OPTION = { "gText_DexSearchTypeNone" }
+for _, t in ipairs({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17 }) do
+  TYPE_OPTION[#TYPE_OPTION + 1] = RomText.key("gTypeNames", t)
+end
+local SEARCH_OPTION_TEXTS = {
+  [SEARCH.NAME] = { titles = { "gText_DexSearchDontSpecify", "gText_DexSearchAlphaABC", "gText_DexSearchAlphaDEF",
+    "gText_DexSearchAlphaGHI", "gText_DexSearchAlphaJKL", "gText_DexSearchAlphaMNO", "gText_DexSearchAlphaPQR",
+    "gText_DexSearchAlphaSTU", "gText_DexSearchAlphaVWX", "gText_DexSearchAlphaYZ" } },
+  [SEARCH.COLOR] = { titles = { "gText_DexSearchDontSpecify", "gText_DexSearchColorRed", "gText_DexSearchColorBlue",
+    "gText_DexSearchColorYellow", "gText_DexSearchColorGreen", "gText_DexSearchColorBlack", "gText_DexSearchColorBrown",
+    "gText_DexSearchColorPurple", "gText_DexSearchColorGray", "gText_DexSearchColorWhite", "gText_DexSearchColorPink" } },
+  [SEARCH.TYPE_LEFT] = { titles = TYPE_OPTION },
+  [SEARCH.TYPE_RIGHT] = { titles = TYPE_OPTION },
+  [SEARCH.ORDER] = {
+    titles = { "gText_DexSortNumericalTitle", "gText_DexSortAtoZTitle", "gText_DexSortHeaviestTitle",
+      "gText_DexSortLightestTitle", "gText_DexSortTallestTitle", "gText_DexSortSmallestTitle" },
+    descriptions = { "gText_DexSortNumericalDescription", "gText_DexSortAtoZDescription",
+      "gText_DexSortHeaviestDescription", "gText_DexSortLightestDescription", "gText_DexSortTallestDescription",
+      "gText_DexSortSmallestDescription" },
+  },
+  [SEARCH.MODE] = {
+    titles = { "gText_DexHoennTitle", "gText_DexNatTitle" },
+    descriptions = { "gText_DexHoennDescription", "gText_DexNatDescription" },
+  },
+}
+-- pokeemerald/src/pokedex.c:1017
+local TOPBAR_DESCRIPTIONS = { "gText_SearchForPkmnBasedOnParameters", "gText_SwitchPokedexListings",
+  "gText_ReturnToPokedex" }
+-- pokeemerald/src/pokedex.c:1042
+local ITEM_DESCRIPTIONS = { "gText_ListByFirstLetter", "gText_ListByBodyColor", "gText_ListByType",
+  "gText_ListByType", "gText_SelectPokedexListingMode", "gText_SelectPokedexMode", "gText_ExecuteSearchSwitch" }
+
+local function topBarDescription(i)
+  return cartText(TOPBAR_DESCRIPTIONS[i + 1], Gfx.manifest().search.topBar[i + 1].description)
+end
+
+local function itemDescription(i)
+  return cartText(ITEM_DESCRIPTIONS[i + 1], Gfx.manifest().search.items[i + 1].description)
+end
+
 -- pokeemerald/src/pokedex.c:1437
-local function searchOptionTexts(which)
+local function searchOptionList(which)
   local sm = Gfx.manifest().search
   if which == SEARCH.NAME then return sm.names end
   if which == SEARCH.COLOR then return sm.colors end
@@ -1603,6 +1652,23 @@ local function searchOptionTexts(which)
   if which == SEARCH.MODE then return sm.modes end
   return {}
 end
+
+local function searchOptionTexts(which)
+  local list = searchOptionList(which)
+  local keys = SEARCH_OPTION_TEXTS[which]
+  if not keys then return list end
+  local out = {}
+  for i, t in ipairs(list) do
+    out[i] = {
+      title = cartText(keys.titles[i], t.title),
+      description = cartText(keys.descriptions and keys.descriptions[i], t.description),
+    }
+  end
+  return out
+end
+Pokedex.searchOptionTexts = searchOptionTexts
+Pokedex.topBarDescription = topBarDescription
+Pokedex.itemDescription = itemDescription
 
 local function searchSel(q, which)
   local c = q.cursor[which] or 0
@@ -1772,7 +1838,7 @@ function tasks.loadSearch(s)
   elseif st == 1 then
     local q = s.searchState
     setDefaultSearchModeAndOrder(s, q)
-    setSearchMessage(q, Gfx.manifest().search.topBar[TOPBAR.SEARCH + 1].description)
+    setSearchMessage(q, topBarDescription(TOPBAR.SEARCH))
     s.searchArrows = {
       { x = 184, y = 4, down = false, data2 = 0, invisible = true },
       { x = 184, y = 108, down = true, data2 = 0, invisible = true },
@@ -1790,7 +1856,7 @@ function tasks.loadSearch(s)
       s.state = 0
       s.fn = "searchTopBar"
       s.searchState.phase = "topbar"
-      setSearchMessage(s.searchState, Gfx.manifest().search.topBar[s.searchState.topBar + 1].description)
+      setSearchMessage(s.searchState, topBarDescription(s.searchState.topBar))
       refreshSearch(s)
     end
   end
@@ -1800,7 +1866,6 @@ end
 function tasks.searchTopBar(s, inp)
   local new = inp.new or {}
   local q = s.searchState
-  local sm = Gfx.manifest().search
   if new.b then
     se("SE_PC_OFF")
     s.fn = "exitSearch"
@@ -1821,20 +1886,20 @@ function tasks.searchTopBar(s, inp)
       return
     end
     q.phase = "menu"
-    setSearchMessage(q, sm.items[q.menuItem + 1].description)
+    setSearchMessage(q, itemDescription(q.menuItem))
     refreshSearch(s)
     return
   end
   if new.left and q.topBar > TOPBAR.SEARCH then
     se("SE_DEX_PAGE")
     q.topBar = q.topBar - 1
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
   end
   if new.right and q.topBar < TOPBAR.CANCEL then
     se("SE_DEX_PAGE")
     q.topBar = q.topBar + 1
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
   end
 end
@@ -1856,7 +1921,7 @@ function tasks.searchMenu(s, inp)
     setDefaultSearchModeAndOrder(s, q)
     q.phase = "topbar"
     s.fn = "searchTopBar"
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
     return
   end
@@ -1902,7 +1967,7 @@ function tasks.searchMenu(s, inp)
     if nxt ~= 0xFF then
       se(sound)
       q.menuItem = nxt
-      setSearchMessage(q, sm.items[q.menuItem + 1].description)
+      setSearchMessage(q, itemDescription(q.menuItem))
       refreshSearch(s)
     end
   end
@@ -1953,7 +2018,7 @@ function tasks.searchDone(s, inp)
     else
       s.fn = "searchMenu"
       q.phase = "menu"
-      setSearchMessage(q, Gfx.manifest().search.items[q.menuItem + 1].description)
+      setSearchMessage(q, itemDescription(q.menuItem))
       refreshSearch(s)
       se("SE_BALL")
     end
@@ -1975,7 +2040,7 @@ function tasks.searchParam(s, inp)
     end
     q.paramBox = false
     q.phase = "menu"
-    setSearchMessage(q, Gfx.manifest().search.items[mi + 1].description)
+    setSearchMessage(q, itemDescription(mi))
     refreshSearch(s)
     s.fn = "searchMenu"
     return
@@ -2144,8 +2209,7 @@ function Pokedex.frame(s, inp)
   end
   if s.searchArrows and s.fn == "searchParam" then
     local q = s.searchState
-    local texts = searchOptionTexts(q.menuItem)
-    local last = #texts - 1
+    local last = #searchOptionList(q.menuItem) - 1
     for _, a in ipairs(s.searchArrows) do
       local off = q.scroll[q.menuItem] or 0
       if a.down then

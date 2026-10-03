@@ -88,6 +88,38 @@ check(flySub() == "CENTRE POKéMON", "a fly destination reads its name from the 
 BUNDLE.text = {}
 check(flySub() == "POKéMON CENTER", "a fly destination missing from the cache keeps the copy")
 
+-- The Pokédex search screen (pokeemerald/src/pokedex.c:1017, 1042, 1330).
+local Gfx = require("src.ui.game3.rse.pokedex_gfx")
+Gfx.manifest = function()
+  return { search = {
+    topBar = { { description = "Search for POKéMON based on selected parameters." } },
+    items = { { description = "List by the first letter in the name." }, {}, {}, {}, {}, {},
+      { description = "Execute search/switch." } },
+    orders = { { title = "NUMERICAL", description = "Pokédex listing by number." },
+      { title = "A TO Z", description = "Alphabetical order." } },
+    types = { { title = "NONE" }, { title = "NORMAL" }, { title = "FIGHT" } },
+  } }
+end
+local Pokedex = require("src.ui.game3.rse.pokedex")
+BUNDLE.text = {
+  gText_SearchForPkmnBasedOnParameters = ir("Chercher des POKéMON."),
+  gText_ListByFirstLetter = ir("Classer par initiale."),
+  gText_ExecuteSearchSwitch = ir("Lancer la recherche."),
+  gText_DexSortNumericalTitle = ir("NUMERIQUE"),
+  gText_DexSortNumericalDescription = ir("Classement par numéro."),
+  ["gTypeNames[0]"] = ir("NORMAL"), ["gTypeNames[1]"] = ir("COMBAT"),
+}
+local orders = Pokedex.searchOptionTexts(Pokedex.SEARCH.ORDER)
+check(orders[1].title == "NUMERIQUE" and orders[1].description == "Classement par numéro.",
+  "a search option reads its title and description from the cart")
+check(orders[2].title == "A TO Z" and orders[2].description == "Alphabetical order.",
+  "a search option missing from the cache keeps the copy")
+local types = Pokedex.searchOptionTexts(Pokedex.SEARCH.TYPE_LEFT)
+check(types[1].title == "NONE" and types[3].title == "COMBAT", "type options read gTypeNames by type id")
+check(Pokedex.topBarDescription(0) == "Chercher des POKéMON.", "a top bar description reads the cart's text")
+check(Pokedex.itemDescription(0) == "Classer par initiale.", "a search item description reads the cart's text")
+check(Pokedex.itemDescription(Pokedex.SEARCH.OK) == "Lancer la recherche.", "the OK item's description reads the cart's text")
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
