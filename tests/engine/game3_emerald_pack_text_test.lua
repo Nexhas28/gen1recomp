@@ -72,6 +72,22 @@ check(PyramidBag.description() == "Retourner au jeu", "the bag's return line nam
 BUNDLE.text.gText_TheField = nil
 check(PyramidBag.description() == "Retourner the field", "a place missing from the cache keeps the copy")
 
+-- Ever Grande City's fly destinations (pokeemerald/src/region_map.c:343).
+local RegionMap = require("src.ui.game3.rse.region_map")
+RegionMap.manifest = function()
+  return { multiNameFlyDestinations = { { names = { "POKéMON LEAGUE", "POKéMON CENTER" }, mapSecId = 5, flag = 2100 } } }
+end
+local function flySub()
+  local s = { mapSecType = RegionMap.TYPE.CITY_CANFLY, mapSecId = 5, posWithinMapSec = 1, mapSecName = "EVER GRANDE",
+    session = { flags = { [2100] = true } } }
+  RegionMap.updateFlyText(s)
+  return s.flyText.sub
+end
+BUNDLE.text = { ["sEverGrandeCityNames[1]"] = ir("CENTRE POKéMON") }
+check(flySub() == "CENTRE POKéMON", "a fly destination reads its name from the cache")
+BUNDLE.text = {}
+check(flySub() == "POKéMON CENTER", "a fly destination missing from the cache keeps the copy")
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
