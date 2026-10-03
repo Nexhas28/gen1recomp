@@ -416,6 +416,17 @@ function SummaryData.abilityDescription(abilityId, abilityName)
   return Strings(d.ABILITIES["ABILITY_"])
 end
 
+-- pokeemerald/src/data/contest_text_tables.h:220: keyed by the English
+-- text, like the move and ability descriptions.  Takes the effect row or its text.
+function SummaryData.contestEffectDescription(effect)
+  local text = type(effect) == "table" and effect.description or effect
+  return Strings(type(text) == "string" and text or "")
+end
+
+function SummaryData.contestCategoryName(name)
+  return Strings(name or "")
+end
+
 function SummaryData.moveDescription(moveId, moveName)
   local d = get_descriptions()
   moveName = rom_name("romMoveName", moveId, moveName)

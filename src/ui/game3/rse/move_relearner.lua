@@ -399,8 +399,11 @@ local function draw_contest(moveId)
   right(RomText.plain("gText_MoveRelearnerJam"), 92, 41)
   if not moveId then return end
   local cm, eff, c = contest_row(moveId)
-  if cm then print_at(c.categories and c.categories[cm.category] or "", 4, 25) end
-  if eff then print_lines(eff.description, 0, 65, NARROW) end
+  if cm then
+    local category = c.categories and c.categories[cm.category]
+    print_at(SummaryData.contestCategoryName(category), 4, 25)
+  end
+  if eff then print_lines(SummaryData.contestEffectDescription(eff), 0, 65, NARROW) end
   draw_hearts(eff)
 end
 

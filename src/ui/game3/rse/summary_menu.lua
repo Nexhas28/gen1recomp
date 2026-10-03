@@ -545,7 +545,7 @@ local function drawMoves(m, Sm, mon, contest, detail)
         drawTile(m, "hearts", i < appeal and 1 or 0, tx * 8, ty * 8)
         drawTile(m, "hearts", i < jam and 3 or 4, tx * 8, (ty + 2) * 8)
       end
-      put(m, dw, eff.description or "", 6, 1, 0)
+      put(m, dw, SummaryData.contestEffectDescription(eff), 6, 1, 0)
     end
   else
     local pa = win(m, W.POWER_ACC)
