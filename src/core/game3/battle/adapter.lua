@@ -494,8 +494,9 @@ function Adapter.new(battleState, sayFn)
     if id and id > 0 then
       if ABILITY_BY_ID[id] then return ABILITY_BY_ID[id] end
       local ok, Pokemon = pcall(require, "src.core.game3.pokemon")
-      if ok and Pokemon and Pokemon.abilityName then
-        local n = Pokemon.abilityName(id)
+      -- The ROM's English name, not the display name a translation shows.
+      if ok and Pokemon and Pokemon.romAbilityName then
+        local n = Pokemon.romAbilityName(id)
         if n and n ~= "" and not n:match("^ABILITY") then
           return (tostring(n):upper():gsub("%s+", "_"))
         end

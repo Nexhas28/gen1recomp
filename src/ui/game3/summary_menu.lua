@@ -905,23 +905,28 @@ local function draw_page_skills(mon)
   -- Party stores ability as numeric id (e.g. 65 = OVERGROW); resolve to name.
   local abilityId = tonumber(mon.abilityId) or tonumber(mon.ability)
   local ability = mon.abilityName
+  local abilityNameTranslated = false
   if type(mon.ability) == "string" and mon.ability ~= "" and not tonumber(mon.ability) then
     ability = mon.ability
   end
   if (not ability or ability == "") and abilityId and abilityId > 0 then
     ability = Pokemon.abilityName(abilityId)
+    abilityNameTranslated = true
   end
   if not ability or ability == "" then
     local aid = Pokemon.abilityId and Pokemon.abilityId(Pokemon.speciesOf(mon), mon.personality or 0)
     if aid and aid > 0 then
       abilityId = aid
       ability = Pokemon.abilityName(aid)
+      abilityNameTranslated = true
     end
   end
   ability = ability or "—"
   local ax, ay = cxy("abilityName", 74, 129)
-  -- No registry renames abilities; a translation reaches the name through Strings().
-  draw_text(Strings(tostring(ability)), ax, ay, 80, "NORMAL")
+  -- abilityName() already translates numeric IDs; external labels still need one lookup.
+  local abilityText = tostring(ability)
+  if not abilityNameTranslated then abilityText = Strings(abilityText) end
+  draw_text(abilityText, ax, ay, 80, "NORMAL")
   local desc = SummaryData.abilityDescription(abilityId, tostring(ability))
   local ad = coords().abilityDesc or { x = 10, y = 143, w = 232 }
   draw_text(desc, ad.x or 10, ad.y or 143, ad.w or 232, "NORMAL")
