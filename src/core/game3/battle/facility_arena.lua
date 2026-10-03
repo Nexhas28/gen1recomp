@@ -228,7 +228,8 @@ local function fill(st, extra)
 end
 
 function Fac:refText(st, which, extra)
-  local ir = Data.arena().refereeStrings[which + 1]
+  local RomText = require("src.core.game3.rom_text")
+  local ir = RomText.irOr(RomText.key("gRefereeStringsTable", which), Data.arena().refereeStrings[which + 1])
   return Data.battleText(ir, fill(st, extra))
 end
 
@@ -519,16 +520,17 @@ function Fac:draw(st)
       Chrome.userFrame(Chrome._frameType or 0, 6, 1, 18, 12)
       local W, I = A.windows, A.textInfo
       local fl = fill(st, j.buffs)
-      local function put(win, ir)
-        windowText(W[win + 1], I[win + 1], fontText(ir, fl))
+      local RomText = require("src.core.game3.rom_text")
+      local function put(win, label, ir)
+        windowText(W[win + 1], I[win + 1], fontText(RomText.irOr(label, ir), fl))
       end
-      put(Fac.WIN.PLAYER_NAME, A.text.playerMon1Name)
-      put(Fac.WIN.VS, A.text.vs)
-      put(Fac.WIN.OPPONENT_NAME, A.text.opponentMon1Name)
-      put(Fac.WIN.MIND, A.text.mind)
-      put(Fac.WIN.SKILL, A.text.skill)
-      put(Fac.WIN.BODY, A.text.body)
-      put(Fac.WIN.JUDGMENT_TITLE, A.text.judgment)
+      put(Fac.WIN.PLAYER_NAME, "gText_PlayerMon1Name", A.text.playerMon1Name)
+      put(Fac.WIN.VS, "gText_Vs", A.text.vs)
+      put(Fac.WIN.OPPONENT_NAME, "gText_OpponentMon1Name", A.text.opponentMon1Name)
+      put(Fac.WIN.MIND, "gText_Mind", A.text.mind)
+      put(Fac.WIN.SKILL, "gText_Skill", A.text.skill)
+      put(Fac.WIN.BODY, "gText_Body", A.text.body)
+      put(Fac.WIN.JUDGMENT_TITLE, "gText_Judgment", A.text.judgment)
       if j.line then
         local img = self:iconImage(Fac.ANIM.LINE)
         for i = 0, 7 do love.graphics.draw(img, 64 + i * 16 - 8, 84 - 8) end

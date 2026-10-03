@@ -56,6 +56,21 @@ function RomText.has(key)
   return cachedText(b, key) ~= nil
 end
 
+-- A cart string a screen also keeps a copy of in its own pack: the script
+-- cache's text under `key` when the cache holds it (a mod's text overrides
+-- land there), else that copy.
+function RomText.irOr(key, fallback)
+  if key ~= nil and RomText.has(key) then return RomText.ir(key) end
+  return fallback
+end
+
+-- A pack's text reference, { name = <pret symbol>, key = "g3:<address>",
+-- ir = <copy> }: the script cache's text by its symbol, then by its address.
+function RomText.refIr(ref)
+  if type(ref) ~= "table" then return nil end
+  return RomText.irOr(ref.name, RomText.irOr(ref.key, ref.ir))
+end
+
 local SOURCE_FORMS = {}
 for _, named in ipairs({ false, true }) do
   for _, nl in ipairs({ "\n", "\\n" }) do

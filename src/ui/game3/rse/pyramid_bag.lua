@@ -467,7 +467,7 @@ local function description()
   if item then return ItemsData.description(item) or "" end
   local ret = Py().manifest().bagReturnTo[(PBag.LOCATION[st.location] or 0) + 1]
   local TextIR = require("src.core.game3.scripting.text_ir")
-  return RomText.plain("gText_ReturnToVar1", { stringVars = { ret and TextIR.toPlain(ret.ir, {}) or "" } })
+  return RomText.plain("gText_ReturnToVar1", { stringVars = { ret and TextIR.toPlain(RomText.refIr(ret), {}) or "" } })
 end
 PBag.description = description
 
