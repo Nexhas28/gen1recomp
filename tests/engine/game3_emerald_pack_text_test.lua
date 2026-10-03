@@ -120,6 +120,26 @@ check(Pokedex.topBarDescription(0) == "Chercher des POKéMON.", "a top bar descr
 check(Pokedex.itemDescription(0) == "Classer par initiale.", "a search item description reads the cart's text")
 check(Pokedex.itemDescription(Pokedex.SEARCH.OK) == "Lancer la recherche.", "the OK item's description reads the cart's text")
 
+-- The party menu's actions (pokeemerald/src/data/party_menu.h:658).
+require("tests.game3_cache").stubSpeciesNames()
+local Profile = require("src.core.game3.profile")
+local Pokemon = require("src.core.game3.pokemon")
+local Kit = require("src.ui.game3.rse.scene_kit")
+local PartyMenu = require("src.ui.game3.party_menu")
+Profile.forSession = function()
+  return { ui = { party = { manifest = "rse/menus", cursorOptionTexts = { "gText_Summary5", "gText_Switch2",
+    "gText_Cancel2" } } } }
+end
+Kit.manifest = function()
+  return { party = { cursorOptions = { "SUMMARY", "SWITCH", "CANCEL", "CUT" }, fieldMoves = { 15 } } }
+end
+Pokemon.moveName = function(move) return move == 15 and "COUPE" or nil end
+BUNDLE.text = { gText_Summary5 = ir("RESUME"), gText_Switch2 = ir("ORDRE") }
+check(PartyMenu._cursorOptionText("SUMMARY") == "RESUME", "a party action reads the cart's text")
+check(PartyMenu._cursorOptionText("SWITCH") == "ORDRE", "a second party action reads the cart's text")
+check(PartyMenu._cursorOptionText("CANCEL") == "CANCEL", "a party action missing from the cache keeps the label")
+check(PartyMenu._cursorOptionText("CUT") == "COUPE", "a field move prints the move's name")
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)

@@ -90,7 +90,7 @@ local function gameFieldMoves()
     index[label] = j - 1
     byMove[move] = label
   end
-  return { labels = labels, base = base, index = index, byMove = byMove }
+  return { labels = labels, base = base, index = index, byMove = byMove, moves = moves, texts = p.cursorOptionTexts }
 end
 
 local function fieldMoveIndex()
@@ -111,14 +111,24 @@ local function cursor_option_text(act)
   local p = partyUi()
   if p and p.actionText then return p.actionText(act, g) end
   if g then
+    -- The pack's labels are the English the cart prints; show the cart's
+    -- text instead (a mod's text overrides land there) and the move's name
+    -- for a field move, as sCursorOptions does.
     local fm = g.index[act]
-    if fm then return g.labels[g.base + fm + 1] end
-    return g.labels[(assert(CURSOR_OPTION[act], act)) + 1]
+    if fm then
+      local move = g.moves[fm + 1]
+      return move and Pokemon.moveName(move) or g.labels[g.base + fm + 1]
+    end
+    local i = assert(CURSOR_OPTION[act], act)
+    local key = g.texts and g.texts[i + 1]
+    if key and RomText.has(key) then return RomText.plain(key) end
+    return g.labels[i + 1]
   end
   local fm = FIELD_MOVE_INDEX[act]
   if fm then return RomText.at("sCursorOptions", CURSOR_OPTION_FIELD_MOVES + fm) end
   return RomText.at("sCursorOptions", (assert(CURSOR_OPTION[act], act)))
 end
+PartyMenu._cursorOptionText = cursor_option_text
 
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
 local function textInsets()
