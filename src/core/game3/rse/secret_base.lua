@@ -580,11 +580,18 @@ function SB.ownedByAnotherPlayer(sess)
   return SB.base(sess, 0).secretBaseId ~= SB._curId
 end
 
--- pokeemerald/src/secret_base.c:728
+-- pokeemerald/src/secret_base.c:728; the European carts put the owner in the
+-- row's STR_VAR_1 ("BASE DE {STR_VAR_1}", pret pokeemerald multi-language,
+-- src/secret_base.c:732), the US and Japanese ones append the row to it.
 function SB.name(idx, sess)
   local b = SB.base(sess, idx)
-  local ok, suffix = pcall(Rse.text, "gText_ApostropheSBase")
-  return tostring(b.trainerName or "") .. (ok and suffix or "'s BASE")
+  local owner = tostring(b.trainerName or "")
+  local ok, base = pcall(function()
+    return require("src.core.game3.rom_text").plain("gText_ApostropheSBase", { stringVars = { "\1" } })
+  end)
+  if not ok then return owner .. "'s BASE" end
+  if base:find("\1", 1, true) then return (base:gsub("\1", function() return owner end)) end
+  return owner .. base
 end
 
 -- pokeemerald/src/secret_base.c:735
