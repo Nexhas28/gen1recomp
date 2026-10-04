@@ -41,6 +41,27 @@ end
 
 local placeholderCache = {}
 
+-- pokeemerald/src/strings.c:6: each expanded placeholder is a cart string the
+-- script cache also holds under its pret label, where a mod's text overrides
+-- land (the rival's name, Japanese くん/ちゃん).  A value comes from the cache
+-- when it has the label, and from the extract otherwise.
+local function cartPlaceholders(extracted)
+  local Extract = require("src.import.gba.text_placeholders_extract")
+  local RomText = require("src.core.game3.rom_text")
+  local function value(name)
+    local label = Extract.SYMBOLS[name]
+    if label and RomText.has(label) then return RomText.plain(label) end
+    return extracted[name]
+  end
+  local byGender = setmetatable({}, { __index = function(_, name)
+    local pair = Extract.BY_GENDER[name]
+    if not pair then return extracted.byGender and extracted.byGender[name] end
+    return { male = value(pair.male), female = value(pair.female) }
+  end })
+  return setmetatable({ byGender = byGender }, { __index = function(_, name) return value(name) end })
+end
+Message.cartPlaceholders = cartPlaceholders
+
 -- pokeemerald/src/string_util.c:456
 TextIR.setContextProvider(function(kind, dialect, ctx)
   if kind == "gender" then
@@ -71,8 +92,8 @@ TextIR.setContextProvider(function(kind, dialect, ctx)
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local t = okC and CacheFs.loadActive(dialect.placeholders) or nil
   if type(t) == "table" then
-    placeholderCache[id] = t
-    return t
+    placeholderCache[id] = cartPlaceholders(t)
+    return placeholderCache[id]
   end
   return nil
 end)

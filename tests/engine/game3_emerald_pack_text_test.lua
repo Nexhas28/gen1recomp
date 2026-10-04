@@ -140,6 +140,27 @@ check(PartyMenu._cursorOptionText("SWITCH") == "ORDRE", "a second party action r
 check(PartyMenu._cursorOptionText("CANCEL") == "CANCEL", "a party action missing from the cache keeps the label")
 check(PartyMenu._cursorOptionText("CUT") == "COUPE", "a field move prints the move's name")
 
+-- Expanded placeholders (pokeemerald/src/strings.c:6): the rival's name and
+-- Japanese くん/ちゃん come from the cache, the extract's copies otherwise.
+local Message = require("src.ui.game3.message")
+local placeholders = Message.cartPlaceholders({
+  RIVAL_MALE = "MAY", RIVAL_FEMALE = "BRENDAN", KUN_MALE = "", KUN_FEMALE = "", VERSION = "EMERALD",
+  byGender = { RIVAL = { male = "MAY", female = "BRENDAN" }, KUN = { male = "", female = "" } },
+})
+BUNDLE.text = { gText_ExpandedPlaceholder_May = ir("FLORA"), gText_ExpandedPlaceholder_Kun = ir("くん") }
+check(placeholders.byGender.RIVAL.male == "FLORA", "the rival's name reads the cache")
+check(placeholders.byGender.RIVAL.female == "BRENDAN", "a rival name missing from the cache keeps the copy")
+check(placeholders.byGender.KUN.male == "くん", "the honorific reads the cache")
+check(placeholders.VERSION == "EMERALD", "a placeholder missing from the cache keeps the copy")
+local line = { { t = "player" }, { t = "ph", code = 5, name = "KUN" }, { t = "text", s = " / " },
+  { t = "ph", code = 6, name = "RIVAL" }, { t = "eos" } }
+BUNDLE.text.gText_ExpandedPlaceholder_Brendan = ir("BRICE")
+BUNDLE.text.gText_ExpandedPlaceholder_Chan = ir("ちゃん")
+check(TextIR.toPlain(line, { dialect = "rse", playerName = "RED", playerGender = 0, placeholders = placeholders })
+  == "REDくん / FLORA", "a boy's line expands the honorific and May's name from the cache")
+check(TextIR.toPlain(line, { dialect = "rse", playerName = "RED", playerGender = 1, placeholders = placeholders })
+  == "REDちゃん / BRICE", "a girl's line expands the honorific and Brendan's name from the cache")
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
