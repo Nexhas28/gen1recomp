@@ -125,7 +125,7 @@ local function stat_up(ad, b, item, stat, delta)
   b.stages[stat] = math.min(6, (b.stages[stat] or 0) + delta)
   ad:playAnim("general", "STATS_CHANGE", b, b, Secondary.statAnimArg(stat, delta))
   local change = RomText.plain("STRINGID_STATROSE")
-  if delta >= 2 then change = RomText.plain("STRINGID_STATSHARPLY") .. change end
+  if delta >= 2 then change = Secondary.sharpChange("STRINGID_STATSHARPLY", "STRINGID_STATROSE") end
   say_id(ad, "STRINGID_USINGITEMSTATOFPKMNROSE", {
     lastItem = item, buff1 = Secondary.statName(stat), scrActive = b, buff2 = change,
   })

@@ -32,12 +32,26 @@ function Secondary.statName(stat)
   return RomText.at("gStatNamesTable", Secondary.STAT_ID[stat])
 end
 
+-- A two-stage stat change: the US and Japanese "sharply"/"harshly" rows end
+-- with a space before the plain change ("sharply rose!", "ぐーんと　あがった！");
+-- the French, Italian and Spanish ones carry the whole change ("monte
+-- beaucoup!"), and their code skips the plain string that follows (pret
+-- pokeemerald multi-language, src/battle_message.c:4617). The German rows have
+-- the same shape ("steigt stark!").
+function Secondary.sharpChange(sharpId, plainId)
+  local sharp = RomText.plain(sharpId)
+  if sharp:sub(-1) == " " or sharp:sub(-3) == "\227\128\128" then
+    return sharp .. RomText.plain(plainId)
+  end
+  return sharp
+end
+
 -- src/battle_script_commands.c:6758
 local function stat_text(ad, battler, stat, delta, isUser)
   local change
-  if delta >= 2 then change = RomText.plain("STRINGID_STATSHARPLY") .. RomText.plain("STRINGID_STATROSE")
+  if delta >= 2 then change = Secondary.sharpChange("STRINGID_STATSHARPLY", "STRINGID_STATROSE")
   elseif delta >= 1 then change = RomText.plain("STRINGID_STATROSE")
-  elseif delta <= -2 then change = RomText.plain("STRINGID_STATHARSHLY") .. RomText.plain("STRINGID_STATFELL")
+  elseif delta <= -2 then change = Secondary.sharpChange("STRINGID_STATHARSHLY", "STRINGID_STATFELL")
   else change = RomText.plain("STRINGID_STATFELL") end
   local id
   if delta > 0 then
