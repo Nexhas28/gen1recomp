@@ -111,9 +111,7 @@ local function cursor_option_text(act)
   local p = partyUi()
   if p and p.actionText then return p.actionText(act, g) end
   if g then
-    -- The pack's labels are the English the cart prints; show the cart's
-    -- text instead (a mod's text overrides land there) and the move's name
-    -- for a field move, as sCursorOptions does.
+    -- pokeemerald/src/data/party_menu.h:658
     local fm = g.index[act]
     if fm then
       local move = g.moves[fm + 1]

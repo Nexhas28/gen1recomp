@@ -617,9 +617,6 @@ local function setStr(ctx, adapters, n, v)
   Util.setStringVar(ctx, adapters, n, v)
 end
 
--- The i-th string of one of pret's tables, from the script cache, which keys
--- it by the table's label (a mod's text overrides land there), else the copy
--- this pack holds.
 local function tableText(list, name, i)
   local RomText = require("src.core.game3.rom_text")
   return RomText.irOr(RomText.key(name, i - 1), list[i])

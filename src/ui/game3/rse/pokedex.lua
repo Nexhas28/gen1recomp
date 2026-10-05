@@ -1593,15 +1593,12 @@ function tasks.switchFromSize(s)
   end
 end
 
--- The search screen's strings, by the labels the script cache keys them
--- under (a mod's text overrides land there); the chrome pack keeps English
--- copies without their labels, the fallback.
 local function cartText(key, fallback)
   if key and RomText.has(key) then return RomText.plain(key) end
   return fallback
 end
 
--- pokeemerald/src/pokedex.c:1330: { description, title } of each option.
+-- pokeemerald/src/pokedex.c:1330
 local TYPE_OPTION = { "gText_DexSearchTypeNone" }
 for _, t in ipairs({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17 }) do
   TYPE_OPTION[#TYPE_OPTION + 1] = RomText.key("gTypeNames", t)

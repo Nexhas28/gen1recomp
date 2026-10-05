@@ -732,7 +732,6 @@ function UI:printContestMoveDescription(move)
   local key = "gContestEffectDescriptionPointers[" .. (cm.effect or 0) .. "]"
   local desc = ""
   if UI.has(key) then
-    -- Translated by its English text, like the summary and the move relearner.
     desc = require("src.core.game3.summary_data").contestEffectDescription(UI.plain(key))
   end
   self.win[WIN_MOVE_DESCRIPTION] = { text = desc, x = 0, y = 1, fg = 15, shadow = 8 }

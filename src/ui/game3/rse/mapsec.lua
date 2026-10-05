@@ -44,8 +44,6 @@ function Mapsec.entry(sec)
 end
 
 -- pokeemerald/src/region_map.c:1568
--- Every caller displays the name, so it goes through Strings() here, keyed by
--- the English name like FireRed's region map.
 function Mapsec.name(sec)
   local e = Mapsec.entry(sec)
   return e and e.name and Strings(e.name) or ""

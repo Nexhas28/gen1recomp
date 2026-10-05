@@ -52,8 +52,7 @@ return {
       -- pokeemerald/src/menu_specialized.c:1503
       levelUpStats = { "gText_MaxHP", "gText_Attack", "gText_Defense", "gText_SpAtk", "gText_SpDef", "gText_Speed" },
     },
-    -- pokeemerald/src/data/party_menu.h:658: sCursorOptions' strings up to
-    -- the field moves, which print gMoveNames.
+    -- pokeemerald/src/data/party_menu.h:658
     cursorOptionTexts = {
       "gText_Summary5", "gText_Switch2", "gText_Cancel2", "gText_Item", "gMenuText_Give", "gText_Take",
       "gText_Mail", "gText_Take2", "gText_Read2", "gText_Cancel2", "gText_Shift", "gText_SendOut",

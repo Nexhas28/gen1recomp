@@ -353,8 +353,7 @@ local function newState(opts)
 end
 RegionMap.newState = newState
 
--- pokeemerald/src/region_map.c:349: the name list each multi-name
--- destination points at, which the script cache keys by its label.
+-- pokeemerald/src/region_map.c:349
 local MULTI_NAME_TABLES = { "sEverGrandeCityNames" }
 
 -- pokeemerald/src/region_map.c:1760

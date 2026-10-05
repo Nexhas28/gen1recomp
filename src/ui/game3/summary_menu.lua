@@ -923,7 +923,6 @@ local function draw_page_skills(mon)
   end
   ability = ability or "—"
   local ax, ay = cxy("abilityName", 74, 129)
-  -- abilityName() already translates numeric IDs; external labels still need one lookup.
   local abilityText = tostring(ability)
   if not abilityNameTranslated then abilityText = Strings(abilityText) end
   draw_text(abilityText, ax, ay, 80, "NORMAL")
