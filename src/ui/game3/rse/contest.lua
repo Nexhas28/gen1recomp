@@ -730,7 +730,10 @@ function UI:printContestMoveDescription(move)
   self:fillBox(0, TILE_EMPTY_JAM_HEART, 0x15, 0x20, MAX_CONTEST_MOVE_HEARTS, 0x01, 0x11)
   self:fillBox(0, TILE_FILLED_JAM_HEART, 0x15, 0x20, hearts, 0x01, 0x11)
   local key = "gContestEffectDescriptionPointers[" .. (cm.effect or 0) .. "]"
-  local desc = UI.has(key) and UI.plain(key) or ""
+  local desc = ""
+  if UI.has(key) then
+    desc = require("src.core.game3.summary_data").contestEffectDescription(UI.plain(key))
+  end
   self.win[WIN_MOVE_DESCRIPTION] = { text = desc, x = 0, y = 1, fg = 15, shadow = 8 }
   self.win[WIN_SLASH] = { text = UI.plain("gText_Slash"), x = 0, y = 1, fg = 15, shadow = 8 }
 end

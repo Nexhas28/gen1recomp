@@ -4,6 +4,7 @@ local PokemonExtract = require("src.import.gba.pokemon_extract")
 local Versions = require("src.import.gba.versions")
 local ModRuntime = require("src.mods.Runtime")
 local CacheBlob = require("src.import.CacheBlob")
+local Strings = require("src.core.Strings")
 
 local Pokemon = {}
 
@@ -331,7 +332,7 @@ function Pokemon.abilityName(abilityId)
   if not abilityId or abilityId < 1 then return "-------" end
   if not Pokemon._abilityNames then Pokemon.install(Pokemon._cache) end
   local n = Pokemon._abilityNames and Pokemon._abilityNames[abilityId]
-  if n and n ~= "" then return n end
+  if n and n ~= "" then return Strings(n) end
   error("no ROM ability name for ability " .. abilityId, 2)
 end
 

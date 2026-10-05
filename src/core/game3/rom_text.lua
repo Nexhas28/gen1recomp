@@ -56,6 +56,16 @@ function RomText.has(key)
   return cachedText(b, key) ~= nil
 end
 
+function RomText.irOr(key, fallback)
+  if key ~= nil and RomText.has(key) then return RomText.ir(key) end
+  return fallback
+end
+
+function RomText.refIr(ref)
+  if type(ref) ~= "table" then return nil end
+  return RomText.irOr(ref.name, RomText.irOr(ref.key, ref.ir))
+end
+
 local SOURCE_FORMS = {}
 for _, named in ipairs({ false, true }) do
   for _, nl in ipairs({ "\n", "\\n" }) do
