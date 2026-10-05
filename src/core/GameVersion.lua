@@ -196,7 +196,7 @@ GameVersion.VERSIONS = {
 
 local NO_FIXES = {}
 
--- Launcher column order.  Append only (src/mods/ModProfile.lua encodes by index).
+-- Launcher column order.
 GameVersion.ORDER = { "red", "blue", "yellow", "gold", "silver", "crystal", "firered", "leafgreen", "ruby", "sapphire", "emerald" }
 
 GameVersion.current = "red"
