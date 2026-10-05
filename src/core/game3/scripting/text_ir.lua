@@ -146,6 +146,10 @@ TextIR.DIALECTS = {
       [3] = "FONT_NORMAL_COPY_2", [4] = "FONT_MALE", [5] = "FONT_FEMALE",
       [6] = "FONT_BRAILLE", [7] = "FONT_BOLD",
     },
+    -- pokefirered/src/string_util.c:386: the honorific after the player's
+    -- name is the cart's gExpandedPlaceholder_Kun or _Chan string, by the
+    -- player's gender (empty on the US cart).
+    GENDERED_LABELS = { KUN = { male = "gExpandedPlaceholder_Kun", female = "gExpandedPlaceholder_Chan" } },
   },
   rse = {
     name = "rse",
@@ -330,6 +334,12 @@ local function is_female(g)
   return g == 1 or g == "female" or g == "F" or g == "girl"
 end
 
+local function player_female(d, ctx)
+  local g = ctx and ctx.playerGender
+  if g == nil and TextIR._provider then g = TextIR._provider("gender", d, ctx) end
+  return is_female(g)
+end
+
 -- pokeemerald/src/string_util.c:456
 local function gendered_ph(name, ctx)
   local d = TextIR.dialect(ctx and ctx.dialect)
@@ -337,10 +347,30 @@ local function gendered_ph(name, ctx)
   local ph = TextIR.placeholdersFor(ctx)
   local by = ph and ph.byGender and ph.byGender[name]
   if type(by) ~= "table" then return nil end
-  local g = ctx and ctx.playerGender
-  if g == nil and TextIR._provider then g = TextIR._provider("gender", d, ctx) end
-  if is_female(g) then return by.female end
+  if player_female(d, ctx) then return by.female end
   return by.male
+end
+
+-- A dialect's gendered placeholder read from the cart strings the loaded
+-- script cache holds under its labels, where a mod's text overrides land; ""
+-- when the cache is not loaded or both strings are empty (the US cart). A
+-- label whose own text holds the placeholder expands it to "" there.
+local reading_label = false
+local function gendered_label(d, name, ctx)
+  local labels = d.GENDERED_LABELS and d.GENDERED_LABELS[name]
+  if not labels then return nil end
+  if reading_label then return "" end
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if not (Space and Space.bundle) then return "" end
+  local RomText = require("src.core.game3.rom_text")
+  local function read(label) return RomText.has(label) and RomText.plain(label) or "" end
+  reading_label = true
+  local ok, male, female = pcall(function() return read(labels.male), read(labels.female) end)
+  reading_label = false
+  if not ok then error(male, 0) end
+  if male == "" and female == "" then return "" end
+  if player_female(d, ctx) then return female end
+  return male
 end
 
 -- pokeemerald/src/string_util.c:428
@@ -411,9 +441,12 @@ local function expand_seg(seg, ctx)
       return "{" .. name .. "}"
     end
     -- pokeemerald/src/string_util.c:464
+    local d = TextIR.dialect(ctx and ctx.dialect)
+    local pname = name or (code and d.PH_NAMES[code])
+    local fromLabel = pname and gendered_label(d, pname, ctx)
+    if fromLabel ~= nil then return fromLabel end
     local placeholders = TextIR.placeholdersFor(ctx)
     if placeholders then
-      local pname = name or (code and TextIR.dialect(ctx and ctx.dialect).PH_NAMES[code])
       local g = pname and gendered_ph(pname, ctx)
       if g ~= nil then return g end
       if pname and placeholders[pname] then return placeholders[pname] end
