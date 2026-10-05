@@ -14,11 +14,15 @@ Menu.__index = Menu
 Menu.TYPE = { HAS_NO_SAVED_GAME = 0, HAS_SAVED_GAME = 1, HAS_MYSTERY_EVENT = 2 }
 local T = Menu.TYPE
 local LABEL = { CONTINUE = "gMainMenuString_Continue", NEW_GAME = "gMainMenuString_NewGame",
-  OPTION = "gMainMenuString_Option", MYSTERY_EVENTS = "gMainMenuString_MysteryEvents" }
+  OPTION = "gMainMenuString_Option", MYSTERY_EVENTS = "gMainMenuString_MysteryEvents", EXIT = "SystemText_Exit" }
+local SCROLL_PX = 32
 function Menu.items(kind)
-  if kind == T.HAS_MYSTERY_EVENT then return { "CONTINUE", "NEW_GAME", "MYSTERY_EVENTS", "OPTION" } end
-  if kind == T.HAS_SAVED_GAME then return { "CONTINUE", "NEW_GAME", "OPTION" } end
-  return { "NEW_GAME", "OPTION" }
+  local rows
+  if kind == T.HAS_MYSTERY_EVENT then rows = { "CONTINUE", "NEW_GAME", "MYSTERY_EVENTS", "OPTION" }
+  elseif kind == T.HAS_SAVED_GAME then rows = { "CONTINUE", "NEW_GAME", "OPTION" }
+  else rows = { "NEW_GAME", "OPTION" } end
+  rows[#rows + 1] = "EXIT"
+  return rows
 end
 function Menu.menuType(hasContinue, info, status)
   if not hasContinue or status == "invalid" or status == "empty" or status == "no_flash" then return T.HAS_NO_SAVED_GAME end
@@ -66,13 +70,19 @@ function Menu.new(opts, ctx)
   opts = opts or {}
   local self = setmetatable({ info = opts.continueInfo, game = opts.game, bootState = opts.bootState,
     textSpeed = tonumber(opts.textSpeed) or 1, saveStatus = opts.saveStatus or "ok", pal = Pal.new(),
-    step = Kit.stepper(), state = "check_save", cursor = 1,
+    step = Kit.stepper(), state = "check_save", cursor = 1, scroll = 0, blink = 0,
     manifest = assert(Kit.manifest("birch"), "RS menu palette missing"),
     frameType = opts.continueInfo and opts.continueInfo.frameType or 0 }, Menu)
   self.menuType = opts.menuType or Menu.menuType(opts.hasContinue, self.info, self.saveStatus)
   self.items = Menu.items(self.menuType)
   self.pal:beginFade(Pal.ALL, 0, 16, 0, opts.returningFromOptions and Pal.BLACK or Pal.WHITE)
   return self
+end
+function Menu:_fixScroll()
+  local w = Menu.windowFor(self.menuType, self.cursor)
+  local bottom, topPx = (w.top + w.height + 1) * 8, (w.top - 1) * 8
+  while bottom - self.scroll > 160 do self.scroll = self.scroll + SCROLL_PX end
+  while topPx - self.scroll < 0 and self.scroll > 0 do self.scroll = self.scroll - SCROLL_PX end
 end
 function Menu:_message(key)
   self.printer = Kit.printer(key, { speed = 2, canSpeedUp = false, textSpeedOption = self.textSpeed })
@@ -84,6 +94,7 @@ function Menu:_openOptions()
 end
 function Menu:frame(inp)
   local state, result = self.state
+  self.blink = self.blink + 1
   if state == "check_save" and not self.pal:fadeActive() then
     local key = self.saveStatus == "invalid" and "gSaveFileDeletedMessage"
       or self.saveStatus == "error" and "gSaveFileCorruptMessage"
@@ -108,13 +119,14 @@ function Menu:frame(inp)
       Kit.playSe("SE_SELECT"); self.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.BLACK); self.state = "pressed_a"
     elseif inp.new.b then
       Kit.playSe("SE_SELECT"); self.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.WHITE); self.state = "pressed_b"
-    elseif inp.new.up and self.cursor > 1 then self.cursor = self.cursor - 1; self.state = "highlight"
-    elseif inp.new.down and self.cursor < #self.items then self.cursor = self.cursor + 1; self.state = "highlight" end
+    elseif inp.new.up and self.cursor > 1 then self.cursor = self.cursor - 1; self:_fixScroll(); self.state = "highlight"
+    elseif inp.new.down and self.cursor < #self.items then self.cursor = self.cursor + 1; self:_fixScroll(); self.state = "highlight" end
   elseif state == "pressed_a" and not self.pal:fadeActive() then
     local item = self.items[self.cursor]
     if item == "CONTINUE" then result = { action = "continue" }
     elseif item == "NEW_GAME" then result = "newGame"
     elseif item == "OPTION" then self:_openOptions()
+    elseif item == "EXIT" then result = { action = "exit" }
     elseif item == "MYSTERY_EVENTS" then
       require("src.core.game3.audio").fadeOutBgm(0)
       self.printer = nil
@@ -126,7 +138,7 @@ function Menu:frame(inp)
     local opts = self.game and self.game.options
     if opts then self.textSpeed = require("src.core.game3.options").block(opts).textSpeed end
     if self.bootState then self.bootState.textSpeed = self.textSpeed end
-    self.options, self.cursor, self.state, self.saveStatus = nil, 1, "check_save", "ok"
+    self.options, self.cursor, self.scroll, self.state, self.saveStatus = nil, 1, 0, "check_save", "ok"
     self.pal:beginFade(Pal.ALL, 0, 16, 0, Pal.BLACK)
   end
   self.pal:updateFade()
@@ -148,17 +160,18 @@ function Menu:colors()
     info = { bg = normal.bg, fg = Kit.color555(gender), shadow = normal.shadow }, fill = normal.bg,
     backdrop = Kit.color555(self.manifest.mainMenuPalette[1]) }
 end
-function Menu:_drawContinue(c)
+function Menu:_drawContinue(c, dy)
   local i = self.info or {}
-  Font.draw(RomText.plain("gMainMenuString_Player"), 16, 24, { colors = c.info })
-  Font.draw(i.name or "", 72, 24, { colors = c.info })
-  Font.draw(RomText.plain("gMainMenuString_Time"), 128, 24, { colors = c.info })
+  local y1, y2 = 24 - dy, 40 - dy
+  Font.draw(RomText.plain("gMainMenuString_Player"), 16, y1, { colors = c.info })
+  Font.draw(i.name or "", 72, y1, { colors = c.info })
+  Font.draw(RomText.plain("gMainMenuString_Time"), 128, y1, { colors = c.info })
   local time = string.format("%d:%02d", i.hours or 0, i.minutes or 0)
-  Font.draw(time, 224 - Font.measure(time), 24, { colors = c.info })
-  Font.draw(RomText.plain("gMainMenuString_Pokedex"), 16, 40, { colors = c.info })
-  Font.draw(tostring(i.dexCount or 0), 72, 40, { colors = c.info })
-  Font.draw(RomText.plain("gMainMenuString_Badges"), 128, 40, { colors = c.info })
-  Font.draw(tostring(i.badges or 0), 205, 40, { colors = c.info })
+  Font.draw(time, 224 - Font.measure(time), y1, { colors = c.info })
+  Font.draw(RomText.plain("gMainMenuString_Pokedex"), 16, y2, { colors = c.info })
+  Font.draw(tostring(i.dexCount or 0), 72, y2, { colors = c.info })
+  Font.draw(RomText.plain("gMainMenuString_Badges"), 128, y2, { colors = c.info })
+  Font.draw(tostring(i.badges or 0), 205, y2, { colors = c.info })
 end
 local canvas
 local function composite(img, rect)
@@ -187,17 +200,22 @@ function Menu:draw()
     canvas = canvas or love.graphics.newCanvas(240, 160)
     canvas:setFilter("nearest", "nearest")
     love.graphics.push("all"); love.graphics.setCanvas(canvas); love.graphics.origin(); love.graphics.clear(0, 0, 0, 0)
+    local dy = self.scroll or 0
     for index, item in ipairs(self.items) do
       local w = Menu.windowFor(self.menuType, index)
-      Chrome.stdFrame(w.left, w.top, w.width, w.height)
-      Font.draw(RomText.plain(LABEL[item]), w.left * 8, w.top * 8, { colors = c.headers })
-      if item == "CONTINUE" then self:_drawContinue(c) end
+      Chrome.stdFrame(w.left, w.top - dy / 8, w.width, w.height)
+      Font.draw(RomText.plain(LABEL[item]), w.left * 8, w.top * 8 - dy, { colors = c.headers })
+      if item == "CONTINUE" then self:_drawContinue(c, dy) end
     end
     love.graphics.pop()
     local w = Menu.windowFor(self.menuType, self.cursor)
-    local rect = { 9, (w.top - 1) * 8 + 1, 231, (w.top + w.height + 1) * 8 - 1 }
+    local rect = { 9, (w.top - 1) * 8 + 1 - dy, 231, (w.top + w.height + 1) * 8 - 1 - dy }
     if self.state == "pressed_b" then rect = { 0, 0, 240, 160 } end
     composite(canvas, rect)
+    local last = Menu.windowFor(self.menuType, #self.items)
+    local Arrow = require("src.ui.game3.rs.scroll_arrow")
+    if (last.top + last.height + 1) * 8 - dy > 160 then Arrow.draw("down", 0x78, 0x98, self.blink) end
+    if dy > 0 then Arrow.draw("up", 0x78, 8, self.blink) end
   end
   if error then
     Chrome.stdFrame(3, 15, 24, 4)

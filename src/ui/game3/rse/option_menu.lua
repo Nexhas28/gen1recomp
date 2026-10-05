@@ -64,15 +64,7 @@ end
 local function portRows()
   local cartRows = {}
   for _, r in ipairs(OptionMenu.CART) do cartRows[r.id] = { id = r.id, cart = r } end
-  local rows = {}
-  for _, r in ipairs(Rows.build(st.ctx)) do
-    rows[#rows + 1] = cartRows[r.id] or r
-    cartRows[r.id] = nil
-  end
-  for _, r in ipairs(OptionMenu.CART) do
-    if cartRows[r.id] then rows[#rows + 1] = cartRows[r.id] end
-  end
-  return Rows.group(rows, function(title, members)
+  return Rows.withCart(st.ctx, cartRows, function(title, members)
     st.pages[#st.pages + 1] = { title = title, rows = members, index = 1, scroll = 0 }
   end)
 end

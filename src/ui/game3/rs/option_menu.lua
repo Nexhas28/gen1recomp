@@ -23,28 +23,16 @@ local function page()
   return Menu._pages and Menu._pages[#Menu._pages]
 end
 
-local function portRows()
-  local skip = {}
-  for _, key in ipairs(KEYS) do skip[key] = true end
-  for key in pairs(Menu.EXCLUDE) do skip[key] = true end
-  local rows = {}
-  for _, r in ipairs(Rows.build(ctx(), skip)) do
-    if not skip[r.id] then rows[#rows + 1] = r end
-  end
-  return Rows.group(rows, function(title, members)
-    Menu._pages[#Menu._pages + 1] = {title = title, rows = members, index = 1, scroll = 0}
-  end)
-end
-
 local function topRows()
-  local rows = {}
-  for i = 1, NATIVE do rows[i] = {native = i} end
-  for _, r in ipairs(portRows()) do rows[#rows + 1] = {port = r} end
-  return rows
+  local cartRows = {}
+  for i, key in ipairs(KEYS) do cartRows[key] = {id = key, native = i} end
+  return Rows.withCart(ctx(), cartRows, function(title, members)
+    Menu._pages[#Menu._pages + 1] = {title = title, rows = members, index = 1, scroll = 0}
+  end, Menu.EXCLUDE)
 end
 
 local function rowCount(p)
-  return p.top and #p.rows or #p.rows + 1
+  return #p.rows + 1
 end
 
 local function clampScroll(p)
@@ -162,20 +150,14 @@ function Menu.handleInput(input)
   local total = rowCount(p)
   local row = p.rows[p.index]
   if pressed(input, "a") then
-    if p.top and row.native == NATIVE then Menu.back()
-    elseif p.top and row.port then activatePort(row.port)
-    elseif not p.top then
-      if row then activatePort(row) else Menu.back() end
-    end
+    if not row then Menu.back()
+    elseif not row.native then activatePort(row) end
   elseif pressed(input, "b") then Menu.back()
   elseif pressed(input, "up") then p.index = (p.index - 2) % total + 1
   elseif pressed(input, "down") then p.index = p.index % total + 1
-  elseif p.top and row.native and row.native < NATIVE then stepNative(row.native, input)
-  else
-    local port = p.top and row.port or (not p.top and row)
-    if port and port.step and (pressed(input, "left") or pressed(input, "right")) then
-      if port.step(ctx(), pressed(input, "left") and -1 or 1) then persist() end
-    end
+  elseif row and row.native then stepNative(row.native, input)
+  elseif row and row.step and (pressed(input, "left") or pressed(input, "right")) then
+    if row.step(ctx(), pressed(input, "left") and -1 or 1) then persist() end
   end
   local cur = page()
   if cur then clampScroll(cur) end
@@ -228,10 +210,8 @@ local function drawContents()
     if idx > rowCount(p) then break end
     local y = baseY + (slot - 1) * 16
     local row = p.rows[idx]
-    if p.top and row.native then
-      drawNative(row.native, -p.scroll * 16)
-    elseif p.top then
-      drawPort(row.port, y)
+    if row and row.native then
+      drawNative(row.native, y - d.rows[row.native].y)
     elseif row then
       drawPort(row, y)
     else

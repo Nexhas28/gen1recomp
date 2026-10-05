@@ -161,7 +161,7 @@ return function(game)
     local top = Option._pages[1]
     local gi
     for i, row in ipairs(top.rows) do
-      if row.port and row.port.id == "group.graphics" then gi = i end
+      if row.id == "group.graphics" then gi = i end
     end
     if check(gi ~= nil, version .. " RS OPTION has a visible GRAPHICS row") then
       top.index = gi

@@ -251,6 +251,12 @@ function PaletteFX.ogObjNormal()
   return OG_OBJ_NORMAL, "gbcobjnormal_soft"
 end
 
+-- home/fade.asm:68
+function PaletteFX.ogObjWorld()
+  if darkWorld or fadeObpMap then return PaletteFX.ogObj() end
+  return PaletteFX.ogObjNormal()
+end
+
 -- The DMG object ramp every mode except OG RED bakes onto overworld sprites,
 -- plus its cache group (same two-value contract as ogObj).  Entry 1 is never
 -- read -- SpriteRenderer.getObpImage keys OBJ color 0 to alpha, the hardware's

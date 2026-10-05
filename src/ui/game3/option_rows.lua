@@ -64,7 +64,9 @@ function Rows.build(ctx, skip)
   local rows = {}
   local function add(row) rows[#rows + 1] = row end
   local function addCart(id, make)
-    if not (skip and skip[id]) then add(make()) end
+    local swap = skip and skip[id]
+    if type(swap) == "table" then add(swap)
+    elseif not swap then add(make()) end
   end
 
   addCart("textSpeed", function() return {
@@ -496,6 +498,14 @@ function Rows.group(rows, openPage)
     if not (id and (owner[id] or taken[id])) then view[#view + 1] = row end
   end
   return view
+end
+
+function Rows.withCart(ctx, cartRows, openPage, exclude)
+  local rows = {}
+  for _, r in ipairs(Rows.build(ctx, cartRows)) do
+    if not (exclude and exclude[r.id]) then rows[#rows + 1] = r end
+  end
+  return Rows.group(rows, openPage)
 end
 
 return Rows

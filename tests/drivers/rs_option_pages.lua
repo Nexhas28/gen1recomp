@@ -73,7 +73,7 @@ local function phase1(game, ShaderFX, ShaderFXMenu)
   end
   shot(game, "01-native-first-page")
   local top = Menu._pages[1]
-  for i = 1, 7 do check(top.rows[i].native == i, "native row " .. i .. " on page 1") end
+  check(top.rows[1].id == "group.speed", "page 1 opens on Emerald's SPEED group")
 
   U.tap(game, "select")
   U.wait(4)
@@ -81,12 +81,12 @@ local function phase1(game, ShaderFX, ShaderFXMenu)
 
   moveTo(game, top, 8)
   shot(game, "02-scrolled-port-rows")
-  moveTo(game, top, #top.rows)
+  moveTo(game, top, #top.rows + 1)
   shot(game, "03-port-rows-bottom")
 
   local groups = {}
   for i, row in ipairs(top.rows) do
-    if row.port and row.port.group then groups[#groups + 1] = { i = i, id = row.port.id } end
+    if row.group then groups[#groups + 1] = { i = i, id = row.id } end
   end
   check(#groups >= 4, "RS OPTION shows " .. #groups .. " port pages")
   local n = 3

@@ -127,23 +127,34 @@ do
   Menu.show({ game = game, session = { version = "ruby", engineOptions = game.options } })
   for _ = 1, 40 do Menu.update() end
   local top = Menu._pages[1]
-  for i = 1, 7 do eq(top.rows[i].native, i, "RS OPTION keeps native row " .. i .. " in cart order") end
   local seen = {}
-  for i = 8, #top.rows do seen[top.rows[i].port.id] = i end
-  check(seen["group.graphics"] ~= nil, "RS OPTION lists a visible GRAPHICS row below CANCEL")
-  check(seen["group.speed"] and seen["group.audio"] and seen["controls"] and seen["mods"],
-    "RS OPTION carries the Emerald port pages")
-  check(seen["eventTickets"] == nil and seen["textSpeed"] == nil, "RS port rows skip cart rows and Emerald-only rows")
+  for i, r in ipairs(top.rows) do seen[r.id] = i end
+  local order = {}
+  for _, id in ipairs(Rows.ORDER) do if seen[id] then order[#order + 1] = id end end
+  for i, id in ipairs(order) do eq(top.rows[i].id, id, "RS OPTION top row " .. i .. " follows Emerald's grouped order") end
+  check(seen["group.speed"] and seen["group.graphics"] and seen["group.audio"] and seen["group.battle"]
+    and seen["controls"] and seen["mods"], "RS OPTION carries the Emerald pages")
+  check(seen["textSpeed"] == nil and seen["sound"] == nil and seen["frameType"] == nil,
+    "RS cart rows move into their Emerald groups")
+  eq(top.rows[seen["buttonMode"]].native, 5, "BUTTON MODE stays a native cart row on the top page")
+  check(seen["eventTickets"] == nil, "RS skips Emerald-only rows")
   Menu.handleInput(input({ "select" }))
   check(not ShaderFXMenu.isOpen(), "SELECT is not a hidden SHADER FX shortcut")
   for _ = 1, seen["group.graphics"] - 1 do Menu.handleInput(input({ "down" })) end
-  eq(top.scroll, seen["group.graphics"] - 7, "the list scrolls to reach the port rows")
   Menu.handleInput(input({ "a" }))
   local graphics = Menu._pages[#Menu._pages]
   check(#Menu._pages == 2, "A on GRAPHICS opens its page")
-  local si
-  for i, r in ipairs(graphics.rows) do if r.id == "shaderfx" then si = i end end
+  local si, fi
+  for i, r in ipairs(graphics.rows) do
+    if r.id == "shaderfx" then si = i end
+    if r.id == "frameType" and r.native == 6 then fi = i end
+  end
+  check(fi ~= nil, "RS GRAPHICS carries the native FRAME row")
   check(si ~= nil, "RS GRAPHICS lists SHADER FX")
+  for _ = 1, (fi or 1) - 1 do Menu.handleInput(input({ "down" })) end
+  Menu.handleInput(input({ "right" }))
+  eq(Menu._pending.frameType, 1, "RIGHT on the grouped FRAME row steps the pending frame")
+  graphics.index = 1
   for _ = 1, (si or 1) - 1 do Menu.handleInput(input({ "down" })) end
   Menu.handleInput(input({ "a" }))
   check(ShaderFXMenu.isOpen(), "A on the visible SHADER FX row opens the picker")

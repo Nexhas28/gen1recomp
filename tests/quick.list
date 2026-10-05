@@ -14,6 +14,7 @@ tests/engine/audio_device_reset.lua
 tests/engine/bag_bicycle_no_options_bug1705.lua
 tests/engine/bag_cancel_row_bug1685.lua
 tests/engine/bag_item_box_bug1521.lua
+tests/engine/bag_split_stack_bug2671.lua
 tests/engine/bag_use_toss_hollow_cursor_2063.lua
 tests/engine/ball_toss_sound_sync_bug2611.lua
 tests/engine/battle_ai_item_messages_2589.lua
@@ -28,6 +29,7 @@ tests/engine/battle_fainted_message_romtext.lua
 tests/engine/battle_field_residual_validation.lua
 tests/engine/battle_fit_option.lua
 tests/engine/battle_fixed_menu_scale.lua
+tests/engine/battle_intro_balls_after_cry_bug2662.lua
 tests/engine/battle_learn_move_page_bug2540.lua
 tests/engine/battle_levelup_order_bug1996.lua
 tests/engine/battle_menu_auxiliary.lua
@@ -41,6 +43,7 @@ tests/engine/bike_shop_displays_bug1530.lua
 tests/engine/bills_pc_changebox_bug2124.lua
 tests/engine/blues_house_daisy_walking_bug1338.lua
 tests/engine/blues_house_town_map_order_2523.lua
+tests/engine/boulder_dust_obp1_bug2650.lua
 tests/engine/box_menu_message_pages_test.lua
 tests/engine/box_release_confirmation_romtext.lua
 tests/engine/buena_prize_box_bug1935.lua
@@ -54,11 +57,13 @@ tests/engine/cart_saves.lua
 tests/engine/cart_store.lua
 tests/engine/caught_ball_obp_restore_bug2127.lua
 tests/engine/celadon_girl_drink_bug1955.lua
+tests/engine/champion_entrance_walk_bug2666.lua
 tests/engine/chip_analog_path.lua
 tests/engine/chip_audio_preroll_test.lua
 tests/engine/chip_mono_fastpath_test.lua
 tests/engine/chip_sample_rate_test.lua
 tests/engine/confusion_selfhit_anim_bug1578.lua
+tests/engine/continue_info_layout_2684.lua
 tests/engine/copyright_splash_backdrop.lua
 tests/engine/crystal_buena_cache_2639.lua
 tests/engine/crystal_credits_bug1967.lua
@@ -82,6 +87,7 @@ tests/engine/ether_move_menu_2158.lua
 tests/engine/evo_stone_cancel_bug883_test.lua
 tests/engine/evo_stone_sfx_bug2072.lua
 tests/engine/evolution_dialogue_bug1596_test.lua
+tests/engine/evolution_double_after_battle_bug2664.lua
 tests/engine/evolution_hold_b_bug968_test.lua
 tests/engine/evolution_timing_bug2033.lua
 tests/engine/exp_traded_ot_survives_reload_bug1265.lua
@@ -349,6 +355,7 @@ tests/engine/ghost_unveil_bug492.lua
 tests/engine/gift_gotmon_rows_2243.lua
 tests/engine/gift_jingle_sites_bug2555.lua
 tests/engine/give_item_jingle.lua
+tests/engine/grass_feet_strip_2688.lua
 tests/engine/grass_palette_modes_2500.lua
 tests/engine/gym_badge_jingle_page_bug1982.lua
 tests/engine/gym_leader_end_battle_text_bug1606.lua
@@ -365,6 +372,7 @@ tests/engine/host_shell_request_headers.lua
 tests/engine/hostshell_spawn_self.lua
 tests/engine/importer_worker_failure_cleanup.lua
 tests/engine/importers_asset_packs.lua
+tests/engine/indigo_statues_bug2683.lua
 tests/engine/input_display_chord_test.lua
 tests/engine/input_dual_path_test.lua
 tests/engine/input_focus_reset_test.lua
@@ -390,6 +398,9 @@ tests/engine/jessie_james_pic.lua
 tests/engine/jigglypuff_dance_gate_bug2335.lua
 tests/engine/kit_spinner_trail_bug2048.lua
 tests/engine/kit_transition.lua
+tests/engine/lance_side_trigger_facing_bug2669.lua
+tests/engine/lance_victory_music_bug2659.lua
+tests/engine/lance_walk_in_bug2665.lua
 tests/engine/launch_options_flags_bug1657.lua
 tests/engine/launch_prelaunch_bug1657.lua
 tests/engine/launch_update_mods_bug2037.lua
@@ -471,12 +482,14 @@ tests/engine/nurse_bow_bug995.lua
 tests/engine/nx_display_test.lua
 tests/engine/nx_yellow_boot_test.lua
 tests/engine/oak_intro_cry_bug2481.lua
+tests/engine/oak_shrink_timing_2685.lua
 tests/engine/oaks_aide_requirement_bug1006.lua
 tests/engine/oaks_lab_dex_rating_bug600.lua
 tests/engine/oaks_lab_last_ball_bug601.lua
 tests/engine/oaks_lab_posters_email_bug1331_1333.lua
 tests/engine/oaks_lab_rival_faces_down_bug1279.lua
 tests/engine/oaks_lab_rival_paths_bug1989_bug1987.lua
+tests/engine/oaks_lab_starter_ball_hide_2686.lua
 tests/engine/oaks_lab_starter_energetic_bug1334.lua
 tests/engine/oaks_lab_yellow_rival_loss_line_2121.lua
 tests/engine/oaks_lab_yellow_starter_bug1013.lua
@@ -492,12 +505,14 @@ tests/engine/options_write_readback_bug828.lua
 tests/engine/orientation_option.lua
 tests/engine/overworld_field_faint_heal_romtext.lua
 tests/engine/overworld_hidden_item_romtext.lua
+tests/engine/overworld_og_obp0_bug2689.lua
 tests/engine/overworld_slot_seat_over_hidden_coin.lua
 tests/engine/overworld_world_palette_seam_bug2152.lua
 tests/engine/pad_hints_bug2452_test.lua
 tests/engine/palette_test.lua
 tests/engine/party_battle_prompt_bug1901.lua
 tests/engine/party_fieldmove_order_bug792.lua
+tests/engine/party_icon_anim_freeze_bug2682.lua
 tests/engine/party_icon_og_obj_bug2268.lua
 tests/engine/party_submenu_cancel_bug1833.lua
 tests/engine/pc_accessed_text_bug1529.lua
@@ -545,9 +560,11 @@ tests/engine/push_battle_transition.lua
 tests/engine/quicksave_gate_bug2185.lua
 tests/engine/quicksave_gate_bug2561.lua
 tests/engine/quit_thread_shutdown.lua
+tests/engine/rage_building_bug2654.lua
 tests/engine/rare_candy_bag_open_bug796.lua
 tests/engine/rby_translation_runtime_test.lua
 tests/engine/rebind_capture_bug510.lua
+tests/engine/recoil_hp_drain_bug2653.lua
 tests/engine/rebind_joystick_bug632.lua
 tests/engine/rebind_swap_clear_bug589.lua
 tests/engine/refresh_rate_counters_test.lua
@@ -564,6 +581,7 @@ tests/engine/rom_importer_nx_flags_test.lua
 tests/engine/rom_importer_source_tree_test.lua
 tests/engine/rom_pick_error_bug442.lua
 tests/engine/rom_pick_tv_cancel.lua
+tests/engine/route23_go_right_ahead_bug2649.lua
 tests/engine/route24_rocket_bug1550.lua
 tests/engine/safari_gate_bug540.lua
 tests/engine/safe_area_units_test.lua
@@ -632,6 +650,7 @@ tests/engine/teleport_escape_ends_turn.lua
 tests/engine/text_cont_single_row_bug2634.lua
 tests/engine/text_double_line_overwrite_bug2524.lua
 tests/engine/textbox_arrow_bug2084.lua
+tests/engine/textbox_arrow_cell_bug2674.lua
 tests/engine/textbox_pause_bug1818.lua
 tests/engine/textbox_sfx_speed_bug2087_test.lua
 tests/engine/thrash_setup_anim_bug1532.lua
@@ -679,6 +698,7 @@ tests/engine/vending_machine_bug1876.lua
 tests/engine/viridian_fisher_pre_bug775.lua
 tests/engine/vitamin_rose_text_sfx_bug2332.lua
 tests/engine/vsync_option.lua
+tests/engine/warp_fade_obp0_identity_bug2689.lua
 tests/engine/warp_fade_palette_2180.lua
 tests/engine/warp_sprite_hidden_bug916.lua
 tests/engine/wave_channel_mix_bug429.lua

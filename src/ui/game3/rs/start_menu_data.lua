@@ -46,7 +46,7 @@ end
 
 Data.window = {left = 23, top = 1, width = 6}
 Data.textX, Data.textY, Data.rowPitch = 0, 8, 16
-Data.maxVisible, Data.dexNeedsSeen, Data.exitConfirms = 8, true, false
+Data.maxVisible, Data.dexNeedsSeen, Data.exitConfirms = 8, true, true
 function Data.drawCursor(x, y)
   require("src.ui.game3.rs.menu_cursor").draw(x, y, 48)
 end
