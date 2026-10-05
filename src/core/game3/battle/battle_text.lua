@@ -39,11 +39,21 @@ local function monName(ref)
   return require("src.core.game3.battle.state").displayName(ref)
 end
 
+-- A foe's name with the cart's wild/foe word. The US and Japanese rows go
+-- before the name ("Wild ", "やせいの　"); the French, Italian and Spanish
+-- carts write theirs to follow it (" sauvage", " salvaje", " selvatico") and
+-- append it (pret pokeemerald multi-language, src/battle_message.c:4042,
+-- :4649). The German row has the same shape (" (Wild)").
+function BattleText.withMonPrefix(prefix, name)
+  if prefix:sub(1, 1) == " " then return name .. prefix end
+  return prefix .. name
+end
+
 -- src/battle_message.c:1807 HANDLE_NICKNAME_STRING_CASE
 local function withPrefix(fill, ref)
   if isPlayer(ref) then return monName(ref) end
   local prefix = fill.trainer and "sText_FoePkmnPrefix" or "sText_WildPkmnPrefix"
-  return RomText.plain(prefix) .. monName(ref)
+  return BattleText.withMonPrefix(RomText.plain(prefix), monName(ref))
 end
 
 local function moveName(fill, move)

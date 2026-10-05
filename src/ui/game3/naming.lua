@@ -56,13 +56,24 @@ Naming.TEMPLATE = {
 -- pokeemerald/include/naming_screen.h:7
 Naming.TEMPLATE_ORDER = { "PLAYER", "BOX", "CAUGHT_MON", "NICKNAME", "WALDA" }
 
+-- A name and a cart string the US code appends after it. The French, Italian
+-- and Spanish carts put the name in the string's STR_VAR_1 instead, wherever
+-- the row places it (pret pokeemerald multi-language, src/naming_screen.c:1746);
+-- a row without one keeps the US order.
+function Naming.nameInto(key, name)
+  name = tostring(name or "")
+  local text = RomText.plain(key, { stringVars = { "\1" } })
+  if text:find("\1", 1, true) then return (text:gsub("\1", function() return name end)) end
+  return name .. text
+end
+
 -- pokeemerald/src/naming_screen.c:1715
 function Naming.monTitle(speciesName)
   if Versions.active() == "ruby" or Versions.active() == "sapphire" then
     return RomText.plain("OtherText_PokeName", {stringVars = {[1] = tostring(speciesName or "")}})
   end
   -- pokeemerald/src/text.c:972
-  return tostring(speciesName or "") .. RomText.plain("gText_PkmnsNickname", { stringVars = {} })
+  return Naming.nameInto("gText_PkmnsNickname", speciesName)
 end
 
 -- pret sKeyboardChars + sPageColumnXPos (cursor).
