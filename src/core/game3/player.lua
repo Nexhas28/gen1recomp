@@ -794,6 +794,11 @@ function Player.scriptStep(dir, run, slow, fast)
   end
   beginStep(tx, ty, run and true or false, false)
   Player._scriptedStep = true
+  -- pokeemerald/src/event_object_movement.c:5101
+  if Player.biking and not (Player.surfHopping or Player.dismounting) then
+    Player.stepFrames = run and RUN_FRAMES or WALK_FRAMES
+    Player.running = run and true or false
+  end
   -- pokefirered/src/event_object_movement.c:9029 UpdateRunSlowAnim
   if run and slow then Player.stepFrames = RUN_SLOW_FRAMES end
   if fast then Player.stepFrames = RUN_FRAMES end
