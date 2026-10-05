@@ -44,6 +44,7 @@ function Audio.questLogGating()
 end
 
 local function rse_policy()
+  if Audio.mapMusicPolicy() == "rs" then return lazyReq("src.core.game3.audio_policy_rs") end
   if Audio.mapMusicPolicy() ~= "rse" then return nil end
   return lazyReq("src.core.game3.audio_policy_rse")
 end
@@ -287,14 +288,20 @@ function Audio.legendaryBattleSong(species, opts)
   return songs[entry]
 end
 
-function Audio.applyOptions(session)
-  local Options = lazyReq("src.core.game3.options")
-  local o = Options.ensure(session)
-  local mono = (tonumber(o.sound) or 0) == 0
+-- pokeruby/src/libs/m4a.c:1738
+function Audio.setCryStereo(value)
+  local mono = (tonumber(value) or 0) == 0
   if mono ~= Audio._mono then
     Audio._mono = mono
     Audio.pushMixOptions()
   end
+  return mono and 0 or 1
+end
+
+function Audio.applyOptions(session)
+  local Options = lazyReq("src.core.game3.options")
+  local o = Options.ensure(session)
+  return Audio.setCryStereo(o.sound)
 end
 
 local function bgm_gain(volume)
@@ -1208,6 +1215,16 @@ function Audio.isSePlaying(id)
   return false
 end
 
+-- pokeemerald/src/sound.c:624
+-- pokeruby/src/sound.c:554
+function Audio.isSpecialSePlaying()
+  for _, src in ipairs(Audio._seSources) do
+    local meta = Audio._seMeta[src]
+    if meta and tonumber(meta.player) == 3 and src:isPlaying() then return true end
+  end
+  return false
+end
+
 function Audio.waitSe(id, cb)
   -- Poll in update via callback list
   Audio._waitSe = Audio._waitSe or {}
@@ -1333,7 +1350,10 @@ function Audio.playCry(species, mode, pan)
     noDuck = o.noDuck == true
   end
   mode = tonumber(mode) or 0
-  local params = Sample.cryParams(mode, volume, Audio.config().cryModeOverrides)
+  local cfg = Audio.config()
+  -- pokeruby/src/sound.c:364
+  if cfg.cryModeMax and (mode < 0 or mode > cfg.cryModeMax) then mode = 0 end
+  local params = Sample.cryParams(mode, volume or cfg.cryDefaultVolume, cfg.cryModeOverrides)
   local doubles = params.mode == 1 or noDuck
   Audio._cryParams = params
   log(string.format("playCry species=%s mode=%d", tostring(species), params.mode))
@@ -1364,6 +1384,7 @@ function Audio.playCry(species, mode, pan)
     local sd, info = Sample.renderCry(pcm, Mix.waveRate(meta.freq), params, {
       outRate = Mix.SAMPLE_RATE,
       pan = pan and pan ~= 0 and Audio.normalizePan(pan) or nil,
+      mono = Audio._mono,
     })
     if info then
       Audio._cryUntil = (Audio._cryClock or 0) + info.frames

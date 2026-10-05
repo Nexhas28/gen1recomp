@@ -12,6 +12,12 @@ local BattleAnimExtract = {}
 BattleAnimExtract.FORMAT_VERSION = 5
 BattleAnimExtract.CACHE_SUB      = "pokemon/battle_anims"
 BattleAnimExtract.REQUIRED       = { "pokemon/battle_anims/pack.lua" }
+BattleAnimExtract.LEVEL_UP_VERTICAL_VERSION = 1
+BattleAnimExtract.FRLG_REQUIRED = {
+  "pokemon/battle_anims/tags/LEVEL_UP_VERTICAL.png",
+  "pokemon/battle_anims/tags/LEVEL_UP_VERTICAL.4bpp",
+  "pokemon/battle_anims/tags/LEVEL_UP_VERTICAL.gbapal",
+}
 
 local V = Versions.BATTLE_ANIMS or {}
 
@@ -771,6 +777,50 @@ local function lz_at(rom, ptr)
   return nil
 end
 
+-- pokefirered/src/pokemon_special_anim_scene.c:58
+local LEVEL_UP_VERTICAL = {
+  firered = {gfx = 0x459888, pal = 0x459868},
+  leafgreen = {gfx = 0x4592A8, pal = 0x459288},
+}
+
+local function extract_level_up_vertical(rom, cache, root, game)
+  local offsets = LEVEL_UP_VERTICAL[game]
+  if not offsets then return nil end
+  local tb = lz_at(rom, offsets.gfx + 0x08000000)
+  assert(tb and #tb == 64, "battle_anim_extract: native level-up streak must contain two 4bpp tiles")
+  local pb = {}
+  for i = 0, 31 do pb[i + 1] = rom:get(offsets.pal + i) end
+  local ints = pal_ints(pb)
+  local pixels = {}
+  for y = 0, 15 do
+    for x = 0, 7 do
+      local b = tb[math.floor(y / 8) * 32 + (y % 8) * 4 + math.floor(x / 2) + 1]
+      local ci = x % 2 == 0 and b % 16 or math.floor(b / 16)
+      local v = ints[ci + 1]
+      local o = (y * 8 + x) * 4 + 1
+      pixels[o] = math.floor((v % 32) * 255 / 31 + 0.5)
+      pixels[o + 1] = math.floor((math.floor(v / 32) % 32) * 255 / 31 + 0.5)
+      pixels[o + 2] = math.floor((math.floor(v / 1024) % 32) * 255 / 31 + 0.5)
+      pixels[o + 3] = ci == 0 and 0 or 255
+    end
+  end
+  local png = assert(encode_png(pixels, 8, 16), "battle_anim_extract: level-up streak PNG failed")
+  local stem = "tags/LEVEL_UP_VERTICAL"
+  cache:write(root .. "/" .. stem .. ".png", png)
+  local unpackBytes = table.unpack or unpack
+  cache:write(root .. "/" .. stem .. ".4bpp", string.char(unpackBytes(tb)))
+  cache:write(root .. "/" .. stem .. ".gbapal", string.char(unpackBytes(pb)))
+  return {version = 1, tag = "LEVEL_UP_VERTICAL", game = game, w = 8, h = 16,
+    count = 18, eva = 12, evb = 6, priority = 1, subpriority = 0,
+    file = stem .. ".png", raw = stem .. ".4bpp", palette = stem .. ".gbapal",
+    pal = ints, gfxOffset = offsets.gfx, palOffset = offsets.pal}
+end
+
+function BattleAnimExtract.extractLevelUpVertical(rom, cache, cacheRoot, game)
+  return extract_level_up_vertical(rom, cache,
+    (cacheRoot or "data/generated/gba") .. "/" .. BattleAnimExtract.CACHE_SUB, game)
+end
+
 local function raw_at(rom, off, n)
   local out = {}
   for i = 0, n - 1 do out[i + 1] = rom:get(off + i) end
@@ -1043,6 +1093,23 @@ local GENERIC = {
 function BattleAnimExtract.ready(cache, cacheRoot)
   local root = (cacheRoot or "data/generated/gba") .. "/" .. BattleAnimExtract.CACHE_SUB
   local path = root .. "/pack.lua"
+  if LEVEL_UP_VERTICAL[Versions.active()] then
+    local source = cache and cache.read and cache:read(path)
+    if type(source) ~= "string" then return false end
+    local fn = loadstring and loadstring(source, "@" .. path) or load(source, "@" .. path, "t", {})
+    if not fn then return false end
+    if setfenv then setfenv(fn, {}) end
+    local ok, pack = pcall(fn)
+    local spec = ok and type(pack) == "table" and pack.levelUpVertical
+    if type(spec) ~= "table" or spec.version ~= 1 or spec.game ~= Versions.active() then return false end
+    local tag = pack.tags and pack.tags.LEVEL_UP_VERTICAL
+    if type(tag) ~= "table" or tag.w ~= 8 or tag.h ~= 16 then return false end
+    for _, file in ipairs({"tags/LEVEL_UP_VERTICAL.png", "tags/LEVEL_UP_VERTICAL.4bpp", "tags/LEVEL_UP_VERTICAL.gbapal"}) do
+      if not (cache.exists and cache:exists(root .. "/" .. file))
+          and not cache:read(root .. "/" .. file) then return false end
+    end
+    return true
+  end
   if cache and cache.exists and cache:exists(path) then return true end
   if cache and cache.read  and cache:read(path)   then return true end
   return false
@@ -1245,6 +1312,12 @@ function BattleAnimExtract.run(rom, cache, opts)
   end
 
   local statMask = cache and extract_stat_mask(rom, cache, root) or nil
+  local levelUpVertical = cache and extract_level_up_vertical(rom, cache, root, Versions.active()) or nil
+  if levelUpVertical then
+    tagMeta.LEVEL_UP_VERTICAL = {file = levelUpVertical.file, w = 8, h = 16,
+      frameW = 8, frameH = 16, pal = levelUpVertical.pal}
+    tagPals.LEVEL_UP_VERTICAL = levelUpVertical.pal
+  end
 
   if strict then
     local keys = {}
@@ -1288,6 +1361,7 @@ function BattleAnimExtract.run(rom, cache, opts)
     tagPals      = tagPals,
     bgPals       = bgPals,
     statMask     = statMask,
+    levelUpVertical = levelUpVertical,
   }
 
   local lua = "return " .. serialize(pack) .. "\n"

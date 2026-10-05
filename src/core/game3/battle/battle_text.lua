@@ -149,11 +149,19 @@ RESOLVE_RSE[0x33] = function(f) return need(f, "partnerName", 0x33) end
 RESOLVE_RSE[0x34] = function(f) return need(f, "buff3", 0x34) end
 BattleText.RESOLVE_RSE = RESOLVE_RSE
 BattleText.RESOLVE = RESOLVE
+local RsText = require("src.core.game3.rs.battle_text_policy")
+local RESOLVE_RS = RsText.resolvers(RESOLVE, RESOLVE_RSE)
+BattleText.RESOLVE_RS = RESOLVE_RS
 
 function BattleText.context(fill)
   fill = fill or {}
   local codes = RESOLVE
-  if require("src.core.game3.battle.profile").get().family == "rse" then codes = RESOLVE_RSE end
+  local dialect
+  if RsText.matches() then
+    codes, dialect = RESOLVE_RS, "rs"
+  elseif require("src.core.game3.battle.profile").get().family == "rse" then
+    codes = RESOLVE_RSE
+  end
   local values = setmetatable({}, {
     __index = function(t, code)
       local resolve = codes[code]
@@ -165,7 +173,7 @@ function BattleText.context(fill)
       return v
     end,
   })
-  return { battle = values, stringVars = fill.stringVars, playerName = fill.playerName,
+  return { battle = values, dialect = dialect, stringVars = fill.stringVars, playerName = fill.playerName,
     rivalName = fill.rivalName, maxWidth = fill.maxWidth }
 end
 

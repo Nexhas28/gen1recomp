@@ -191,16 +191,19 @@ local function apply_status_effect(M, eff, primary, certain, effBattler)
   local strict = primary or certain
   if status == "PSN" or status == "TOX" then
     if ab == "IMMUNITY" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNPREVENTSPOISONINGWITH")
       return false
     end
   elseif status == "BRN" then
     if ab == "WATER_VEIL" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNSXPREVENTSBURNS")
       return false
     end
   elseif status == "PAR" then
     if ab == "LIMBER" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNPREVENTSPARALYSISWITH")
       return false
     end
@@ -213,6 +216,7 @@ local function apply_status_effect(M, eff, primary, certain, effBattler)
     return false
   end
   ad:applyStatus(effBattler, status, M.user, { ignoreSafeguard = true, force = true })
+  if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
   ad:statusAnim(effBattler, status)
   ad:sayText(STATUS_MSG[status], { eff = effBattler })
   -- pokefirered/src/battle_script_commands.c:2376
@@ -273,10 +277,11 @@ function Secondary.set(M, eff, primary, certain, affectsUser)
   if not effBattler then return false end
   -- pokefirered/src/battle_script_commands.c:2128
   if M.st and M.st.pokedude and eff ~= "SLEEP" and effBattler.side == "enemy" then return false end
-  if rank and rank <= 9 and not primary and ad:abilityOf(effBattler) == "SHIELD_DUST" and not affectsUser then
+  if rank and rank <= 9 and not primary and not M._rsStatusAbilityEffect
+      and ad:abilityOf(effBattler) == "SHIELD_DUST" and not affectsUser then
     return false
   end
-  if rank and rank <= 7 and not primary and not affectsUser then
+  if rank and rank <= 7 and not primary and not affectsUser and not M._rsStatusAbilityEffect then
     local side = ad:ownSide(effBattler)
     if side and (side.expSafeguardTurns or 0) > 0 then return false end
   end

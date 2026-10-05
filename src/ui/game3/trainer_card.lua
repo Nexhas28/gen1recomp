@@ -625,6 +625,8 @@ end
 
 function TrainerCard.show(opts)
   opts = opts or {}
+  local redirected = require("src.ui.game3.screens").redirect("trainer_card", TrainerCard, opts.session)
+  if redirected then return redirected.show(opts) end
   TrainerCard.open = true
   TrainerCard.side = "front"
   TrainerCard._flip = nil

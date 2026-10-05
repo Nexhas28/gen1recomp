@@ -241,6 +241,10 @@ local function writeback(session, battleParty, remap, result, save, opts)
         abilityId = src.abilityId,
         _allowMoveRewrite = true,
       })
+      if src.status == nil or src.status == 0 then
+        mon.status, mon.sleep = nil, src.sleep
+        if mon.statusNum then mon.statusNum = 0 end
+      end
       -- pokefirered/src/battle_controller_player.c:1909
       local held = src.item or src.heldItem
       if held == 0 or held == "" then held = nil end
@@ -287,7 +291,11 @@ end
 function BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
   opts = opts or {}
   if opts.wild or type(session) ~= "table" then return false end
-  if not Pokemon.isLeagueTrainerClass(league_trainer_class(foe, opts)) then return false end
+  local policy = require("src.core.game3.battle.profile").get(session).trainerParty
+  if policy and (opts.link or opts.battleTower or opts.eReader or opts.secretBase
+      or (foe and (foe.battleTower or foe.eReader or foe.secretBase))) then return false end
+  local predicate = policy and policy.isLeagueTrainerClass or Pokemon.isLeagueTrainerClass
+  if not predicate(league_trainer_class(foe, opts)) then return false end
   local ctx = { leagueBattle = true, mapSec = Pokemon.currentMapSec(session) }
   local changed = false
   for i, mon in ipairs(session.party or {}) do
@@ -323,14 +331,35 @@ BattleBridge.EXTRA_KINDS = {
   "groudon", "kyogre", "rayquaza", "trainerIdB",
   "tutorialKind", "playerHalf", "partnerTrainerId", "partnerBackPic", "trainerItems",
   "battleTower", "secretBase", "dome", "palace", "arena", "factory", "pike", "pyramid", "frontierTrainer", "frontierTrainerB",
-  "towerLinkMulti", "victoryTextB",
+  "towerLinkMulti", "victoryTextB", "specialBattleKind",
 }
 
 -- pokeemerald/src/battle_main.c:5098
-function BattleBridge.tvBattleEnd(session, result)
+function BattleBridge.tvBattleEnd(session, result, resultState)
   local B = package.loaded["src.core.game3.battle"]
-  local st = B and B.getState and B.getState()
+  local st = resultState or (B and B.getState and B.getState())
   if not st then return end
+  if st.resultPolicy then
+    if st._rsTvPublished then return end
+    st.resultPolicy.captureFinishState(st, result)
+    if not st.battleResults._rsFinishSnapshot then return end
+    st._rsTvPublished = true
+    local k = st.kinds or {}
+    local kinds = {
+      link = st.link or k.link, recordedLink = k.recordedLink, trainer = not st.wild,
+      firstBattle = st.firstBattle or k.firstBattle, safari = st.safari or k.safari,
+      ereaderTrainer = st.eReader, wallyTutorial = k.tutorial == "wally",
+      battleTower = st.battleTower or k.battleTower, frontier = k.frontier,
+    }
+    local flags = st.resultPolicy.flagsForState(st)
+    for name, mask in pairs(st.resultPolicy.EXCLUDED_FLAGS) do
+      kinds[name] = math.floor(flags / mask) % 2 ~= 0
+    end
+    local code = require("src.core.game3.scripting.natives").outcome_to_code(result or "win")
+    require("src.core.game3.rse.init").call("tv", "onBattleEnd", "TryPutPokemonTodayOnAir", nil,
+      st.battleResults, code, kinds)
+    return
+  end
   local Pokemon = require("src.core.game3.pokemon")
   local k = st.kinds or {}
   local r = st.battleResults or { catchAttempts = {} }
@@ -401,7 +430,8 @@ function BattleBridge.start(mod, game, foe, opts)
   BattleBridge._remap = remap
   BattleBridge._battleParty = battleParty
 
-  BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
+  local nativeTrainerPolicy = require("src.core.game3.battle.profile").get(session).trainerParty
+  if not nativeTrainerPolicy then BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts) end
 
   local save = game and game.save
   local done = opts.done
@@ -495,7 +525,8 @@ function BattleBridge.start(mod, game, foe, opts)
     and not wildScripted and not legendary and not roamer
     and not opts.firstBattle and not opts.oldManTutorial and not opts.firstBattleKind
     and not opts.tutorialKind
-  local startOpts = {
+  local startOpts
+  startOpts = {
     -- pokefirered/src/cable_club.c:664 BATTLE_TYPE_LINK
     link = opts.link or (foe and foe.link) or nil,
     session = session,
@@ -504,6 +535,7 @@ function BattleBridge.start(mod, game, foe, opts)
     linkFlags = opts.linkFlags,
     -- pokefirered/src/battle_controllers.c:148 InitLinkBtlControllers
     linkMaster = opts.linkMaster,
+    enigmaBerries = opts.enigmaBerries,
     hostRules = opts.link and opts.hostRules or nil,
     multi = opts.link and opts.multi or nil,
     unionRoom = opts.unionRoom,
@@ -550,7 +582,23 @@ function BattleBridge.start(mod, game, foe, opts)
     onDone = function(result)
       finish(result)
     end,
+    onResultsReady = function(result, st)
+      BattleBridge.tvBattleEnd(session, result, st)
+    end,
+    onPartyCreated = nativeTrainerPolicy and function()
+      BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
+    end or nil,
     onStarted = function()
+      local profile = require("src.core.game3.profile").forSession(session)
+      if profile.id == "ruby" or profile.id == "sapphire" then
+        local RsStats = require("src.core.game3.rse.battle_stats_rs")
+        if RsStats.firstBattle(startOpts) then
+          require("src.core.game3.encounters").resetRateModifiers()
+          require("src.core.game3.rse.first_battle_rs").onStart(session)
+        else
+          RsStats.onStarted(session, startOpts)
+        end
+      end
       -- pokefirered/src/battle_main.c:612
       if ModRuntime.wants("battle.started") then
         ModRuntime.emit("battle.started", battle_payload(Battle, opts, foe, isDouble))
@@ -624,6 +672,10 @@ function BattleBridge.start(mod, game, foe, opts)
     return true
   end
 
+  local profile = require("src.core.game3.profile").forSession(session)
+  if profile.id == "ruby" or profile.id == "sapphire" then
+    require("src.core.game3.rse.battle_stats_rs").onAccepted(session, startOpts)
+  end
   if opts.headless or opts.fade == false then
     return doStart()
   end
@@ -708,10 +760,12 @@ function BattleBridge.startFirstBattle(mod, game, opts)
   o.wild = true
   o.firstBattleKind = bp.kinds.firstBattle
   o.transitionId = opts.transitionId or C:require("battle", fb.transition)
-  -- pokeemerald/src/battle_setup.c:941
-  local okE, Encounters = pcall(require, "src.core.game3.encounters")
-  if okE and Encounters and Encounters.resetRateModifiers then
-    Encounters.resetRateModifiers()
+  -- pokeruby/src/battle_setup.c:871
+  if bp.gameId ~= "ruby" and bp.gameId ~= "sapphire" then
+    local okE, Encounters = pcall(require, "src.core.game3.encounters")
+    if okE and Encounters and Encounters.resetRateModifiers then
+      Encounters.resetRateModifiers()
+    end
   end
   return BattleBridge.start(mod, game, foe, o)
 end

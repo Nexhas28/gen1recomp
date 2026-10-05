@@ -232,12 +232,28 @@ end
 local function RomText() return require("src.core.game3.rom_text") end
 local function Util() return require("src.core.game3.rse.contest_util") end
 
+local function nativeText(key)
+  local p = require("src.core.game3.profile").forSession()
+  if p.id ~= "ruby" and p.id ~= "sapphire" then return nil end
+  local man = Vram.manifest("rse/rs_contest_gfx")
+  local bytes = man.texts and man.texts[key]
+  if not bytes then return nil end
+  local list, i = {}, 1
+  while i <= #bytes do
+    if bytes[i] == 0xFC and bytes[i + 1] == 0 then
+      list[#list + 1], list[#list + 2] = 0xFD, 1
+      i = i + 2
+    else list[#list + 1] = bytes[i]; i = i + 1 end
+  end
+  return require("src.core.game3.scripting.text_ir").decode(list, {dialect = "rs"})
+end
+
 function UI.ir(key)
-  return RomText().ir(key)
+  return nativeText(key) or RomText().ir(key)
 end
 
 function UI.has(key)
-  return RomText().has(key)
+  return nativeText(key) ~= nil or RomText().has(key)
 end
 
 function UI.plain(key, vars)
@@ -516,6 +532,10 @@ end
 function UI:mainCb()
   local sp = self:sprites()
   sp:animateAll()
+  -- pokeruby/src/contest.c:407
+  if self.man.assetLayout == "rs" then
+    require("src.core.game3.battle.anim").update(1 / 60)
+  end
   self.m.tasks:run(self)
   sp:buildOam()
   self:pal():update()
@@ -1111,9 +1131,12 @@ function UI:moveAnimStep(t, ev)
     [3] = { 48, 40, x = 48, y = 40 },
   }
   local target = c.mons[ev.target] or {}
+  local nativeRs = self.man.assetLayout == "rs"
+  local presentation
   return function()
     if not started then
       started = true
+      if nativeRs then presentation = Anim.beginContestPresentation({ headless = self.headless }) end
       local attackerPresent = Anim.present(2)
       attackerPresent.visible = true
       attackerPresent.ox, attackerPresent.oy = 0, 0
@@ -1126,11 +1149,13 @@ function UI:moveAnimStep(t, ev)
         attackerSpecies = mon.species,
         targetSpecies = target.species,
         turn = c.contest.moveAnimTurnCount,
+        phase = nativeRs and "task" or nil,
         ctx = { isContest = true, contestant = contestant, target = ev.target },
         coordinateOverrides = overrides,
         headless = self.headless,
         onEnd = function()
           ended = true
+          if presentation then Anim.endContestPresentation(presentation); presentation = nil end
           attackerPresent.ox, attackerPresent.oy = 0, 0
           attackerPresent.visible = false
           local current = self:sprite(t.monSpriteId)
@@ -1149,6 +1174,7 @@ function UI:moveAnimStep(t, ev)
       ended = true
       if present then present.ox, present.oy, present.visible = 0, 0, false end
       if current then current.x2, current.y2 = originalX2, originalY2 end
+      if presentation then Anim.endContestPresentation(presentation); presentation = nil end
     end
     if c.status[contestant].hasJudgesAttention == 0 then self:stopFlashJudgeAttentionEye(contestant) end
     self:drawUnnervedSymbols()
@@ -2226,8 +2252,9 @@ UI.Host = Host
 function UI.open(opts)
   local Stack = require("src.ui.game3.stack")
   local SceneKit = require("src.ui.game3.rse.scene_kit")
-  local screen = UI.new(opts)
-  require("src.core.game3.battle.anim").reset({ headless = screen.headless, double = true })
+  local screen = ((opts and opts.sceneClass) or UI).new(opts)
+  require("src.core.game3.battle.anim").reset({ headless = screen.headless,
+    double = screen.man.assetLayout ~= "rs" })
   Host._screen = screen
   Host._step = SceneKit.stepper()
   local userDone = opts and opts.onDone
@@ -2266,7 +2293,9 @@ end
 function Host.update(dt)
   local screen = Host._screen
   if not screen then return end
-  require("src.core.game3.battle.anim").update(dt)
+  if screen.man.assetLayout ~= "rs" then
+    require("src.core.game3.battle.anim").update(dt)
+  end
   Host._step:run(dt, function(inp)
     if screen.done then return true end
     screen:frame(inp)

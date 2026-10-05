@@ -121,6 +121,13 @@ B_TXT_RSE[0x32] = "B_PARTNER_CLASS"
 B_TXT_RSE[0x33] = "B_PARTNER_NAME"
 B_TXT_RSE[0x34] = "B_BUFF3"
 
+-- pokeruby/include/battle_message.h:21
+local B_TXT_RS = { [0] = "B_BUFF1", [1] = "B_BUFF2" }
+for code = 0x02, 0x21 do B_TXT_RS[code] = TextIR.B_TXT[code + 3] end
+B_TXT_RS[0x22] = "B_26"
+for code = 0x23, 0x29 do B_TXT_RS[code] = TextIR.B_TXT[code + 4] end
+B_TXT_RS[0x2A] = "B_BUFF3"
+
 TextIR.DIALECTS = {
   frlg = {
     name = "frlg",
@@ -173,6 +180,26 @@ TextIR.DIALECTS = {
     placeholders = "data/generated/gba/text/placeholders.lua",
   },
 }
+-- pokeruby/src/string_util.c:476
+TextIR.DIALECTS.rs = {
+  name = "rs",
+  PH_NAMES = {
+    [0] = "UNKNOWN", [1] = "PLAYER", [2] = "STR_VAR_1", [3] = "STR_VAR_2",
+    [4] = "STR_VAR_3", [5] = "KUN", [6] = "RIVAL", [7] = "VERSION",
+    [8] = "EVIL_TEAM", [9] = "GOOD_TEAM", [10] = "EVIL_LEADER", [11] = "GOOD_LEADER",
+    [12] = "EVIL_LEGENDARY", [13] = "GOOD_LEGENDARY",
+  },
+  B_TXT = B_TXT_RS, B_TXT_CODE = invert(B_TXT_RS),
+  -- pokeruby/src/text.c:419
+  FONT_IDS = {
+    [0] = "FONT_RS_0", [1] = "FONT_RS_1", [2] = "FONT_RS_2", [3] = "FONT_RS_3",
+    [4] = "FONT_RS_4", [5] = "FONT_RS_5", [6] = "FONT_BRAILLE",
+  },
+  CHARMAP_EXTRA = TextIR.DIALECTS.rse.CHARMAP_EXTRA,
+  CHARMAP_RUNS = TextIR.DIALECTS.rse.CHARMAP_RUNS,
+  GENDERED_PH = TextIR.DIALECTS.rse.GENDERED_PH,
+  placeholders = "data/generated/gba/text/placeholders.lua",
+}
 for _, d in pairs(TextIR.DIALECTS) do
   d.PH_CODE = invert(d.PH_NAMES)
   d.FONT_CODE = invert(d.FONT_IDS)
@@ -183,6 +210,7 @@ TextIR.DEFAULT_DIALECT = "frlg"
 function TextIR.dialectOf(version)
   local GameVersion = require("src.core.GameVersion")
   local id = version or GameVersion.get()
+  if id == "ruby" or id == "sapphire" then return "rs" end
   local family = GameVersion.layout and GameVersion.layout(id) or nil
   if not family then
     local Profile = package.loaded["src.core.game3.profile"]

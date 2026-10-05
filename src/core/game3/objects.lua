@@ -866,6 +866,9 @@ function Objects.forDraw()
       vrec.sprite = GfxIds.spriteFor(gid)
       vrec.graphicsId = gid
       vrec.raiseY = tonumber(vo.y2) or 0
+      vrec.px, vrec.py, vrec.moving = vo.px, vo.py, vo.moving == true
+      vrec.targetX, vrec.targetY = vo.targetX, vo.targetY
+      vrec.animClock, vrec.stepFrames, vrec.stepFlip = tonumber(vo.animClock) or 0, vo.stepFrames, vo.stepFlip
       if not offMap(Objects._bounds, vrec) then
         n = n + 1
         list[n] = vrec
@@ -919,6 +922,8 @@ function Objects.blocks(tx, ty, exceptLocalId, elevation)
   for i = 1, VirtualObjects.slots() do
     local vo = VirtualObjects.nth(i)
     if vo and vo.solid == true and tonumber(vo.x) == tx and tonumber(vo.y) == ty then return true end
+    -- pokeruby/src/overworld.c:2709
+    if vo and vo.solid == true and tonumber(vo.prevX) == tx and tonumber(vo.prevY) == ty then return true end
   end
   return false
 end

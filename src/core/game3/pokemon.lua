@@ -467,8 +467,9 @@ function Pokemon.calcStats(species, level, ivs, evs, personality)
 end
 
 --- Fill battle/display stats on an opaque mon (mutates and returns mon).
-function Pokemon.applyStats(mon)
+function Pokemon.applyStats(mon, session)
   if type(mon) ~= "table" then return mon end
+  local oldMaxHp = tonumber(mon.maxHp or mon.maxhp) or 0
   local species = tonumber(mon.species or mon.speciesId) or 1
   local level = tonumber(mon.level) or 5
   local ivs = mon.ivs or {}
@@ -476,6 +477,8 @@ function Pokemon.applyStats(mon)
   local personality = mon.personality or 0
   local st = Pokemon.calcStats(species, level, ivs, evs, personality)
   mon.maxHp = st.maxHp
+  local Enigma = require("src.core.game3.rs.enigma")
+  if Enigma.matches(session) then Enigma.recordStatCalculation(oldMaxHp, st.maxHp) end
   if mon.hp == nil or mon.hp < 0 or mon.hp > st.maxHp then
     mon.hp = st.maxHp
   end

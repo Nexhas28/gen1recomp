@@ -478,6 +478,7 @@ function OwExtract.readAvatars(rom, spec)
   if not spec then return nil end
   local genders = spec.genders
   local function pair(off)
+    if not off then return nil end
     return { male = rom:get(off), female = rom:get(off + 1) }
   end
   local function states(off, n)
@@ -514,7 +515,9 @@ local function avatar_lines(av)
     out[#out + 1] = "    },\n"
   end
   for _, key in ipairs({ "linkFrlg", "linkRs" }) do
+    if av[key] then
     out[#out + 1] = ("    %s = { male = %d, female = %d },\n"):format(key, av[key].male, av[key].female)
+    end
   end
   out[#out + 1] = "    stateFlags = {\n"
   for _, g in ipairs({ "male", "female" }) do

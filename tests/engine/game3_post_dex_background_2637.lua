@@ -167,7 +167,7 @@ local GameVersion = require("src.core.GameVersion")
 for _, profile in ipairs(profiles) do
   local version = GameVersion.forSha1(profile[2])
   Versions.select(profile[2])
-  T.eq(Versions.CACHE_VERSION, 128, profile[1] .. " active edition retains shared128 cache stamp")
+  T.eq(Versions.CACHE_VERSION, 129, profile[1] .. " active edition retains shared129 cache stamp")
   local files, set = {}, {}
   for _, path in ipairs(Contract.requiredFiles(version)) do
     files[version .. "/" .. path] = "fixture"
@@ -178,10 +178,10 @@ for _, profile in ipairs(profiles) do
   local profileFs = { prefix = "" }
   profileFs.exists = function(path) return files[profileFs.prefix .. path] ~= nil end
   profileFs.read = function(path) return files[profileFs.prefix .. path] end
-  files[meta] = '{"cache_version":127}'
-  T.eq(Contract.isReady(version, profileFs), false, profile[1] .. " old127 stamp requires reimport")
   files[meta] = '{"cache_version":128}'
-  T.eq(Contract.isReady(version, profileFs), true, profile[1] .. " complete128 cache is ready")
+  T.eq(Contract.isReady(version, profileFs), false, profile[1] .. " old128 stamp requires reimport")
+  files[meta] = '{"cache_version":129}'
+  T.eq(Contract.isReady(version, profileFs), true, profile[1] .. " complete129 cache is ready")
   local count = 0
   for key, info in pairs(frlgManifests[profile[1]].terrains) do
     count = count + 1
@@ -203,5 +203,5 @@ for _, profile in ipairs(profiles) do
 end
 Versions.select("firered")
 T.eq(V.CACHE_VERSION, 14, "Emerald cache version advanced once to14")
-T.eq(require("src.import.gba.versions_frlg").CACHE_VERSION, 128, "FRLG cache version advanced once to128")
+T.eq(require("src.import.gba.versions_frlg").CACHE_VERSION, 129, "FRLG cache version advanced once to129")
 T.finish("game3_post_dex_background_2637")

@@ -357,7 +357,9 @@ function Doors.getSoundForWarp(mapId, x, y, destMap, isDoor)
     end
   end
 
-  -- src/field_door.c:510
+  -- pokeemerald/src/field_door.c:546
+  -- pokeruby/src/field_door.c:597
+  if SE.current == "emerald" then return Doors.SOUND_NORMAL, nil end
   return Doors.SOUND_SLIDING, nil
 end
 
@@ -766,5 +768,4 @@ function Doors.reset()
 end
 
 return Doors
-
 

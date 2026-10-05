@@ -931,7 +931,7 @@ function UI:cb_end()
     if self:printRanking() then g.gameEndState = 6 end
   elseif st == 6 then
     if self:printResults() then
-      B.incrementGameStat(self.session, B.GAME_STAT_POKEBLOCKS)
+      B.incrementGameStat(self.session, self.opts.nativeRS and self.linked and B.GAME_STAT_POKEBLOCKS_WITH_FRIENDS or B.GAME_STAT_POKEBLOCKS)
       g.gameEndState = 7
     end
   elseif st == 7 then

@@ -82,6 +82,10 @@ function CableCar.new(opts)
   local self = setmetatable({}, CableCar)
   self.m = Machine.new()
   self.man = self.m:manifest(CableCar.MANIFEST)
+  if opts.requireAssetLayout then
+    assert(self.man.assetLayout == opts.requireAssetLayout, "cable_car: incorrect native asset layout")
+  end
+  self.playerGfxNames, self.hikerGfxNames = opts.playerGfxNames, opts.hikerGfxNames
   self.goingDown = opts.goingDown and true or false
   self.female = opts.female and true or false
   self.random = opts.random or function() return require("src.core.game3.rng").Random() end
@@ -697,11 +701,12 @@ end
 function CableCar:createSprites()
   local sp, c = self.m.ppu.sprites, self.c
   local rval = self.random() % 65536
-  local playerGfx = gfxId(self.female and "OBJ_EVENT_GFX_RIVAL_MAY_NORMAL" or "OBJ_EVENT_GFX_RIVAL_BRENDAN_NORMAL")
-  local hikerGfx = {
-    [0] = gfxId("OBJ_EVENT_GFX_HIKER"), gfxId("OBJ_EVENT_GFX_CAMPER"), gfxId("OBJ_EVENT_GFX_PICNICKER"),
-    gfxId("OBJ_EVENT_GFX_ZIGZAGOON_1"),
+  local playerNames = self.playerGfxNames or {[0] = "OBJ_EVENT_GFX_RIVAL_BRENDAN_NORMAL", "OBJ_EVENT_GFX_RIVAL_MAY_NORMAL"}
+  local hikerNames = self.hikerGfxNames or {
+    [0] = "OBJ_EVENT_GFX_HIKER", "OBJ_EVENT_GFX_CAMPER", "OBJ_EVENT_GFX_PICNICKER", "OBJ_EVENT_GFX_ZIGZAGOON_1",
   }
+  local playerGfx, hikerGfx = gfxId(playerNames[self.female and 1 or 0]), {}
+  for i = 0, 3 do hikerGfx[i] = gfxId(hikerNames[i]) end
   local hikerCoords = { [0] = { 0, 80 }, { 240, 146 } }
   local hikerDelay = { [0] = 0, 60, 120, 170 }
   local carTpl = self:template("car", { callback = spriteCbCableCar(self), paletteTag = TAG_CABLE_CAR })

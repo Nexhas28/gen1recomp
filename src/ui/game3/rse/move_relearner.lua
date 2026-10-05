@@ -56,7 +56,13 @@ local function total_rows()
 end
 
 local function shown()
-  return math.min(MAX_SHOWN, total_rows())
+  return math.min(RseRelearner._opts and RseRelearner._opts.maxShown or MAX_SHOWN, total_rows())
+end
+
+local function text(key, ctx)
+  local opts = RseRelearner._opts
+  if opts and opts.text then return opts.text(key, ctx) end
+  return RomText.plain(key, ctx)
 end
 
 local function clamp_cursor()
@@ -87,7 +93,7 @@ end
 -- pokeemerald/src/move_relearner.c:836 ShowTeachMoveText
 local function to_list()
   RseRelearner.state = "list"
-  RseRelearner.prompt = RomText.plain("gText_TeachWhichMoveToPkmn", { stringVars = { mon_name() } })
+  RseRelearner.prompt = text("gText_TeachWhichMoveToPkmn", { stringVars = { mon_name() } })
 end
 
 local function push_message(text, cb)
@@ -147,6 +153,11 @@ end
 -- pokeemerald/src/move_relearner.c:517
 local function start_learn(moveId)
   RseRelearner._pendingMoveId = moveId
+  if RseRelearner._opts and RseRelearner._opts.startLearn then
+    return RseRelearner._opts.startLearn(RseRelearner, moveId, {
+      message = push_message, yesNo = ask_yes_no, forget = open_forget_screen, toList = to_list,
+    })
+  end
   LearnMove.begin({
     mon = RseRelearner._mon,
     moveId = moveId,
@@ -173,6 +184,7 @@ function RseRelearner.show(mon, opts)
   RseRelearner.open = true
   RseRelearner._mon = mon
   RseRelearner._session = opts.session
+  RseRelearner._opts = opts
   RseRelearner._onDone = opts.onDone
   RseRelearner._moves = MoveLearn.relearnableMoves(mon)
   RseRelearner._pendingMoveId = nil
@@ -190,7 +202,7 @@ end
 
 -- pokeemerald/src/move_relearner.c:811
 function RseRelearner.giveUpPrompt()
-  ask_yes_no(RomText.plain("gText_MoveRelearnerGiveUp", { stringVars = { mon_name() } }), function(yes)
+  ask_yes_no(text("gText_MoveRelearnerGiveUp", { stringVars = { mon_name() } }), function(yes)
     if yes then
       RseRelearner.finish(false)
     else
@@ -261,7 +273,7 @@ function RseRelearner.handleInput(input)
     local moveId = selected_move()
     if moveId then
       -- pokeemerald/src/move_relearner.c:819
-      ask_yes_no(RomText.plain("gText_MoveRelearnerTeachMoveConfirm",
+      ask_yes_no(text("gText_MoveRelearnerTeachMoveConfirm",
         { stringVars = { mon_name(), Pokemon.moveName(moveId) } }), function(yes)
         if yes then
           start_learn(moveId)
@@ -417,6 +429,7 @@ end
 function RseRelearner.draw()
   if not RseRelearner.open then return end
   if not (love and love.graphics) then return end
+  if RseRelearner._opts and RseRelearner._opts.draw then return RseRelearner._opts.draw(RseRelearner) end
   -- pokeemerald/src/move_relearner.c:415
   love.graphics.setColor(0, 0, 0, 1)
   love.graphics.rectangle("fill", 0, 0, 240, 160)

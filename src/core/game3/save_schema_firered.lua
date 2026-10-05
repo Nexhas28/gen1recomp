@@ -191,14 +191,16 @@ function Schema.newGame(opts)
   }
   -- pret new_game.c: SeedWildEncounterRng(Random()) after title SeedRngAndSetTrainerId.
   local Rng = require("src.core.game3.rng")
-  if opts.trainerIdLower ~= nil then
+  if rules.newGameTrainerIds then
+    session.trainerId, session.secretId = rules.newGameTrainerIds(opts)
+  elseif opts.trainerIdLower ~= nil then
     -- pokeemerald/src/new_game.c:84
     session.trainerId = math.floor(tonumber(opts.trainerIdLower) or 0) % 65536
   else
     session.trainerId = Rng.seedNewGame({ seed = opts.rngSeed })
   end
   -- pokefirered/src/new_game.c:56 InitPlayerTrainerId
-  session.secretId = Rng.Random()
+  if not rules.newGameTrainerIds then session.secretId = Rng.Random() end
   session.id = session.trainerId
   session.playerId = session.trainerId
   Rng.captureToSession(session)
@@ -207,6 +209,10 @@ function Schema.newGame(opts)
   rules.newGamePcItems(session.storage)
   rules.newGameInit(session, opts)
   require("src.core.game3.save_sections").newGame(session, version)
+  if rules.finishNewGameInit then
+    rules.finishNewGameInit(session, opts)
+    Rng.captureToSession(session)
+  end
   Options.ensure(session)
   -- Plan naming: text_speed / l_equals_a aliases mirror Options fields.
   session.options.text_speed = session.options.textSpeed

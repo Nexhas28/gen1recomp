@@ -11,6 +11,10 @@ local ENV_MODULES = {
 }
 
 function BattleBg.env(family)
+  if family == nil then
+    local bp = require("src.core.game3.battle.profile").get()
+    if bp.environmentModule then return require(bp.environmentModule) end
+  end
   family = family or require("src.core.game3.profile").family()
   local module = ENV_MODULES[family]
   if not module then error("battle bg: no environment module for family '" .. tostring(family) .. "'") end

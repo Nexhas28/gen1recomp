@@ -397,6 +397,8 @@ end
 function Daycare.step(session)
   session = sessionOf(session)
   if not session then return 0 end
+  local policy = require("src.core.game3.profile").forSession(session).daycare
+  if policy and policy.step then return policy.step(session) end
   local r5 = Daycare.route5Of(session)
   if r5 and speciesOf(r5.mon) ~= SPECIES_NONE then
     r5.steps = r5.steps + 1

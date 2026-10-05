@@ -425,6 +425,14 @@ function Records.remove()
   pop(Records.STACK_ID)
 end
 
+function Records.eraseBox(left, top, right, bottom)
+  local win = Records._window
+  if win and left <= win.left - 1 and top <= win.top - 1
+      and right >= win.left + win.width and bottom >= win.top + win.height then
+    Records.remove()
+  end
+end
+
 function Records.isOpen()
   return Records._window ~= nil
 end

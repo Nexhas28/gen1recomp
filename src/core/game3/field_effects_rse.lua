@@ -59,6 +59,8 @@ function FxRse.fc()
 end
 
 function FxRse.invalidate()
+  local orb = package.loaded["src.core.game3.rse.orb_effect_rs"]
+  if orb then orb.reset() end
   FxRse._list = {}
   FxRse._fc = nil
   FxRse._images = {}
@@ -347,7 +349,24 @@ local function stepEntry(e)
   return false
 end
 
+-- pokeemerald/src/data/field_effects/field_effect_objects.h:849
+local DISTORT_SCALE = {}
+do
+  local d = 0
+  for _, s in ipairs({ { 1, 4 }, { 0, 8 }, { -1, 4 }, { 0, 8 }, { -1, 4 }, { 0, 8 }, { 1, 4 }, { 0, 8 } }) do
+    for _ = 1, s[2] do
+      d = d + s[1]
+      DISTORT_SCALE[#DISTORT_SCALE + 1] = math.floor(65536 / (256 - d))
+    end
+  end
+end
+
+function FxRse.reflectionScale()
+  return DISTORT_SCALE[(FxRse._distortTick or 0) % #DISTORT_SCALE + 1]
+end
+
 function FxRse.step()
+  FxRse._distortTick = ((FxRse._distortTick or 0) + 1) % #DISTORT_SCALE
   FxRse._hookTick = ((FxRse._hookTick or 0) + 1) % 256
   if FxRse._hookTick == 0 then lazyReq("src.core.game3.rse.berry_trees").installTimeHook() end
   local keep = {}
@@ -698,7 +717,24 @@ local function drawReflection(obj, gid, frame, hflip, x2, y2, camX, camY, ox, oy
         local ix0, ix1 = math.max(left, tx * CELL), math.min(left + w, tx * CELL + CELL)
         local iy0, iy1 = math.max(top, ty * CELL), math.min(top + h, ty * CELL + CELL)
         local dw, dh = ix1 - ix0, iy1 - iy0
-        if dw > 0 and dh > 0 then
+        if dw > 0 and dh > 0 and rtype == 2 then
+          -- pokeemerald/src/field_effect_helpers.c:153
+          local pa = hflip and -FxRse.reflectionScale() or FxRse.reflectionScale()
+          local ry0 = math.max(iy0, top + 1)
+          local rdh = iy1 - ry0
+          if rdh > 0 then
+            local tyMin = h - (iy1 - 1 - top)
+            for c = ix0, ix1 - 1 do
+              local tcol = math.floor(pa * (c - left - w / 2) / 256) + w / 2
+              if tcol >= 0 and tcol < w then
+                reflQuad:setViewport(tcol, fy + tyMin, 1, rdh, iw, ih)
+                love.graphics.draw(src.image, reflQuad, c - camX, iy1 - camY, 0, 1, -1)
+              end
+            end
+          end
+          coverCells[coverN + 1], coverCells[coverN + 2] = tx, ty
+          coverN = coverN + 2
+        elseif dw > 0 and dh > 0 then
           local dx0, dy0 = ix0 - left, iy0 - top
           local sx = hflip and (w - (dx0 + dw)) or dx0
           local sy = h - (dy0 + dh)
@@ -780,6 +816,17 @@ local function coverReflections(camX, camY)
     coverPairs[p] = nil
   end
   love.graphics.setShader()
+end
+
+function FxRse.coverWorldRect(left, top, w, h, camX, camY)
+  coverN = 0
+  for ty = math.floor(top / CELL), math.floor((top + h - 1) / CELL) do
+    for tx = math.floor(left / CELL), math.floor((left + w - 1) / CELL) do
+      coverCells[coverN + 1], coverCells[coverN + 2] = tx, ty
+      coverN = coverN + 2
+    end
+  end
+  coverReflections(camX, camY)
 end
 
 local function drawReflections(camX, camY)
@@ -923,6 +970,7 @@ FxRse.SYSTEMS = {
   "src.core.game3.mirage_tower",
   "src.core.game3.faraway_island",
   "src.core.game3.special_scene_rse",
+  "src.core.game3.rse.orb_effect_rs",
 }
 
 function FxRse.collectActors(actors)

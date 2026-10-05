@@ -676,7 +676,11 @@ function Map.load(mod, game, mapId, opts)
   if fromMapId and (fromMapId ~= mapId or opts.heal) and FieldModules.enabled("vsSeeker", session) then
     require("src.core.game3.vs_seeker").mapReset(session)
   end
-  if isRse and require("src.core.game3.capabilities").gate(session, "match_call") then
+  local RsRematch = isRse and require("src.core.game3.rs.rematch")
+  if RsRematch and RsRematch.enabled(session) then
+    -- pokeruby/src/overworld.c:617
+    RsRematch.tryUpdateRandomTrainerRematchesForMap(session, mapId)
+  elseif isRse and require("src.core.game3.capabilities").gate(session, "match_call") then
     -- pokeemerald/src/overworld.c:801
     require("src.core.game3.rse.rematch").tryUpdateRandomTrainerRematchesForMap(session, mapId)
   end
@@ -721,7 +725,8 @@ function Map.load(mod, game, mapId, opts)
   -- pokefirered/src/overworld.c:809 SetCurrentAndNextWeather
   if def and def.weather ~= nil then
     local Weather = require("src.core.game3.weather")
-    Weather.apply(def.weather, { seamless = opts.seamless })
+    Weather.apply(def.weather, { seamless = opts.seamless,
+      continue = isRse and (opts.enterVia or Map._nextEnterVia) == "continue" })
   end
   if isRse and not opts.seamless and def and require("src.core.game3.dataset").isOutdoorMapType(def.mapType) then
     -- pokeemerald/src/overworld.c:857
@@ -747,8 +752,14 @@ function Map.load(mod, game, mapId, opts)
   local enterVia = opts.enterVia or Map._nextEnterVia
   Map._nextEnterVia = nil
   if Space and Space.runEnterScripts then
+    local Weather = isRse and def and def.weather ~= nil and require("src.core.game3.weather")
+    local savedBefore = Weather and Weather.getSaved()
     Space.runEnterScripts(mod or Runtime._mod, mapId, game, world,
       { seamless = opts.seamless, enterVia = enterVia, keepScript = opts.keepScript })
+    -- pokeruby/src/overworld.c:661
+    if Weather and Weather.getSaved() ~= savedBefore then
+      if opts.seamless then Weather.doCurrent() else Weather.resumePaused() end
+    end
   elseif Space and Space.onMapEnter then
     Space.onMapEnter(mod or Runtime._mod, mapId, game, world)
   end

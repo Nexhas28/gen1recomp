@@ -534,7 +534,7 @@ local CART_COLOR = {
   red = PAL.railRed, blue = PAL.railBlue, yellow = PAL.railGold,
   gold = PAL.railAmber, silver = PAL.railSilver,
   crystal = PAL.railCrystal, firered = PAL.railFireRed, leafgreen = PAL.railLeafGreen,
-  emerald = PAL.railEmerald,
+  emerald = PAL.railEmerald, ruby = PAL.railRuby, sapphire = PAL.railSapphire,
 }
 local function cartColor(version)
   return CART_COLOR[version] or PAL.green
@@ -1493,6 +1493,10 @@ local GAME_TABS = {
     color = PAL.railFireRed, label = "Fire Red" },
   { id = "leafgreen", key = "tab-leafgreen", letter = "L",
     color = PAL.railLeafGreen, label = "Leaf Green" },
+  { id = "ruby", key = "tab-ruby", letter = "R",
+    color = PAL.railRuby, label = "Ruby" },
+  { id = "sapphire", key = "tab-sapphire", letter = "S",
+    color = PAL.railSapphire, label = "Sapphire" },
   { id = "emerald", key = "tab-emerald", letter = "E",
     color = PAL.railEmerald, label = "Emerald" },
 }
@@ -4598,20 +4602,23 @@ end
 local function buildModScopeModal(imp, m)
   local options = modScopeOptions(imp)
   local pad = math.floor(18 * m.s)
-  local w = math.floor(360 * m.s)
   local gap = math.floor(8 * m.s)
+  local cols = #options > 6 and 2 or 1
+  local w = math.floor((cols == 2 and 440 or 360) * m.s)
   local headH = Kit.textHeight("button") + math.floor(12 * m.s)
   local rowH = m.btnH + gap
-  local listH = #options * rowH - gap
+  local listH = math.ceil(#options / cols) * rowH - gap
   local px, py, pw, ph = modalPanel(m, w, 2 * pad + headH + listH + gap + m.btnH)
   Kit.text("button", Strings("Show for"), px + pad, py + pad, PAL.heading)
   local x, iw, bodyY = px + pad, pw - 2 * pad, py + pad + headH
   local footY = py + ph - pad - m.btnH
   local _, rw, place, done = modalBody(imp, "_modScopePopup", x, bodyY, iw,
     footY - gap - bodyY, listH)
+  local colW = math.floor((rw - (cols - 1) * gap) / cols)
   for i, opt in ipairs(options) do
     local id = "scopepop-" .. tostring(opt.id or "all")
-    btn(imp, x, place(id, (i - 1) * rowH, m.btnH), rw, m.btnH, id, opt.label, {
+    local bx = x + ((i - 1) % cols) * (colW + gap)
+    btn(imp, bx, place(id, math.floor((i - 1) / cols) * rowH, m.btnH), colW, m.btnH, id, opt.label, {
       kind = (imp.modScope == opt.id) and "primary" or "ghost", font = "small",
       action = function()
         imp:_setModScope(opt.id)

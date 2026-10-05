@@ -20,6 +20,15 @@ Gfx.readCache = readCache
 function Gfx.manifest()
   if manifest then return manifest end
   manifest = assert(Kit.loadLua(Gfx.SUB .. "/manifest.lua"), "rse pokedex manifest missing from the cache")
+  if manifest.assetLayout == "rs" then
+    local detail = assert(Kit.loadLua("data/generated/gba/rse/pokedex_detail/manifest.lua"), "native RS pokedex detail pack missing")
+    assert(detail.assetLayout == "rs", "native RS pokedex detail pack has the wrong layout")
+    for key, value in pairs(detail) do
+      if key == "gfx" or key == "maps" or key == "palettes" then
+        for name, row in pairs(value) do manifest[key][name] = row end
+      elseif key ~= "files" then manifest[key] = value end
+    end
+  end
   return manifest
 end
 

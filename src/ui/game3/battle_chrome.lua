@@ -166,6 +166,8 @@ function BattleChrome.install(cache)
   BattleChrome._textbox = nil
   BattleChrome._playerBox = nil
   BattleChrome._enemyBox = nil
+  BattleChrome._safariBox = nil
+  BattleChrome._safariTried = false
   BattleChrome._doublesPlayerBox = nil
   BattleChrome._doublesOpponentBox = nil
   BattleChrome._doublesTried = false
@@ -194,6 +196,7 @@ function BattleChrome.install(cache)
   BattleChrome._playerBox = rgba_to_image(pb, 128, 64)
   BattleChrome._enemyBox = rgba_to_image(eb, 128, 32)
   BattleChrome._elements = rgba_to_image(el, 320, 24)
+  BattleChrome._elementsRaw, BattleChrome._rsStatus = el, {}
   -- EXP bar tiles need healthbox palette (blue); fall back to HP sheet if missing
   BattleChrome._elementsExp = rgba_to_image(elExp, 320, 24) or BattleChrome._elements
   local pinfo = m.partySummaryBar or { w = 128, h = 8 }
@@ -502,6 +505,19 @@ function BattleChrome.drawPlayerBox(x, y)
   love.graphics.draw(BattleChrome._playerBox, x, y)
 end
 
+function BattleChrome.drawSafariBox(x, y)
+  if not BattleChrome._safariTried then
+    BattleChrome._safariTried = true
+    local info = BattleChrome.manifest().safariBox or {}
+    BattleChrome._safariBox = rgba_to_image(read_bytes(battle_root() .. "/" .. (info.file or "healthbox_safari.rgba")),
+      info.w or 128, info.h or 64)
+  end
+  if not BattleChrome._safariBox then return false end
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(BattleChrome._safariBox, x, y)
+  return true
+end
+
 -- Element tile bases (pret B_INTERFACE_GFX_*)
 local HP_TEXT_TILE = 1
 local HP_BAR_LEFT_BORDER = 65
@@ -614,6 +630,56 @@ function BattleChrome.drawElementTile(ti, x, y, healthboxPal)
   if not q then return end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(sheet, q, x, y)
+end
+
+-- pokeruby/src/battle_interface.c:1669
+local RS_STATUS_VARIANT = { [0] = 21, [1] = 71, [2] = 86, [3] = 101 }
+function BattleChrome.drawRsStatusIcon(battlerId, ailment, x, y)
+  ailment = tonumber(ailment) or 0
+  if ailment < 1 or ailment > 5 or not BattleChrome._elementsRaw then return end
+  local bid = (tonumber(battlerId) or 0) % 4
+  BattleChrome._rsStatus = BattleChrome._rsStatus or {}
+  local key = bid * 8 + ailment
+  local img = BattleChrome._rsStatus[key]
+  if img == nil then
+    img = false
+    local raw = BattleChrome._elementsRaw
+    local pal = read_bytes(cache_root() .. "/rs/assets/battle_interface__gBattleInterfaceStatusIcons_DynPal.rom")
+    if pal and #pal >= 10 and love and love.image then
+      local lo, hi = pal:byte((ailment - 1) * 2 + 1, (ailment - 1) * 2 + 2)
+      local c = lo + hi * 256
+      local r = (c % 32) * 255 / 31
+      local g = (math.floor(c / 32) % 32) * 255 / 31
+      local b = (math.floor(c / 1024) % 32) * 255 / 31
+      local tile = RS_STATUS_VARIANT[bid] + (ailment - 1) * 3
+      local other = RS_STATUS_VARIANT[(bid + 1) % 4] + (ailment - 1) * 3
+      local data = love.image.newImageData(24, 8)
+      local function px(t, dx, py)
+        local tx, ty = (t % 40) * 8 + dx, math.floor(t / 40) * 8 + py
+        local o = (ty * 320 + tx) * 4
+        return raw:byte(o + 1, o + 4)
+      end
+      for i = 0, 2 do
+        for py = 0, 7 do
+          for dx = 0, 7 do
+            local r1, g1, b1, a1 = px(tile + i, dx, py)
+            local r2, g2, b2, a2 = px(other + i, dx, py)
+            if r1 ~= r2 or g1 ~= g2 or b1 ~= b2 or a1 ~= a2 then
+              data:setPixel(i * 8 + dx, py, r / 255, g / 255, b / 255, 1)
+            else
+              data:setPixel(i * 8 + dx, py, r1 / 255, g1 / 255, b1 / 255, a1 / 255)
+            end
+          end
+        end
+      end
+      img = love.graphics.newImage(data)
+      if img.setFilter then img:setFilter("nearest", "nearest") end
+    end
+    BattleChrome._rsStatus[key] = img
+  end
+  if not img then return end
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(img, x, y)
 end
 
 --- Pret EXP bar: 8 element tiles in healthbox VRAM (TAG_HEALTHBOX_PAL → blue).

@@ -216,7 +216,7 @@ function Sample.renderCry(pcm, sampleRate, params, opts)
   if not (love and love.sound and love.sound.newSoundData) then return nil, info end
   local n = math.max(1, #out)
   local pan = opts.pan
-  local channels = pan and 2 or 1
+  local channels = pan and not opts.mono and 2 or 1
   local sd = love.sound.newSoundData(n, info.outRate, 16, channels)
   local gainL, gainR = 1, 1
   if pan then
@@ -229,7 +229,7 @@ function Sample.renderCry(pcm, sampleRate, params, opts)
       sd:setSample(i, 1, v * gainL)
       sd:setSample(i, 2, v * gainR)
     else
-      sd:setSample(i, v)
+      sd:setSample(i, v * (gainL + gainR) * 0.5)
     end
   end
   return sd, info
