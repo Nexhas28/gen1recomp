@@ -41,10 +41,7 @@ end
 
 local placeholderCache = {}
 
--- pokeemerald/src/strings.c:6: each expanded placeholder is a cart string the
--- script cache also holds under its pret label, where a mod's text overrides
--- land (the rival's name, Japanese くん/ちゃん).  A value comes from the cache
--- when it has the label, and from the extract otherwise.
+-- pokeemerald/src/strings.c:6
 local function cartPlaceholders(extracted)
   local Extract = require("src.import.gba.text_placeholders_extract")
   local RomText = require("src.core.game3.rom_text")
@@ -53,12 +50,15 @@ local function cartPlaceholders(extracted)
     if label and RomText.has(label) then return RomText.plain(label) end
     return extracted[name]
   end
-  local byGender = setmetatable({}, { __index = function(_, name)
-    local pair = Extract.BY_GENDER[name]
-    if not pair then return extracted.byGender and extracted.byGender[name] end
-    return { male = value(pair.male), female = value(pair.female) }
-  end })
-  return setmetatable({ byGender = byGender }, { __index = function(_, name) return value(name) end })
+  local out, byGender = {}, {}
+  for name, v in pairs(extracted) do out[name] = v end
+  for name in pairs(Extract.SYMBOLS) do out[name] = value(name) end
+  for name, pair in pairs(extracted.byGender or {}) do byGender[name] = pair end
+  for name, pair in pairs(Extract.BY_GENDER) do
+    byGender[name] = { male = out[pair.male], female = out[pair.female] }
+  end
+  out.byGender = byGender
+  return out
 end
 Message.cartPlaceholders = cartPlaceholders
 
@@ -87,13 +87,15 @@ TextIR.setContextProvider(function(kind, dialect, ctx)
   local GameVersion = require("src.core.GameVersion")
   local s = liveSession()
   local id = (s and s.version) or GameVersion.get() or ""
+  local Sp = package.loaded["src.core.game3.scripting.space"]
+  local bundle = Sp and Sp.bundle
   local hit = placeholderCache[id]
-  if hit then return hit end
+  if hit and hit.bundle == bundle then return hit.values end
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local t = okC and CacheFs.loadActive(dialect.placeholders) or nil
   if type(t) == "table" then
-    placeholderCache[id] = cartPlaceholders(t)
-    return placeholderCache[id]
+    placeholderCache[id] = { bundle = bundle, values = cartPlaceholders(t) }
+    return placeholderCache[id].values
   end
   return nil
 end)

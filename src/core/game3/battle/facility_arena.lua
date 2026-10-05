@@ -374,11 +374,32 @@ function Fac:runStep(st, step)
   return true
 end
 
+-- pokeemerald/src/battle_arena.c:412
+local JUDGMENT_TEXTS = {
+  { Fac.WIN.PLAYER_NAME, "gText_PlayerMon1Name", "playerMon1Name" },
+  { Fac.WIN.VS, "gText_Vs", "vs" },
+  { Fac.WIN.OPPONENT_NAME, "gText_OpponentMon1Name", "opponentMon1Name" },
+  { Fac.WIN.MIND, "gText_Mind", "mind" },
+  { Fac.WIN.SKILL, "gText_Skill", "skill" },
+  { Fac.WIN.BODY, "gText_Body", "body" },
+  { Fac.WIN.JUDGMENT_TITLE, "gText_Judgment", "judgment" },
+}
+
+local function judgmentTexts()
+  local RomText = require("src.core.game3.rom_text")
+  local text, out = Data.arena().text, {}
+  for i, row in ipairs(JUDGMENT_TEXTS) do
+    out[i] = { win = row[1], ir = RomText.irOr(row[2], text[row[3]]) }
+  end
+  return out
+end
+
 -- pokeemerald/src/battle_arena.c:395
 function Fac:judgeStep(st, step)
   local j = self.window
   if step.state == "open" then
-    self.window = { fade = 0, target = 8, icons = {}, line = true, buffs = { buff1 = "0", buff2 = "0" } }
+    self.window = { fade = 0, target = 8, icons = {}, line = true, buffs = { buff1 = "0", buff2 = "0" },
+      texts = judgmentTexts() }
     self.fadeWait = true
     return false
   elseif step.state == "row" then
@@ -520,17 +541,9 @@ function Fac:draw(st)
       Chrome.userFrame(Chrome._frameType or 0, 6, 1, 18, 12)
       local W, I = A.windows, A.textInfo
       local fl = fill(st, j.buffs)
-      local RomText = require("src.core.game3.rom_text")
-      local function put(win, label, ir)
-        windowText(W[win + 1], I[win + 1], fontText(RomText.irOr(label, ir), fl))
+      for _, t in ipairs(j.texts) do
+        windowText(W[t.win + 1], I[t.win + 1], fontText(t.ir, fl))
       end
-      put(Fac.WIN.PLAYER_NAME, "gText_PlayerMon1Name", A.text.playerMon1Name)
-      put(Fac.WIN.VS, "gText_Vs", A.text.vs)
-      put(Fac.WIN.OPPONENT_NAME, "gText_OpponentMon1Name", A.text.opponentMon1Name)
-      put(Fac.WIN.MIND, "gText_Mind", A.text.mind)
-      put(Fac.WIN.SKILL, "gText_Skill", A.text.skill)
-      put(Fac.WIN.BODY, "gText_Body", A.text.body)
-      put(Fac.WIN.JUDGMENT_TITLE, "gText_Judgment", A.text.judgment)
       if j.line then
         local img = self:iconImage(Fac.ANIM.LINE)
         for i = 0, 7 do love.graphics.draw(img, 64 + i * 16 - 8, 84 - 8) end

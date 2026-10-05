@@ -68,8 +68,11 @@ end
 PyramidBag._st.count, PyramidBag._st.location = 1, "field"
 BUNDLE.text = { gText_ReturnToVar1 = { { t = "text", s = "Retourner " }, { t = "strvar", n = 1 }, { t = "eos" } },
   gText_TheField = ir("au jeu") }
+PyramidBag._st.returnTo = PyramidBag.returnTo("field")
 check(PyramidBag.description() == "Retourner au jeu", "the bag's return line names the place from the cache")
 BUNDLE.text.gText_TheField = nil
+check(PyramidBag.description() == "Retourner au jeu", "the open bag keeps the place it read")
+PyramidBag._st.returnTo = PyramidBag.returnTo("field")
 check(PyramidBag.description() == "Retourner the field", "a place missing from the cache keeps the copy")
 
 -- Ever Grande City's fly destinations (pokeemerald/src/region_map.c:343).
@@ -143,23 +146,61 @@ check(PartyMenu._cursorOptionText("CUT") == "COUPE", "a field move prints the mo
 -- Expanded placeholders (pokeemerald/src/strings.c:6): the rival's name and
 -- Japanese くん/ちゃん come from the cache, the extract's copies otherwise.
 local Message = require("src.ui.game3.message")
-local placeholders = Message.cartPlaceholders({
+local extracted = {
   RIVAL_MALE = "MAY", RIVAL_FEMALE = "BRENDAN", KUN_MALE = "", KUN_FEMALE = "", VERSION = "EMERALD",
   byGender = { RIVAL = { male = "MAY", female = "BRENDAN" }, KUN = { male = "", female = "" } },
-})
+}
 BUNDLE.text = { gText_ExpandedPlaceholder_May = ir("FLORA"), gText_ExpandedPlaceholder_Kun = ir("くん") }
+local placeholders = Message.cartPlaceholders(extracted)
 check(placeholders.byGender.RIVAL.male == "FLORA", "the rival's name reads the cache")
 check(placeholders.byGender.RIVAL.female == "BRENDAN", "a rival name missing from the cache keeps the copy")
 check(placeholders.byGender.KUN.male == "くん", "the honorific reads the cache")
 check(placeholders.VERSION == "EMERALD", "a placeholder missing from the cache keeps the copy")
+BUNDLE.text.gText_ExpandedPlaceholder_May = ir("AURA")
+check(placeholders.byGender.RIVAL.male == "FLORA", "the values are resolved once, not on every read")
 local line = { { t = "player" }, { t = "ph", code = 5, name = "KUN" }, { t = "text", s = " / " },
   { t = "ph", code = 6, name = "RIVAL" }, { t = "eos" } }
-BUNDLE.text.gText_ExpandedPlaceholder_Brendan = ir("BRICE")
-BUNDLE.text.gText_ExpandedPlaceholder_Chan = ir("ちゃん")
+BUNDLE.text = { gText_ExpandedPlaceholder_May = ir("FLORA"), gText_ExpandedPlaceholder_Kun = ir("くん"),
+  gText_ExpandedPlaceholder_Brendan = ir("BRICE"), gText_ExpandedPlaceholder_Chan = ir("ちゃん") }
+placeholders = Message.cartPlaceholders(extracted)
 check(TextIR.toPlain(line, { dialect = "rse", playerName = "RED", playerGender = 0, placeholders = placeholders })
   == "REDくん / FLORA", "a boy's line expands the honorific and May's name from the cache")
 check(TextIR.toPlain(line, { dialect = "rse", playerName = "RED", playerGender = 1, placeholders = placeholders })
   == "REDちゃん / BRICE", "a girl's line expands the honorific and Brendan's name from the cache")
+
+-- The context provider builds them once per script cache.
+local Space = package.loaded["src.core.game3.scripting.space"]
+Space.bundle = BUNDLE
+package.loaded["src.import.CacheFs"] = { loadActive = function() return extracted end }
+local first = TextIR.placeholdersFor({ dialect = "rse" })
+check(first ~= nil and TextIR.placeholdersFor({ dialect = "rse" }) == first,
+  "the provider builds the placeholders once per script cache")
+check(first.byGender.RIVAL.female == "BRICE", "the provider's placeholders read the cache")
+BUNDLE = { text = { gText_ExpandedPlaceholder_Brendan = ir("BRUNO") } }
+Space.bundle = BUNDLE
+check(TextIR.placeholdersFor({ dialect = "rse" }).byGender.RIVAL.female == "BRUNO",
+  "a new script cache rebuilds them")
+Space.bundle = nil
+
+-- The Battle Arena's judgment window reads its titles once, when it opens
+-- (pokeemerald/src/battle_arena.c:412).
+local Data = require("src.core.game3.rse.frontier.f2_data")
+Data.arena = function()
+  return { text = { playerMon1Name = ir("A"), vs = ir("VS"), opponentMon1Name = ir("B"), mind = ir("MIND"),
+    skill = ir("SKILL"), body = ir("BODY"), judgment = ir("JUDGMENT") } }
+end
+local Arena = require("src.core.game3.battle.facility_arena")
+local arena = Arena.new()
+BUNDLE.text = { gText_Mind = ir("ESPRIT") }
+arena:judgeStep({}, { state = "open" })
+local titles = {}
+for _, row in ipairs(arena.window.texts) do titles[row.win] = plain(row.ir) end
+check(titles[Arena.WIN.MIND] == "ESPRIT", "the judgment window reads a title from the cache when it opens")
+check(titles[Arena.WIN.BODY] == "BODY", "a judgment title missing from the cache keeps the copy")
+BUNDLE.text = { gText_Mind = ir("AUTRE") }
+titles = {}
+for _, row in ipairs(arena.window.texts) do titles[row.win] = plain(row.ir) end
+check(titles[Arena.WIN.MIND] == "ESPRIT", "the open window keeps the titles it read")
 
 if failed > 0 then
   print(failed .. " check(s) failed")

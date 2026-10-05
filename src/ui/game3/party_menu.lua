@@ -130,6 +130,16 @@ local function cursor_option_text(act)
 end
 PartyMenu._cursorOptionText = cursor_option_text
 
+-- pokeemerald/src/party_menu.c:2557
+local function action_texts(list)
+  local cached = PartyMenu._actionTexts
+  if cached and cached.list == list then return cached.texts end
+  local texts = {}
+  for i, act in ipairs(list) do texts[i] = cursor_option_text(act) end
+  PartyMenu._actionTexts = { list = list, texts = texts }
+  return texts
+end
+
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
 local function textInsets()
   local p = partyUi()
@@ -2869,12 +2879,13 @@ function PartyMenu.draw()
     local popX = 22
     local popY = 19 - popH
     Window.stdFrame(Window.template(popX, popY, popW, popH))
-    for i, act in ipairs(PartyMenu.ITEM_ACTIONS) do
+    local texts = action_texts(PartyMenu.ITEM_ACTIONS)
+    for i in ipairs(PartyMenu.ITEM_ACTIONS) do
       local rowY = (popY * 8) + (i - 1) * 16 + ins.actY
       if i == PartyMenu.itemActionCursor then
         Window.cursorPx(popX * 8 + ins.cursorX, rowY)
       end
-      FrlgFont.draw(cursor_option_text(act), popX * 8 + ins.actX, rowY, { colors = FrlgFont.COLOR.NORMAL })
+      FrlgFont.draw(texts[i], popX * 8 + ins.actX, rowY, { colors = FrlgFont.COLOR.NORMAL })
     end
   elseif PartyMenu.mode == "action" and p and p.drawActions then
     p.drawActions(PartyMenu, false)
@@ -2888,6 +2899,7 @@ function PartyMenu.draw()
     local popX = 19
     local popY = 19 - popH
     Window.stdFrame(Window.template(popX, popY, popW, popH))
+    local texts = action_texts(PartyMenu.ACTIONS)
     for i, act in ipairs(PartyMenu.ACTIONS) do
       local rowY = (popY * 8) + (i - 1) * 16 + ins.actY
       if i == PartyMenu.actionCursor then
@@ -2895,7 +2907,7 @@ function PartyMenu.draw()
       end
       local isFm = PartyMenu._fieldMoveNames and PartyMenu._fieldMoveNames[act]
       local col = isFm and (FrlgFont.COLOR.BLUE or FrlgFont.COLOR.MALE_NPC) or FrlgFont.COLOR.NORMAL
-      FrlgFont.draw(cursor_option_text(act), popX * 8 + ins.actX, rowY, { colors = col })
+      FrlgFont.draw(texts[i], popX * 8 + ins.actX, rowY, { colors = col })
     end
   else
     if p and p.drawPrompt then

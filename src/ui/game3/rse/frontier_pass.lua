@@ -476,6 +476,10 @@ function Map.show()
   Map.pal:beginFade(PalFade.ALL, 0, 16, 0, PalFade.WHITE)
   Map.image = nil
   Map.head = Map.headPosition()
+  Map.landmarks = {}
+  for i = 0, NUM_FACILITIES - 1 do
+    Map.landmarks[i] = { name = textOf(landmarkText(i, "name")), description = textOf(landmarkText(i, "description")) }
+  end
 end
 
 -- pokeemerald/src/frontier_pass.c:1582
@@ -564,9 +568,9 @@ function Map.draw()
   love.graphics.draw(Map.image, 0, 0)
   local lm = man().landmarks
   for i = 0, NUM_FACILITIES - 1 do
-    drawText(textOf(landmarkText(i, "name")), 160 + 4, 8 + i * 16 + 1, colors(i == Map.pos and 2 or 1), "narrow")
+    drawText(Map.landmarks[i].name, 160 + 4, 8 + i * 16 + 1, colors(i == Map.pos and 2 or 1), "narrow")
   end
-  drawText(textOf(landmarkText(Map.pos, "description")), 16 + 4, 128, colors(0))
+  drawText(Map.landmarks[Map.pos].description, 16 + 4, 128, colors(0))
   local cur = spriteFrame("cursor", 4, 16, 16, p.cursor)
   love.graphics.draw(cur, 155 + 8, Map.cursorY - 8, 0, -1, 1)
   local mark = lm[Map.pos + 1]

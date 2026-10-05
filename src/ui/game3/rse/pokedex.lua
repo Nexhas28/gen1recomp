@@ -2030,8 +2030,7 @@ function tasks.searchParam(s, inp)
   local new, rep = inp.new or {}, inp.rep or {}
   local q = s.searchState
   local mi = q.menuItem
-  local texts = searchOptionTexts(mi)
-  local maxOption = #texts - 1
+  local maxOption = #searchOptionList(mi) - 1
   if new.a or new.b then
     se(new.a and "SE_PIN" or "SE_BALL")
     if new.b then
@@ -2065,7 +2064,7 @@ function tasks.searchParam(s, inp)
   end
   if moved then
     se("SE_SELECT")
-    local t = texts[searchSel(q, mi) + 1]
+    local t = searchOptionTexts(mi)[searchSel(q, mi) + 1]
     setSearchMessage(q, t and t.description or "")
     refreshSearch(s)
   end
