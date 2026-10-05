@@ -4,6 +4,7 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local BattleChromeExtract = {}
 
@@ -725,11 +726,11 @@ function BattleChromeExtract.ready(cache, cacheRoot)
       local CacheFs = require("src.import.CacheFs")
       local bytes = CacheFs.readActive and CacheFs.readActive(rel)
       if bytes then return bytes end
-      if love and love.filesystem then bytes = love.filesystem.read(rel) end
+      if love and love.filesystem then bytes = CacheBlob.readFs(rel) end
       if bytes then return bytes end
       local file = io.open(rel, "rb")
       if not file then return nil end
-      bytes = file:read("*a"); file:close(); return bytes
+      bytes = CacheBlob.decode(rel, file:read("*a")); file:close(); return bytes
     end
     local body = read_file(root .. "/manifest.lua")
     local chunk = type(body) == "string" and load(body, "@battle/manifest.lua", "t", {})
@@ -767,7 +768,7 @@ function BattleChromeExtract.ready(cache, cacheRoot)
       if data and #data >= minSize then return true end
     end
     if love and love.filesystem and love.filesystem.read then
-      local ok, data = pcall(love.filesystem.read, rel)
+      local ok, data = pcall(CacheBlob.readFs, rel)
       if ok and data and #data >= minSize then return true end
     end
     local f = io.open(rel, "rb")

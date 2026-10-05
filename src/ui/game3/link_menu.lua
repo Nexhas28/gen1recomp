@@ -2,6 +2,7 @@ local Stack = require("src.ui.game3.stack")
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Status = require("src.core.game3.link.status")
+local CacheBlob = require("src.import.CacheBlob")
 
 local LinkMenu = {}
 
@@ -53,12 +54,12 @@ local function read_bytes(rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local okR, d = pcall(love.filesystem.read, "data/generated/gba/" .. rel)
+    local okR, d = pcall(CacheBlob.readFs, "data/generated/gba/" .. rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open("data/generated/gba/" .. rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode("data/generated/gba/" .. rel, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end

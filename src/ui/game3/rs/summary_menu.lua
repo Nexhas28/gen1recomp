@@ -7,6 +7,7 @@ local SummaryData = require("src.core.game3.summary_data")
 local Policy = require("src.ui.game3.rs.summary_policy")
 local Pal = require("src.core.game3.pal_fade")
 local Audio = require("src.core.game3.audio")
+local CacheBlob = require("src.import.CacheBlob")
 local S = {isMenu = true, open = false, PAGE = Policy.PAGE, MODE = Policy.MODE, policy = Policy}
 local layers, tiles, quads = {}, {}, {}
 local function rawMon() return S._party and S._party[S._cursor] end
@@ -275,7 +276,7 @@ local function frame(entry, index, x, y)
   if not quads[key] then quads[key] = love.graphics.newQuad(0, index * entry.h, entry.w, entry.h, image:getDimensions()) end
   love.graphics.setColor(1, 1, 1, 1); love.graphics.draw(image, quads[key], x, y)
 end
-local function read(path) return assert(love.filesystem.read(path), path) end
+local function read(path) return assert(CacheBlob.readFs(path), path) end
 local function shiny() return not Pokemon.isEgg(mon()) and Pokemon.isShiny(mon()) end
 local function nativeImage(key, tile, bank, sourceOverride)
   local palette = S._man.palettes.bg

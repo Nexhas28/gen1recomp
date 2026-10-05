@@ -5,6 +5,7 @@ local Palette = require("src.core.game3.gba_palette")
 local Sprites = require("src.core.game3.gba_sprites")
 local TileLayer = require("src.ui.game3.rse.tile_layer")
 local OwSheet = require("src.ui.game3.rse.ow_sheet")
+local CacheBlob = require("src.import.CacheBlob")
 
 local band = bit.band
 
@@ -406,7 +407,7 @@ function CableCar:loadCb()
     ppu.sprites:freeAllPalettes()
     ppu.palette:resetFade()
     self:startWeather()
-    local tiles = assert(love.filesystem.read(self.man.bgTiles), "cable_car: bg tiles missing from cache")
+    local tiles = assert(CacheBlob.readFs(self.man.bgTiles), "cable_car: bg tiles missing from cache")
     self.bg = {}
     for i = 0, 3 do self.bg[i] = TileLayer.new(tiles) end
     -- pokeemerald/src/cable_car.c:95

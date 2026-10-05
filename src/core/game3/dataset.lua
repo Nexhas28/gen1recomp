@@ -5,10 +5,11 @@ local Versions = require("src.import.gba.versions")
 local Extract = require("src.import.gba.extract_island1")
 local MapIds = require("src.core.game3.map_ids")
 local Profile = require("src.core.game3.profile")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Dataset = {}
 
-local function diskFallback(rel)
+local function diskFallbackRaw(rel)
   local override = Dataset.cacheRootOverride
   if override then
     local f = io.open(override .. "/" .. rel:gsub("^data/generated/gba/", ""), "rb")
@@ -63,6 +64,10 @@ local function diskFallback(rel)
   return nil
 end
 
+local function diskFallback(rel)
+  return CacheBlob.decode(rel, diskFallbackRaw(rel))
+end
+
 local function loveCache()
   return {
     assetWorkerSpec = function(_, root, kind, key)
@@ -82,7 +87,7 @@ local function loveCache()
         if type(bytes) == "string" then return bytes end
       end
       if love and love.filesystem then
-        local bytes = love.filesystem.read(rel)
+        local bytes = CacheBlob.readFs(rel)
         if type(bytes) == "string" then return bytes end
       end
       return diskFallback(rel)
@@ -93,7 +98,7 @@ local function loveCache()
         return CacheFs.write(rel, bytes)
       end
       if not love or not love.filesystem then return false end
-      return love.filesystem.write(rel, bytes)
+      return love.filesystem.write(rel, CacheBlob.encode(rel, bytes))
     end,
     exists = function(_, rel)
       local ok, CacheFs = pcall(require, "src.import.CacheFs")
@@ -108,7 +113,7 @@ local function loveCache()
           and love.filesystem.getInfo(rel, "file") then
         return true
       end
-      return diskFallback(rel) ~= nil
+      return diskFallbackRaw(rel) ~= nil
     end,
   }
 end

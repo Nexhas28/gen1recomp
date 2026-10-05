@@ -2,6 +2,7 @@
 
 local FrlgFont = require("src.ui.game3.frlg_font")
 local TextIR = require("src.core.game3.scripting.text_ir")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Braille = {}
 
@@ -109,17 +110,17 @@ local function read_bytes(rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local okR, d = pcall(love.filesystem.read, rel)
+    local okR, d = pcall(CacheBlob.readFs, rel)
     if okR and type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    okR, d = pcall(love.filesystem.read, alt)
+    okR, d = pcall(CacheBlob.readFs, alt)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   local candidates = { rel, "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")) }
   for _, path in ipairs(candidates) do
     local f = io.open(path, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(path, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end

@@ -8,6 +8,7 @@
 local SE = require("src.core.game3.se_ids")
 
 local MB = require("src.core.game3.mb")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Doors = {}
 
@@ -619,13 +620,13 @@ local function loadSheet(tileName, sheetFile)
   end
 
   if not bytes and love and love.filesystem and love.filesystem.read then
-    bytes = love.filesystem.read(relPath) or love.filesystem.read("doors/" .. file)
+    bytes = CacheBlob.readFs(relPath) or CacheBlob.readFs("doors/" .. file)
   end
 
   if not bytes then
     local f = io.open(relPath, "rb")
     if f then
-      bytes = f:read("*a")
+      bytes = CacheBlob.decode(relPath, f:read("*a"))
       f:close()
     end
   end

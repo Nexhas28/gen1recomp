@@ -3,6 +3,7 @@ local CachePaths = require("src.core.game3.cache_paths")
 local PokemonExtract = require("src.import.gba.pokemon_extract")
 local Versions = require("src.import.gba.versions")
 local ModRuntime = require("src.mods.Runtime")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Pokemon = {}
 
@@ -56,7 +57,7 @@ local function resolve_cache(cache)
       end
       local f = io.open(rel, "rb") or io.open("data/generated/gba/" .. rel, "rb")
       if f then
-        local data = f:read("*a")
+        local data = CacheBlob.decode(rel, f:read("*a"))
         f:close()
         return data
       end

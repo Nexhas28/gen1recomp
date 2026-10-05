@@ -4,6 +4,7 @@ local band, rshift = bit.band, bit.rshift
 local Tasks = require("src.core.game3.gba_tasks")
 
 local RsPolicy = require("src.core.game3.rs.berry_blender_policy")
+local CacheBlob = require("src.import.CacheBlob")
 local Blender = {}
 Blender.__index = Blender
 
@@ -71,7 +72,7 @@ local function readCache(path)
     if okR and s then return s end
   end
   if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(path) then
-    return love.filesystem.read(path)
+    return CacheBlob.readFs(path)
   end
   return nil
 end

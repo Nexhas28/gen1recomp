@@ -7,6 +7,7 @@ local Pokemon = require("src.core.game3.pokemon")
 local ItemsData = require("src.core.game3.items_data")
 local Strings = require("src.core.Strings")
 local Presentation = require("src.ui.game3.storage_presentation")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PcChrome = {}
 
@@ -62,12 +63,12 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local ok, d = pcall(love.filesystem.read, rel)
+    local ok, d = pcall(CacheBlob.readFs, rel)
     if ok and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open(rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
     if type(d) == "string" and #d > 0 then return d end
   end

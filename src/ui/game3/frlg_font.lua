@@ -2,6 +2,7 @@
 -- Field dialogue must use this — Gen2 Font.lua is fixed 8px and overflows the 208px box.
 
 local TextIR = require("src.core.game3.scripting.text_ir")
+local CacheBlob = require("src.import.CacheBlob")
 
 local FrlgFont = {}
 
@@ -246,15 +247,15 @@ local function loadImage(candidates)
       end
     end
     if not data and love and love.filesystem and love.filesystem.read then
-      data = love.filesystem.read(path)
+      data = CacheBlob.readFs(path)
       if not data then
-        data = love.filesystem.read("data/generated/gba/" .. (path:gsub("^data/generated/gba/", "")))
+        data = CacheBlob.readFs("data/generated/gba/" .. (path:gsub("^data/generated/gba/", "")))
       end
     end
     if not data then
       local f = io.open(path, "rb") or io.open("data/generated/gba/" .. (path:gsub("^data/generated/gba/", "")), "rb")
       if f then
-        data = f:read("*a")
+        data = CacheBlob.decode(path, f:read("*a"))
         f:close()
       end
     end

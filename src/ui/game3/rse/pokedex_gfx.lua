@@ -1,4 +1,5 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Gfx = {}
 
@@ -11,7 +12,7 @@ local function readCache(path)
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local data = okC and CacheFs and CacheFs.read and CacheFs.read(path) or nil
   if not data and love and love.filesystem and love.filesystem.getInfo(path) then
-    data = love.filesystem.read(path)
+    data = CacheBlob.readFs(path)
   end
   return data
 end

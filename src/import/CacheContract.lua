@@ -22,12 +22,12 @@ CacheContract.VERSION_FORMAT = {
   -- data/pikachu/pikachu_pic_animation.asm:340
   yellow = "rom-cache-v12-yellow2:",
   -- v8: M4A tracks retain reachable patterns and explicit entry offsets.
-  firered = "rom-cache-v24-firered:",
-  leafgreen = "rom-cache-v9-leafgreen:",
-  emerald = "rom-cache-v4-emerald:",
+  firered = "rom-cache-v25-firered:",
+  leafgreen = "rom-cache-v10-leafgreen:",
+  emerald = "rom-cache-v5-emerald:",
   -- pokeruby/src/string_util.c:408
-  ruby = "rom-cache-v6-ruby:",
-  sapphire = "rom-cache-v6-sapphire:",
+  ruby = "rom-cache-v7-ruby:",
+  sapphire = "rom-cache-v7-sapphire:",
 }
 CacheContract.MARKER_PATH = "rom-cache.complete"
 
@@ -1009,7 +1009,7 @@ function CacheContract.sourceTreeHasData(version)
     local exact = {
       read = function(path)
         local full = prefix .. path
-        if love.filesystem.getRealDirectory(full) == source then return love.filesystem.read(full) end
+        if love.filesystem.getRealDirectory(full) == source then return require("src.import.CacheBlob").readFs(full) end
       end,
       exists = function(path)
         local full = prefix .. path
