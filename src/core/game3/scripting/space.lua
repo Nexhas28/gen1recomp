@@ -744,7 +744,8 @@ function Space.install(mod)
       end
     end
     -- Direct Gen2 World:setMap (ferry/warps often skip the facade).
-    local ok, World = pcall(lazyReq, "src.world.gen2.World")
+    local World = package.loaded["src.world.gen2.World"]
+    local ok = type(World) == "table"
     if ok and World and World.setMap and not World._game3SetMap then
       local prevW = World.setMap
       World.setMap = function(self, mapId, ...)
@@ -796,7 +797,8 @@ function Space.install(mod)
 
   -- Gen2 World:busy must see game3 scripts or frozeNpcs clears mid-dialog.
   do
-    local ok, World = pcall(lazyReq, "src.world.gen2.World")
+    local World = package.loaded["src.world.gen2.World"]
+    local ok = type(World) == "table"
     if ok and World and World.busy and not World._game3Busy then
       local prevBusy = World.busy
       World.busy = function(self)

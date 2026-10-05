@@ -679,17 +679,7 @@ function Battle.start(opts)
   end
 
   local BattleBg = require("src.core.game3.battle.bg")
-  local terrain = opts.terrain
-  -- pokefirered/src/battle_main.c:689
-  if terrain == nil and (opts.mapBehavior ~= nil or opts.mapType ~= nil) then
-    terrain = BattleBg.resolveFromBehavior(opts.mapBehavior, opts.mapKind, opts.mapType)
-  end
-  if terrain == nil and opts.mapKind then
-    terrain = BattleBg.resolveFromMapKind(opts.mapKind)
-  end
-  if terrain == nil then
-    terrain = BattleBg.TERRAIN.BUILDING
-  end
+  local terrain = BattleBg.resolveOpts(opts)
   st.terrain = terrain
   -- pokefirered/src/battle_bg.c:714
   BattleBg.setTerrain(BattleBg.resolveOverride(terrain, {

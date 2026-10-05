@@ -181,6 +181,7 @@ function Sample.renderCryMix(pcm, sampleRate, params, opts)
   local gain = (tonumber(params.volume) or Sample.CRY_VOLUME) / 127
   local reverse = params.reverse and true or false
   local out = {}
+  local warm = package.loaded["src.core.game3.warm"]
   for i = 0, nOut - 1 do
     local g = env.gain(math.floor(i * frameRate / outRate)) * gain
     local acc = 0
@@ -196,6 +197,7 @@ function Sample.renderCryMix(pcm, sampleRate, params, opts)
       if acc > 1 then acc = 1 elseif acc < -1 then acc = -1 end
     end
     out[i + 1] = acc
+    if warm and i % 2048 == 2047 then warm.yield() end
   end
   local v1 = voices[1]
   local sampleFrames = v1.samples * frameRate / outRate
@@ -223,6 +225,7 @@ function Sample.renderCry(pcm, sampleRate, params, opts)
     gainL = (127 - pan) / 191
     gainR = (128 + pan) / 191
   end
+  local warm = package.loaded["src.core.game3.warm"]
   for i = 0, #out - 1 do
     local v = out[i + 1]
     if channels == 2 then
@@ -231,6 +234,7 @@ function Sample.renderCry(pcm, sampleRate, params, opts)
     else
       sd:setSample(i, v * (gainL + gainR) * 0.5)
     end
+    if warm and i % 2048 == 2047 then warm.yield() end
   end
   return sd, info
 end

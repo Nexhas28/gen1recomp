@@ -161,8 +161,18 @@ local TERRAIN_MT = {
   __index = function(_, key) return BattleChrome.terrain(key) end,
 }
 
+local function install_key(cache)
+  return tostring(cache) .. "|" .. battle_root()
+end
+
+function BattleChrome.ensureInstalled()
+  if BattleChrome._installKey == install_key(resolve_cache(nil)) and BattleChrome._manifest then return end
+  BattleChrome.install(nil)
+end
+
 function BattleChrome.install(cache)
   BattleChrome._cache = resolve_cache(cache)
+  BattleChrome._installKey = install_key(BattleChrome._cache)
   BattleChrome._manifest = nil
   BattleChrome._textbox = nil
   BattleChrome._playerBox = nil

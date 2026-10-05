@@ -47,7 +47,8 @@ end
 local function not_the_time(session)
   if require("src.core.game3.profile").family(session) == "rse" then
     -- pokeemerald/src/item_use.c:158 DisplayDadsAdviceCannotUseItemMessage
-    return (RomText.box("gText_DadsAdvice", { playerName = player_name(session) }))
+    -- pokeruby/src/item_use.c:146
+    return (RomText.box(is_rs() and "gOtherText_DadsAdvice" or "gText_DadsAdvice", { playerName = player_name(session) }))
   end
   return (RomText.box("gText_OakForbidsUseOfItemHere", { playerName = player_name(session) }))
 end

@@ -243,7 +243,7 @@ function Ui.reset(opts)
   Ui._oldManSubstate = nil
   if Message and Message.isHeld and Message.isHeld() then Message.close() end
   if not Ui._headless then
-    local okC, errC = pcall(BattleChrome.install, nil)
+    local okC, errC = pcall(BattleChrome.ensureInstalled)
     if not okC and not chromeInstallWarned then
       chromeInstallWarned = true
       print("[game3/battle.ui] BattleChrome.install failed: " .. tostring(errC))

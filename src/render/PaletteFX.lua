@@ -959,12 +959,13 @@ function PaletteFX.shadeMap()
 end
 
 local function invalidateColorCaches()
-  pcall(function() require("src.battle.BattleState").invalidate() end)
-  pcall(function() require("src.render.SpriteRenderer").invalidate() end)
+  local loaded = package.loaded
+  pcall(function() if loaded["src.battle.BattleState"] then loaded["src.battle.BattleState"].invalidate() end end)
+  pcall(function() if loaded["src.render.SpriteRenderer"] then loaded["src.render.SpriteRenderer"].invalidate() end end)
   pcall(function()
-    require("src.world.MapLoader").invalidateAll()
-    local Game = require("src.core.Game")
-    if Game.overworld and Game.overworld.map and Game.overworld.reloadMap then
+    if loaded["src.world.MapLoader"] then loaded["src.world.MapLoader"].invalidateAll() end
+    local Game = loaded["src.core.Game"]
+    if type(Game) == "table" and Game.overworld and Game.overworld.map and Game.overworld.reloadMap then
       Game.overworld:reloadMap(Game.overworld.map.id, "colors")
     end
   end)
@@ -995,8 +996,8 @@ function PaletteFX.setCustomRamp(ramp)
 end
 
 function PaletteFX.pickerActive()
-  local ok, Game = pcall(require, "src.core.Game")
-  local states = ok and Game.stack and Game.stack.states
+  local Game = package.loaded["src.core.Game"]
+  local states = type(Game) == "table" and Game.stack and Game.stack.states or nil
   local top = states and states[#states]
   return top ~= nil and top.screenId == "PaletteScreen"
 end

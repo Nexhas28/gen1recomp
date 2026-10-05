@@ -405,6 +405,15 @@ function OwSprites.getDraw(graphicsId)
   return OwSprites.get(graphicsId)
 end
 
+function OwSprites.peekDraw(graphicsId)
+  graphicsId = tonumber(graphicsId)
+  if graphicsId == nil then return nil end
+  local ov = OwSprites._overrides and OwSprites._overrides[graphicsId]
+  if ov or OwSprites._loaded[graphicsId] or not OwSprites._stream then return OwSprites.getDraw(graphicsId) end
+  OwSprites.prefetch(graphicsId, 0)
+  return nil
+end
+
 local function paletteRgb(colors)
   if type(colors) ~= "table" then return nil end
   local out = {}

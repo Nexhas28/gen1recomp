@@ -81,6 +81,21 @@ local function frlgSheetKey(env, id)
   return primary
 end
 
+function BattleBg.resolveOpts(opts)
+  local terrain = opts.terrain
+  -- pokefirered/src/battle_main.c:689
+  if terrain == nil and (opts.mapBehavior ~= nil or opts.mapType ~= nil) then
+    terrain = BattleBg.resolveFromBehavior(opts.mapBehavior, opts.mapKind, opts.mapType)
+  end
+  if terrain == nil and opts.mapKind then
+    terrain = BattleBg.resolveFromMapKind(opts.mapKind)
+  end
+  if terrain == nil then
+    terrain = BattleBg.TERRAIN.BUILDING
+  end
+  return terrain
+end
+
 function BattleBg.sheetKey(id)
   id = tonumber(id) or BattleBg._terrainId
   local env = BattleBg.env()

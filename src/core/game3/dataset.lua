@@ -376,10 +376,28 @@ function Dataset.mountExtractRoots()
 end
 
 local manifestLayouts = {}
+local lazyLayouts, LazyDef
 
 function Dataset.invalidateManifestCache()
   manifestLayouts = {}
 end
+
+lazyLayouts = setmetatable({}, { __mode = "k" })
+
+LazyDef = {
+  __index = function(def, k)
+    if k ~= "midLayout" then return nil end
+    local src = lazyLayouts[def]
+    if not src then return nil end
+    lazyLayouts[def] = nil
+    local blob = src.cache:read(src.rel)
+    local decoded = blob and require("src.import.gba.native_pack").decodeMidLayout(blob)
+    if not decoded then return nil end
+    local layout = require("src.core.game3.layout_native").fromDecoded(decoded, src.mapId, src.pair, blob)
+    rawset(def, "midLayout", layout)
+    return layout
+  end,
+}
 
 --- Bind LayoutNative handles onto map defs (FieldView needs midLayout).
 function Dataset.attachMidLayouts(maps, cache)
@@ -397,25 +415,28 @@ function Dataset.attachMidLayouts(maps, cache)
   end
   local attached = 0
   for mapId, def in pairs(maps) do
-    if def and not def.midLayout then
+    if def and not rawget(def, "midLayout") and not lazyLayouts[def] then
       local info = layouts[mapId]
       local rel = nativeRoot .. "/"
         .. ((info and info.file) or ("layouts/" .. mapId .. ".mid"))
       local blob = cache:read(rel)
-      if blob then
-        local decoded = NativePack.decodeMidLayout(blob)
-        if decoded then
-          local pair = (info and info.pair) or def.pair
-          def.midLayout = LayoutNative.fromDecoded(decoded, mapId, pair, blob)
-          local tw = decoded.trueWidth or decoded.width
-          local th = decoded.trueHeight or decoded.height
-          if tw and tw > 0 then def.width = tw end
-          if th and th > 0 then def.height = th end
-          if pair then def.pair = pair end
-          attached = attached + 1
+      if blob and #blob >= 16 and blob:sub(1, 4) == NativePack.MAGIC_MID then
+        local pair = (info and info.pair) or def.pair
+        local tw = blob:byte(11) + blob:byte(12) * 256
+        local th = blob:byte(13) + blob:byte(14) * 256
+        if tw > 0 then def.width = tw end
+        if th > 0 then def.height = th end
+        if pair then def.pair = pair end
+        if getmetatable(def) == nil then
+          lazyLayouts[def] = { cache = cache, rel = rel, mapId = mapId, pair = pair }
+          setmetatable(def, LazyDef)
+        else
+          local decoded = NativePack.decodeMidLayout(blob)
+          if decoded then def.midLayout = LayoutNative.fromDecoded(decoded, mapId, pair, blob) end
         end
+        attached = attached + 1
       end
-    elseif def and def.midLayout then
+    elseif def then
       attached = attached + 1
     end
   end

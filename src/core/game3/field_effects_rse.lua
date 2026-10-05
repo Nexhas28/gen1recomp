@@ -682,7 +682,7 @@ local ghostPose = {}
 
 local function drawReflection(obj, gid, frame, hflip, x2, y2, camX, camY, ox, oy)
   local Ow = package.loaded["src.core.game3.ow_sprites"]
-  local spr = Ow and Ow.getDraw and Ow.getDraw(gid)
+  local spr = Ow and (Ow.peekDraw or Ow.getDraw)(gid)
   if not (spr and spr.quads and spr.quads[frame]) then return false end
   ox, oy = ox or 0, oy or 0
   local cx = (obj.moving and obj.targetX or obj.cellX) + ox
@@ -871,7 +871,7 @@ local function drawReflections(camX, camY)
           for j = 1, #live do
             local eo = live[j]
             if not eo.hideReflection and eo.graphicsId and not eo.virtualId then
-              local spr = Ow.getDraw(eo.graphicsId)
+              local spr = (Ow.peekDraw or Ow.getDraw)(eo.graphicsId)
               if spr then
                 ghostPose.frame = eo.customFrame
                 local frame, flip = Ow.pose(spr, eo.facing, O.walkPhase(eo), eo.stepFlip, ghostPose)

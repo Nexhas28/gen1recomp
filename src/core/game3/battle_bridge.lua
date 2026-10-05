@@ -146,8 +146,8 @@ function BattleBridge.installWhiteoutIntercept(mod, game)
   end
   BattleBridge._whiteoutHook = onWhiteout
 
-  local ok, World = pcall(require, "src.world.gen2.World")
-  if ok and World then
+  local World = package.loaded["src.world.gen2.World"]
+  if type(World) == "table" then
     if type(World.whiteOut) == "function" and not World._game3WhiteOut then
       local prev = World.whiteOut
       World.whiteOut = function(self, ...)
@@ -398,6 +398,9 @@ function BattleBridge.start(mod, game, foe, opts)
   if not session then return nil, "no session" end
 
   BattleBridge.installWhiteoutIntercept(mod, game)
+  if not opts.headless then
+    pcall(function() require("src.core.game3.prewarm").battle(session, foe) end)
+  end
   if opts.wild and require("src.core.game3.profile").family(session) == "rse" then
     -- pokeemerald/src/battle_setup.c:417
     require("src.core.game3.rse.init").call("tv", "incrementDailyWildBattles", "IncrementDailyWildBattles", nil)
@@ -658,6 +661,9 @@ function BattleBridge.start(mod, game, foe, opts)
   do
     local StayMessage = package.loaded["src.ui.game3.message"]
     if StayMessage and StayMessage.closeStay then StayMessage.closeStay() end
+  end
+  if not opts.headless then
+    pcall(function() require("src.core.game3.prewarm").battleStart(startOpts) end)
   end
 
   local function doStart()

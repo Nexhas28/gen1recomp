@@ -15,6 +15,7 @@ local MapIds = require("src.core.game3.map_ids")
 local Profile = require("src.core.game3.profile")
 local Runtime = require("src.core.game3.runtime")
 local Audio = require("src.core.game3.audio")
+local Warm = require("src.core.game3.warm")
 local Options = require("src.core.game3.options")
 local Dataset = require("src.core.game3.dataset")
 local Display = require("src.core.game3.display")
@@ -117,6 +118,10 @@ function Game3:_enterField(session, reason, opts)
   -- pokefirered/src/fieldmap.c:100
   Runtime.start(nil, self, session, { reason = reason or "new_game" })
   Map._nextEnterVia = nil
+  pcall(function() require("src.core.game3.prewarm").session(session) end)
+  local Syms = package.loaded["src.import.gba.syms"]
+  if Syms and Syms.reset then Syms.reset() end
+  collectgarbage("collect")
   if fieldCallback then require(fieldCallback).execute() end
   if reason == "continue" then
     if lazyReq("src.core.game3.profile").family(session) == "rse" then
@@ -755,6 +760,8 @@ function Game3:update(dt)
   local okP, errP = pcall(function() lazyReq("src.render.Pipelines").update(dt) end)
   if not okP then s9log("pipelines", errP) end
   pcall(function() lazyReq("src.core.DiscordPresence").update(dt) end)
+  local okW, errW = pcall(Warm.step)
+  if not okW then s9log("warm", errW) end
   Game3.stepGC()
 end
 
