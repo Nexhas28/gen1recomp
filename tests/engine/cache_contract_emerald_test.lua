@@ -16,8 +16,8 @@ local function digest(list)
   return h
 end
 
-eq(CacheContract.markerFor("emerald", SHA), "rom-cache-v3-emerald:" .. SHA, "emerald marker")
-check(CacheContract.markerMatches("emerald", "rom-cache-v3-emerald:" .. SHA), "emerald marker matches")
+eq(CacheContract.markerFor("emerald", SHA), "rom-cache-v4-emerald:" .. SHA, "emerald marker")
+check(CacheContract.markerMatches("emerald", "rom-cache-v4-emerald:" .. SHA), "emerald marker matches")
 check(not CacheContract.markerMatches("emerald", "rom-cache-v17-firered:" .. SHA), "a FireRed marker does not")
 
 eq(#CacheContract.requiredFiles("firered"), 456, "FireRed required list size")
@@ -83,7 +83,7 @@ check(not CacheContract.cacheVersionCurrent("emerald", stale), "an emerald meta 
 
 local complete = {}
 for _, p in ipairs(em) do complete["emerald/" .. p] = "x" end
-complete["emerald/" .. CacheContract.MARKER_PATH] = "rom-cache-v3-emerald:" .. SHA
+complete["emerald/" .. CacheContract.MARKER_PATH] = "rom-cache-v4-emerald:" .. SHA
 complete["emerald/data/generated/gba/meta.json"] = emMeta
 check(CacheContract.isReady("emerald", memfs(complete)), "a complete emerald cache is ready")
 

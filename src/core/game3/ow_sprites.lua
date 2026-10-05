@@ -455,8 +455,11 @@ function OwSprites.draw(graphicsId, px, py, camX, camY, facing, walkPhase, stepF
   local frame, flip = OwSprites.pose(spr, facing, walkPhase, stepFlip, opts)
   local q = spr.quads[frame]
   if not q then return false end
-  local sx = px - camX + (16 - spr.width) / 2
-  local sy = py - camY + 16 - spr.height
+  local offX = spr.drawOffX or 0
+  -- src/sprite.c:1669
+  if flip then offX = -offX end
+  local sx = px - camX + (16 - spr.width) / 2 + offX
+  local sy = py - camY + 16 - spr.height + (spr.drawOffY or 0)
   love.graphics.setColor(1, 1, 1, opts and opts.alpha or 1)
   if flip then
     love.graphics.draw(spr.image, q, sx + spr.width, sy, 0, -1, 1)
