@@ -193,6 +193,43 @@ check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER MAY's ZIGZATON",
 BUNDLE.text.gOtherText_Unknown1 = ir(" von ")
 check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER ZIGZATON von MAY", "a European hall caption names the POKéMON first")
 
+-- Easy Chat: what the player reads prints each word translated
+-- (EasyChatText.word); what the scripts compare keeps the cart's word.
+package.loaded["src.core.game3.easy_chat_text"] = {
+  -- 1513 is 513's cart word under another id, translated differently
+  rawWord = function(id) return "RAW" .. id % 1000 end, word = function(id) return "MOT" .. id end,
+  group = function() return { words = { { id = 513, text = "RAW513" } } } end,
+}
+package.loaded["src.core.game3.rs.dewford_trend"] = { editorValid = function() return true end,
+  trySetTrendyPhrase = function() return true end }
+local Contracts = require("src.core.game3.rs.easy_chat_contracts")
+local trend = Contracts.commit({ type = 9, wordCount = 2, before = { 0xFFFF, 0xFFFF }, session = {} }, { 513, 514 })
+check(trend.stringVar2 == "MOT513 MOT514", "the trendy phrase the script prints is translated")
+check(trend.result == 1, "a new trend counts as a change")
+local same = Contracts.commit({ type = 9, wordCount = 2, before = { 1513, 514 }, session = {} }, { 513, 514 })
+check(same.result == 0, "the change is measured on the cart's words, not their translation")
+check(require("src.core.game3.rs.tv_playback").word(513) == "MOT513", "the TV prints a word translated")
+-- Gabby and Ty's last quote is printed from the cart's bytes: a translated
+-- word the cart's charset cannot hold keeps the cart's word.
+local Routes = require("src.core.game3.scripting.natives_rs_tv_routes")
+local Rse, Tv = require("src.core.game3.rse.init"), require("src.core.game3.rse.tv")
+local session, gabbyData = { version = "ruby" }, { quote = {} }
+local rseSession, tvState = Rse.session, Tv.state
+Rse.session = function() return session end
+Tv.state = function() return { gabbyAndTyData = gabbyData } end
+local function lastQuote()
+  gabbyData.quote[0] = 513
+  local ctx = {}
+  Routes.BY_NAME.GabbyAndTyGetLastQuote(ctx, nil)
+  return ctx.stringVars[1]
+end
+check(lastQuote() == "MOT513", "Gabby and Ty quote a word translated")
+local EASY = package.loaded["src.core.game3.easy_chat_text"]
+local word = EASY.word
+EASY.word = function() return "ともだち" end
+check(lastQuote() == "RAW513", "a word the cart cannot print keeps the cart's word")
+EASY.word, Rse.session, Tv.state = word, rseSession, tvState
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
