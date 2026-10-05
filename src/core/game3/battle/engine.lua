@@ -949,6 +949,7 @@ local function charge_turn(M)
   if eff == E.SOLAR_BEAM and Rules.weather.effective(M.st, ad) == "SUN" then
     M:ppReduce()
     M.noPP = true
+    M.animTurn = 1
     return false
   end
   if ModRuntime.wantsHook("battle.charge_required") then
@@ -960,6 +961,7 @@ local function charge_turn(M)
     if required == false then
       M:ppReduce()
       M.noPP = true
+      M.animTurn = 1
       return false
     end
   end
