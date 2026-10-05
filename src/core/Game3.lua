@@ -367,6 +367,10 @@ function Game3:writeOptions()
 end
 Game3.persistOptions = Game3.writeOptions
 
+function Game3:restartWithMods()
+  lazyReq("src.core.HostShell").restart()
+end
+
 function Game3:applyOptions(opts)
   opts = opts or self.options or {}
   self.options = opts

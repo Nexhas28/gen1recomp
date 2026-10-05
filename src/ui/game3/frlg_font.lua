@@ -78,7 +78,47 @@ FrlgFont.COLOR = {
   STAT = { fg = FrlgFont.STDPAL[4], shadow = FrlgFont.STDPAL[5], bg = FrlgFont.STDPAL[0] },
   DARK_GRAY = { fg = FrlgFont.STDPAL[2], shadow = FrlgFont.STDPAL[3], bg = FrlgFont.STDPAL[0] },
   DARK = { fg = FrlgFont.STDPAL[2], shadow = FrlgFont.STDPAL[3], bg = FrlgFont.STDPAL[0] },
+  -- src/option_menu.c:180
+  OPTION_VALUE = { fg = FrlgFont.STDPAL[5], shadow = FrlgFont.STDPAL[4], bg = FrlgFont.STDPAL[0] },
 }
+
+local FRLG_COLOR_IDS = {}
+for k, v in pairs(FrlgFont.COLOR_IDS) do FRLG_COLOR_IDS[k] = v end
+
+-- pokeruby/charmap.txt:391
+local RS_COLOR_IDS = {
+  TRANSPARENT = 0, DARK_GRAY = 1, DARK_GREY = 1, RED = 2, LIGHT_RED = 2, GREEN = 3, LIGHT_GREEN = 3,
+  BLUE = 4, YELLOW = 5, CYAN = 6, MAGENTA = 7, LIGHT_GRAY = 8, LIGHT_GREY = 8, BLACK = 9,
+  WHITE = 12, SKY_BLUE = 13, LIGHT_BLUE = 14, WHITE2 = 15,
+}
+
+local FRLG_COLOR_SLOTS = {
+  MALE = { 9, 8 }, GENDER_MALE = { 9, 8 }, FEMALE = { 5, 4 }, GENDER_FEMALE = { 5, 4 },
+  MALE_NPC = { 8, 3 }, FEMALE_NPC = { 4, 3 }, BLUE = { 8, 3 }, RED = { 4, 5 }, GREEN = { 6, 7 },
+  WHITE = { 1, 2 }, LIGHT = { 1, 2 }, PARTY = { 1, 2 }, STAT = { 4, 5 }, DARK_GRAY = { 2, 3 }, DARK = { 2, 3 },
+  OPTION_VALUE = { 5, 4 },
+}
+
+-- pokeruby/src/text.c:247
+local RS_COLOR_SLOTS = {
+  MALE = { 4, 8 }, GENDER_MALE = { 4, 8 }, FEMALE = { 2, 8 }, GENDER_FEMALE = { 2, 8 },
+  MALE_NPC = { 4, 8 }, FEMALE_NPC = { 2, 8 }, BLUE = { 4, 8 }, RED = { 2, 8 }, GREEN = { 3, 8 },
+  WHITE = { 12, 1 }, LIGHT = { 12, 1 }, PARTY = { 12, 1 }, STAT = { 2, 8 }, DARK_GRAY = { 1, 8 }, DARK = { 1, 8 },
+  OPTION_VALUE = { 2, 8 },
+}
+
+local function applyColorSlots(rs)
+  local slots = rs and RS_COLOR_SLOTS or FRLG_COLOR_SLOTS
+  for name, s in pairs(slots) do
+    local c = FrlgFont.COLOR[name]
+    c.fg, c.shadow = FrlgFont.STDPAL[s[1]], FrlgFont.STDPAL[s[2]]
+  end
+  local ids = rs and RS_COLOR_IDS or FRLG_COLOR_IDS
+  for k in pairs(FrlgFont.COLOR_IDS) do FrlgFont.COLOR_IDS[k] = nil end
+  for k, v in pairs(ids) do FrlgFont.COLOR_IDS[k] = v end
+end
+
+FrlgFont.applyColorSlots = applyColorSlots
 
 -- include/constants/vars.h:340
 FrlgFont.NPC_TEXT_COLOR = {
@@ -370,6 +410,7 @@ local function applyPalette(spec)
   FrlgFont.COLOR.NORMAL.fg = FrlgFont.STDPAL[colors.fg]
   FrlgFont.COLOR.NORMAL.shadow = FrlgFont.STDPAL[colors.shadow]
   FrlgFont.COLOR.NORMAL.bg = FrlgFont.STDPAL[colors.bg]
+  applyColorSlots(spec and spec.nativeLayout == "rs")
 end
 
 local function resolveSpec()
@@ -842,6 +883,33 @@ local KEYPAD_PATHS = {
   { path = "data/generated/gba/chrome/fonts/keypad_icons.rgba", w = 128, h = 32 },
 }
 
+FrlgFont.KEYPAD_WORDS = {
+  [0x00] = "A", [0x01] = "B", [0x02] = "L", [0x03] = "R", [0x04] = "START", [0x05] = "SELECT",
+  [0x06] = "UP", [0x07] = "DOWN", [0x08] = "LEFT", [0x09] = "RIGHT", [0x0A] = "UP/DN",
+  [0x0B] = "L/R", [0x0C] = "DPAD",
+}
+
+local keypadQuads = nil
+
+local function keypadWord(iconId)
+  return (FrlgFont.KEYPAD_WORDS[iconId] or "?") .. " "
+end
+
+local function keypadKnownMissing()
+  local spec = FrlgFont.sync and FrlgFont.sync()
+  if spec and spec.nativeLayout == "rs" then return true end
+  return FrlgFont._keypad == false
+end
+
+function FrlgFont.hasKeypadIcons()
+  if keypadKnownMissing() then return false end
+  if not FrlgFont._keypad then
+    FrlgFont._keypad = loadImage(KEYPAD_PATHS) or false
+    keypadQuads = nil
+  end
+  return FrlgFont._keypad ~= false
+end
+
 local reportedTags = {}
 local function unknownTag(tag)
   if os.getenv("POKEPORT_DEV") == "1" or _G.POKEPORT_DEV_MODE == true then
@@ -875,13 +943,14 @@ local colorScratchIdx = 0
 local function acquireColorScratch(c)
   colorScratchIdx = (colorScratchIdx % 4) + 1
   local cur = colorScratchPool[colorScratchIdx]
+  local normal = FrlgFont.COLOR.NORMAL
   if not c then
-    cur.fg = FrlgFont.STDPAL[2]
-    cur.shadow = FrlgFont.STDPAL[3]
+    cur.fg = normal.fg
+    cur.shadow = normal.shadow
     cur.bg = FrlgFont.STDPAL[0]
   else
-    cur.fg = c.fg or FrlgFont.STDPAL[2]
-    cur.shadow = c.shadow or FrlgFont.STDPAL[3]
+    cur.fg = c.fg or normal.fg
+    cur.shadow = c.shadow or normal.shadow
     cur.bg = c.bg or FrlgFont.STDPAL[0]
   end
   return cur
@@ -1155,7 +1224,7 @@ function FrlgFont.measure(text, opts)
     elseif ttype == "font" then
       activeOpts = { font = val or opts.font, small = opts.small, letterSpacing = opts.letterSpacing, japanese = opts.japanese, textMode = opts.textMode }
     elseif ttype == "icon" then
-      line = line + FrlgFont.KEYPAD_ICONS[val].w + ls
+      line = line + FrlgFont.keypadIconWidth(val, activeOpts) + ls
     elseif ttype == "clear" then
       line = line + val
     elseif ttype == "skip" then
@@ -1172,17 +1241,25 @@ function FrlgFont.measure(text, opts)
   return maxLine
 end
 
-local keypadQuads = nil
+function FrlgFont.keypadIconWidth(iconId, opts)
+  if not FrlgFont.hasKeypadIcons() then return FrlgFont.measure(keypadWord(iconId), opts) end
+  return FrlgFont.KEYPAD_ICONS[iconId].w
+end
+
+local WORD_OPTS = { colors = nil, font = nil, small = nil }
 
 -- src/text.c:1335
-function FrlgFont.drawKeypadIcon(iconId, x, y)
+function FrlgFont.drawKeypadIcon(iconId, x, y, opts)
   local icon = FrlgFont.KEYPAD_ICONS[iconId]
-  if not FrlgFont._keypad then
-    FrlgFont._keypad = loadImage(KEYPAD_PATHS)
-    if not FrlgFont._keypad then
-      error("FrlgFont: keypad_icons.rgba is not in the cache", 0)
+  if not FrlgFont.hasKeypadIcons() then
+    local word = keypadWord(iconId)
+    if opts then
+      WORD_OPTS.colors, WORD_OPTS.font, WORD_OPTS.small = opts.colors, opts.font, opts.small
+    else
+      WORD_OPTS.colors, WORD_OPTS.font, WORD_OPTS.small = nil, nil, nil
     end
-    keypadQuads = nil
+    FrlgFont.draw(word, x, y, WORD_OPTS)
+    return FrlgFont.measure(word, WORD_OPTS)
   end
   if not keypadQuads then
     local iw, ih = FrlgFont._keypad:getDimensions()
@@ -1239,6 +1316,8 @@ end
 
 local ADVANCE_SMALL = { small = true }
 local ADVANCE_NORMAL = {}
+local ICON_COLORS = { fg = nil, shadow = nil, bg = nil }
+local ICON_OPTS = { colors = ICON_COLORS, font = nil, small = nil }
 
 local function set_col(c)
   if type(c) == "table" then
@@ -1314,11 +1393,15 @@ function FrlgFont.draw(text, x, y, opts)
       penY = penY + pitch
       drawn = drawn + 1
     elseif ttype == "icon" then
-      local w = FrlgFont.KEYPAD_ICONS[val].w
+      local cfg, csh, cbg = curCol.fg, curCol.shadow, curCol.bg
+      local w = FrlgFont.keypadIconWidth(val, activeOpts)
       if penX + w <= maxW or penX == 0 then
-        FrlgFont.drawKeypadIcon(val, x + penX, y + penY)
+        ICON_COLORS.fg, ICON_COLORS.shadow, ICON_COLORS.bg = cfg, csh, cbg
+        ICON_OPTS.font, ICON_OPTS.small = activeOpts.font, activeOpts.small
+        FrlgFont.drawKeypadIcon(val, x + penX, y + penY, ICON_OPTS)
         penX = penX + w + ls
       end
+      curCol.fg, curCol.shadow, curCol.bg = cfg, csh, cbg
       drawn = drawn + 1
     elseif ttype == "shiftx" or ttype == "skip" then
       penX = val

@@ -783,6 +783,7 @@ tests/game3_trainer_rewards_dialogs_test.lua
 tests/game3_u12_healthbox_hp_text_test.lua
 tests/game3_ui_braille_test.lua
 tests/game3_weather_test.lua
+tests/gen2_fly_map_test.lua
 tests/save_compat/gen1_cache_selection_test.lua
 tests/save_compat/gen2_coverage_test.lua
 tests/save_compat/gen2_event_clear_test.lua

@@ -756,6 +756,18 @@ function Map.load(mod, game, mapId, opts)
     local savedBefore = Weather and Weather.getSaved()
     Space.runEnterScripts(mod or Runtime._mod, mapId, game, world,
       { seamless = opts.seamless, enterVia = enterVia, keepScript = opts.keepScript })
+    if enterVia == "continue" and session and not opts.seamless then
+      local snap = session.objectEvents
+      session.objectEvents = nil
+      if snap == nil or snap.mapId ~= mapId then
+        -- pokeemerald/src/overworld.c:1739
+        -- pokeemerald/src/overworld.c:2177
+        Space.runOnWarpIntoMap(mapId)
+      else
+        -- pokeemerald/src/overworld.c:2182
+        Objects.restoreSnapshot(snap)
+      end
+    end
     -- pokeruby/src/overworld.c:661
     if Weather and Weather.getSaved() ~= savedBefore then
       if opts.seamless then Weather.doCurrent() else Weather.resumePaused() end

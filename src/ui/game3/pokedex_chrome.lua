@@ -183,8 +183,16 @@ function PokedexChrome.getMarkerBlend()
   return c[1] / 16, c[2] / 16
 end
 
+local SMALL_OPTS, NORMAL_OPTS = { small = true }, {}
+
+local function controlInfoOpts()
+  local FrlgFont = require("src.ui.game3.frlg_font")
+  local spec = FrlgFont.sync and FrlgFont.sync()
+  return (spec and spec.nativeLayout == "rs") and NORMAL_OPTS or SMALL_OPTS
+end
+
 function PokedexChrome.measureControlInfo(str)
-  return require("src.ui.game3.frlg_font").measure(str, { small = true })
+  return require("src.ui.game3.frlg_font").measure(str, controlInfoOpts())
 end
 
 --- Draw control info text right-aligned ending at rightX (default 236), at y (default 146)
@@ -201,7 +209,7 @@ local CONTROL_INFO_COLORS = { fg = { 1, 1, 1, 1 }, shadow = { 98/255, 98/255, 98
 --- Draw control info text left-aligned starting at startX, at y (default 146)
 function PokedexChrome.drawControlInfoLeft(str, startX, y)
   require("src.ui.game3.frlg_font").draw(str, startX, y or 146, {
-    small = true,
+    small = controlInfoOpts().small,
     colors = CONTROL_INFO_COLORS,
   })
 end
