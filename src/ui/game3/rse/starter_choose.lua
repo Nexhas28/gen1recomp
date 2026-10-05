@@ -1,5 +1,6 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
 local RomText = require("src.core.game3.rom_text")
+local Strings = require("src.core.Strings")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Pal = require("src.core.game3.pal_fade")
 local Trig = require("src.core.game3.trig")
@@ -126,7 +127,7 @@ local function categoryText(species, policy)
   local nat = Pokemon.national and Pokemon.national(species) or species
   local row = dex and dex[nat]
   -- pokeemerald/src/international_string_util.c:86
-  local category = (row and row.category) or ""
+  local category = Strings((row and row.category) or "")
   if policy then return policy.categoryText(category, RomText.plain(policy.categoryKey)) end
   return category .. " " .. RomText.plain("gText_Pokemon")
 end

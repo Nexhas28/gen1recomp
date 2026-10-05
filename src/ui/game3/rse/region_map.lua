@@ -353,14 +353,20 @@ local function newState(opts)
 end
 RegionMap.newState = newState
 
+-- pokeemerald/src/region_map.c:349
+local MULTI_NAME_TABLES = { "sEverGrandeCityNames" }
+
 -- pokeemerald/src/region_map.c:1760
 function RegionMap.updateFlyText(s)
   s.flyText = nil
   if s.mapSecType > TYPE.NONE then
-    for _, m in ipairs(RegionMap.manifest().multiNameFlyDestinations) do
+    for i, m in ipairs(RegionMap.manifest().multiNameFlyDestinations) do
       if s.mapSecId == m.mapSecId then
         if flagSet(s, m.flag) then
-          s.flyText = { tall = true, name = s.mapSecName, sub = m.names[s.posWithinMapSec + 1] or "" }
+          local sub = m.names[s.posWithinMapSec + 1] or ""
+          local key = MULTI_NAME_TABLES[i] and RomText.key(MULTI_NAME_TABLES[i], s.posWithinMapSec)
+          if key and RomText.has(key) then sub = RomText.plain(key) end
+          s.flyText = { tall = true, name = s.mapSecName, sub = sub }
         end
         break
       end

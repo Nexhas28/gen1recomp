@@ -90,7 +90,7 @@ local function gameFieldMoves()
     index[label] = j - 1
     byMove[move] = label
   end
-  return { labels = labels, base = base, index = index, byMove = byMove }
+  return { labels = labels, base = base, index = index, byMove = byMove, moves = moves, texts = p.cursorOptionTexts }
 end
 
 local function fieldMoveIndex()
@@ -111,13 +111,31 @@ local function cursor_option_text(act)
   local p = partyUi()
   if p and p.actionText then return p.actionText(act, g) end
   if g then
+    -- pokeemerald/src/data/party_menu.h:658
     local fm = g.index[act]
-    if fm then return g.labels[g.base + fm + 1] end
-    return g.labels[(assert(CURSOR_OPTION[act], act)) + 1]
+    if fm then
+      local move = g.moves[fm + 1]
+      return move and Pokemon.moveName(move) or g.labels[g.base + fm + 1]
+    end
+    local i = assert(CURSOR_OPTION[act], act)
+    local key = g.texts and g.texts[i + 1]
+    if key and RomText.has(key) then return RomText.plain(key) end
+    return g.labels[i + 1]
   end
   local fm = FIELD_MOVE_INDEX[act]
   if fm then return RomText.at("sCursorOptions", CURSOR_OPTION_FIELD_MOVES + fm) end
   return RomText.at("sCursorOptions", (assert(CURSOR_OPTION[act], act)))
+end
+PartyMenu._cursorOptionText = cursor_option_text
+
+-- pokeemerald/src/party_menu.c:2557
+local function action_texts(list)
+  local cached = PartyMenu._actionTexts
+  if cached and cached.list == list then return cached.texts end
+  local texts = {}
+  for i, act in ipairs(list) do texts[i] = cursor_option_text(act) end
+  PartyMenu._actionTexts = { list = list, texts = texts }
+  return texts
 end
 
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
@@ -2859,12 +2877,13 @@ function PartyMenu.draw()
     local popX = 22
     local popY = 19 - popH
     Window.stdFrame(Window.template(popX, popY, popW, popH))
-    for i, act in ipairs(PartyMenu.ITEM_ACTIONS) do
+    local texts = action_texts(PartyMenu.ITEM_ACTIONS)
+    for i in ipairs(PartyMenu.ITEM_ACTIONS) do
       local rowY = (popY * 8) + (i - 1) * 16 + ins.actY
       if i == PartyMenu.itemActionCursor then
         Window.cursorPx(popX * 8 + ins.cursorX, rowY)
       end
-      FrlgFont.draw(cursor_option_text(act), popX * 8 + ins.actX, rowY, { colors = FrlgFont.COLOR.NORMAL })
+      FrlgFont.draw(texts[i], popX * 8 + ins.actX, rowY, { colors = FrlgFont.COLOR.NORMAL })
     end
   elseif PartyMenu.mode == "action" and p and p.drawActions then
     p.drawActions(PartyMenu, false)
@@ -2878,6 +2897,7 @@ function PartyMenu.draw()
     local popX = 19
     local popY = 19 - popH
     Window.stdFrame(Window.template(popX, popY, popW, popH))
+    local texts = action_texts(PartyMenu.ACTIONS)
     for i, act in ipairs(PartyMenu.ACTIONS) do
       local rowY = (popY * 8) + (i - 1) * 16 + ins.actY
       if i == PartyMenu.actionCursor then
@@ -2885,7 +2905,7 @@ function PartyMenu.draw()
       end
       local isFm = PartyMenu._fieldMoveNames and PartyMenu._fieldMoveNames[act]
       local col = isFm and (FrlgFont.COLOR.BLUE or FrlgFont.COLOR.MALE_NPC) or FrlgFont.COLOR.NORMAL
-      FrlgFont.draw(cursor_option_text(act), popX * 8 + ins.actX, rowY, { colors = col })
+      FrlgFont.draw(texts[i], popX * 8 + ins.actX, rowY, { colors = col })
     end
   else
     if p and p.drawPrompt then

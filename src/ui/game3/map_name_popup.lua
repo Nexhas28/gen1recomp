@@ -155,7 +155,7 @@ local function rsePrint()
     local idx = pyramid.location(sess) == pyramid.LOCATION.TOP and #headers or
       (tonumber(pyramid.frontier(sess).curChallengeBattleNum) or 0) + 1
     local ref = headers[idx]
-    if ref then name = require("src.core.game3.scripting.text_ir").toPlain(ref.ir) end
+    if ref then name = require("src.core.game3.scripting.text_ir").toPlain(RomText.refIr(ref)) end
   elseif sec == rseConstants():id("region_map_sections", "MAPSEC_SECRET_BASE") then
     -- pokeemerald/src/secret_base.c:735
     local sb = R.system("secretBase")
