@@ -134,6 +134,65 @@ check(Entries.ready(entriesCache("return { [277] = { descriptionLabel = \"DexDes
   "an R/S cache with the labels keeps its entries")
 Registry.active = active
 
+-- Native screens that keep a cart string in their pack under its pret label
+-- read the script cache's text under that label first.
+local COPY = { 0xBD, 0xC9, 0xCA, 0xD3, 0xFF } -- "COPY"
+local Kit = require("src.ui.game3.rse.scene_kit")
+local MANIFESTS = {
+  ["items/shop"] = { assetLayout = "rs", shopVersion = 2, textAliases = { gText_HowMayIServeYou = "gOtherText_HowMayIServe" },
+    textBytes = { gOtherText_HowMayIServe = COPY, gOtherText_Unnamed = COPY } },
+}
+Kit.manifest = function(sub)
+  if MANIFESTS[sub] then return MANIFESTS[sub] end
+  return { assetLayout = "rs", textBytes = { gOtherText_TeachWhichMove = COPY, gOtherText_Unnamed = COPY } }
+end
+local Shop = require("src.ui.game3.rs.shop_menu")
+BUNDLE.text = { gOtherText_HowMayIServe = ir("Que puis-je faire pour vous ?"),
+  gOtherText_TeachWhichMove = ir("Quelle capacité apprendre ?") }
+check(Shop.plain("gText_HowMayIServeYou") == "Que puis-je faire pour vous ?", "the shop reads the cache by its label")
+check(Shop.plain("gOtherText_Unnamed") == "COPY", "a shop line missing from the cache keeps the pack's copy")
+
+-- The move relearner, the decoration menus and the museum's painting
+-- captions, through the text function each screen hands its shared base.
+package.loaded["src.ui.game3.rse.move_relearner"] = { SUB = "tutor", show = function(_, opts) return opts end }
+local tutorText = require("src.ui.game3.rs.move_relearner").show({}, {}).text
+check(tutorText("gText_TeachWhichMoveToPkmn") == "Quelle capacité apprendre ?", "the move relearner reads the cache by its label")
+check(tutorText("gOtherText_Unnamed") == "COPY", "a move relearner line missing from the cache keeps the pack's copy")
+BUNDLE.text.gOtherText_TeachWhichMove = ir("Autre texte")
+check(tutorText("gText_TeachWhichMoveToPkmn") == "Quelle capacité apprendre ?", "a screen resolves its text once while it is open")
+tutorText = require("src.ui.game3.rs.move_relearner").show({}, {}).text
+check(tutorText("gText_TeachWhichMoveToPkmn") == "Autre texte", "and again when it opens")
+
+package.loaded["src.ui.game3.rse.decoration"] = { open = function(opts) return opts end }
+package.loaded["src.core.game3.rse.decoration"] = { manifest = function()
+  return { textBytes = { gSecretBaseText_DecorReturned = COPY, gSecretBaseText_NoDecor = COPY }, strings = {} }
+end }
+package.loaded["src.core.game3.rse.decoration_inventory"] = { categoryName = function() return "" end }
+local decorText = require("src.ui.game3.rs.decoration").open().text
+BUNDLE.text = { gSecretBaseText_DecorReturned = ir("La décoration est retournée au PC.") }
+check(decorText("gText_DecorationReturnedToPC") == "La décoration est retournée au PC.", "the decoration menus read the cache by their labels")
+check(decorText("gText_NoDecorationHere") == "COPY", "a decoration line missing from the cache keeps the pack's copy")
+
+package.loaded["src.ui.game3.rse.contest_painting"] = { ID = "contest_painting", SUB = "contest_painting" }
+local Painting = require("src.ui.game3.rs.contest_painting")
+local PAINT = { captionLayout = { museumStart = 5, nicknameBytes = 10 },
+  captionParts = { [0] = { prefix = "gContestPaintingCool1", suffix = "gContestPaintingCool2" } },
+  textBytes = { gContestPaintingCool1 = COPY, gContestPaintingCool2 = COPY } }
+BUNDLE.text = { gContestPaintingCool1 = ir("Le POKéMON ") }
+check(Painting.caption(5, { nickname = "ZIGZATON", contestCategory = 0 }, nil, PAINT) == "Le POKéMON ZIGZATONCOPY",
+  "a painting's caption reads the cache by its labels, the pack's copy where the cache has none")
+-- pokeruby/src/contest_painting.c:234: the European carts name the POKéMON
+-- first ("ZIGZATON von MAY"), the US and Japanese ones the trainer.
+PAINT.rankNames = { [0] = "gContestRankNormal" }
+PAINT.hallCaption, PAINT.hallPossessive = "gContestText_ContestWinner", "gOtherText_Unknown1"
+PAINT.captionLayout.hallLatinControl = {}
+PAINT.textBytes.gContestRankNormal, PAINT.textBytes.gContestText_ContestWinner, PAINT.textBytes.gOtherText_Unknown1 = COPY, COPY, COPY
+local winner = { nickname = "ZIGZATON", trainerName = "MAY", contestCategory = 0 }
+BUNDLE.text = { gContestRankNormal = ir("NORMAL "), gContestText_ContestWinner = ir("WINNER "), gOtherText_Unknown1 = ir("'s ") }
+check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER MAY's ZIGZATON", "the US hall caption names the trainer first")
+BUNDLE.text.gOtherText_Unknown1 = ir(" von ")
+check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER ZIGZATON von MAY", "a European hall caption names the POKéMON first")
+
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
