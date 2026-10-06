@@ -254,6 +254,16 @@ local menu = { ACTIONS = { "SUMMARY", "CANCEL" }, actionCursor = 1,
   _actionTextsFor = function(list) resolved = resolved + 1 return { "RESUME", "RETOUR" } end }
 PartyData.drawActions(menu, false)
 check(drawn[2] == "RESUME" and drawn[3] == "RETOUR" and resolved == 1, "the action menu draws the texts resolved for its list")
+package.loaded["src.core.game3.pokemon"].displayName = function(mon) return mon.nickname end
+BUNDLE.text = { ["PartyMenuPromptTexts[5]"] = { { t = "text", s = "Que faire avec " }, { t = "strvar", n = 1 },
+  { t = "text", s = "?" }, { t = "eos" } } }
+drawn, menu.ACTIONS, menu._party, menu.cursor = {}, { "SUMMARY", "CANCEL" }, { { nickname = "POUSSIFEU" } }, 1
+PartyData.drawActions(menu, false)
+check(drawn[1] == "Que faire avec POUSSIFEU?", "the action prompt reads the cache and names the POKeMON")
+BUNDLE.text = {}
+drawn = {}
+PartyData.drawActions(menu, false)
+check(drawn[1] == "Que faire avec POUSSIFEU?", "the prompt resolved for this menu is drawn again without a lookup")
 package.loaded["src.ui.game3.frlg_font"], package.loaded["src.ui.game3.chrome"] = font, chrome
 package.loaded["src.ui.game3.rs.menu_cursor"], package.loaded["src.ui.game3.rs.party_chrome"] = cursor, partyChrome
 if failed > 0 then
