@@ -767,7 +767,8 @@ end
 
 Game3.GC_BUDGET_SEC = 0.0003
 Game3.GC_MAX_STEPS = 64
-Game3.GC_CEILING_KB = 1024 * 1024
+Game3.GC_CEILING_KB = 256 * 1024
+Game3._gcNextKB = nil
 
 function Game3.stepGC()
   if not collectgarbage then return end
@@ -782,7 +783,10 @@ function Game3.stepGC()
   else
     collectgarbage("step", 1)
   end
-  if collectgarbage("count") > Game3.GC_CEILING_KB then collectgarbage("collect") end
+  if collectgarbage("count") > (Game3._gcNextKB or Game3.GC_CEILING_KB) then
+    collectgarbage("collect")
+    Game3._gcNextKB = math.max(Game3.GC_CEILING_KB, collectgarbage("count") * 2)
+  end
 end
 
 function Game3:_drawHud(w, h)
@@ -1305,6 +1309,7 @@ local SOFT_RESET = {
   { "src.ui.game3.teachy_tv", closeFlag("open") },
   { "src.ui.game3.slot_machine", closeFlag("open") },
   { "src.ui.game3.mod_manager", closeFlag("open") },
+  { "src.ui.game3.controls_menu", "close" },
   { "src.ui.game3.shaderfx_menu", "close" },
   { "src.ui.game3.prize_corner", "reset" },
   { "src.ui.game3.stat_growth", closeFlag("_open") },

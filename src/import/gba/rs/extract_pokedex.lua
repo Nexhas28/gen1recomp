@@ -30,7 +30,8 @@ end
 function M.run(rom, cache, opts)
   local c = A.context(rom, cache, opts, M.SUB)
   local man = {screen = "pokedex", coverage = "native_list_detail_search_backgrounds_and_search_tables", gfx = {}, maps = {}, layers = {}, palettes = {}}
-  local pals = {hoenn = c:pal("gPokedexMenu_Pal", 96), national = c:pal(N .. "sNationalPokedexPalette", 96),
+  -- pokeruby/src/pokedex.c:1967
+  local pals = {hoenn = c:palAt(c:off("gPokedexMenu_Pal"), 96), national = c:pal(N .. "sNationalPokedexPalette", 96),
     searchResults = c:pal(N .. "sPokedexSearchPalette", 96), search = c:pal("gPokedexMenuSearch_Pal", 64)}
   for k, p in pairs(pals) do man.palettes[k] = K.palList(p, 0, k == "search" and 64 or 96) end
   local gs = {}

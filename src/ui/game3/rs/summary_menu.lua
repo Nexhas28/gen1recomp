@@ -393,15 +393,20 @@ local function portrait()
   local img, q = Ui.ballQuad(Balls.ballIdForItem(m.pokeball), 0)
   if img and S._ballReady then love.graphics.setColor(1, 1, 1, 1); love.graphics.draw(img, q, -2, 128) end
 end
+-- pokeruby/src/region_map.c:1143
+function S.locationName(sec)
+  local C = require("src.core.game3.constants").active(S._playerState)
+  if sec == C:require("region_map_sections", "MAPSEC_EVIL_TEAM_HIDEOUT") then return RomText.plain("gOtherText_Hideout") end
+  -- pokeruby/src/region_map.c:1130
+  if sec == C:require("region_map_sections", "MAPSEC_DYNAMIC") then return RomText.plain("gOtherText_Ferry") end
+  if sec == C:require("region_map_sections", "MAPSEC_SECRET_BASE") then return RomText.plain("gOtherText_SecretBase") end
+  return require("src.ui.game3.rse.mapsec").name(sec)
+end
 local function memo()
   local m, owner = mon(), S._opts.owner or S._playerState
-  local location = m.metLocationName
-  if not location then
-    local entry = require("src.import.gba.map_sections_extract").getInfo(tonumber(m.metLocation) or 0, nil, 0)
-    location = entry and (entry.rawName or entry.name)
-  end
   local x, y = 88, 112
-  for _, run in ipairs(Policy.memo(m, owner, location)) do
+  -- pokeruby/src/pokemon_summary_screen.c:2543
+  for _, run in ipairs(Policy.memo(m, owner, S.locationName(tonumber(m.metLocation) or 0))) do
     local first = true
     for value in (run.text .. "\n"):gmatch("(.-)\n") do
       if not first then x, y = 88, y + 16 end

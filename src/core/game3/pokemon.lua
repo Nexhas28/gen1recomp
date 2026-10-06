@@ -1532,12 +1532,41 @@ local function pic_rel(kind, species, form)
   return root .. species .. ".rgba"
 end
 
-local function pic_entry(store, key, rgba)
+Pokemon.PIC_CAP = 48
+Pokemon.SPINDA_CAP = 8
+
+local picTick = 0
+
+local function pic_touch(entry)
+  picTick = picTick + 1
+  entry.used = picTick
+  return entry
+end
+
+local function pic_evict(store, cap)
+  local n, oldKey, oldUse = 0, nil, nil
+  for k, v in pairs(store) do
+    if type(v) == "table" and v.lru then
+      n = n + 1
+      if oldUse == nil or (v.used or 0) < oldUse then oldKey, oldUse = k, v.used or 0 end
+    end
+  end
+  if n >= cap and oldKey ~= nil then store[oldKey] = nil end
+end
+
+local function pic_entry(store, key, rgba, cap)
   local image = image_from_rgba(rgba, 64, 64)
   if not image then return nil end
-  local entry = { image = image, w = 64, h = 64 }
+  pic_evict(store, cap or Pokemon.PIC_CAP)
+  local entry = pic_touch({ image = image, w = 64, h = 64, lru = true })
   store[key] = entry
   return entry
+end
+
+function Pokemon.picCacheSize(store)
+  local n = 0
+  for _, v in pairs(store or {}) do if type(v) == "table" and v.lru then n = n + 1 end end
+  return n
 end
 
 -- pokefirered/src/data/pokemon_graphics/shiny_palette_table.h:415
@@ -1549,7 +1578,7 @@ local function pic(store, kind, species, form, shiny)
   local key = form > 0 and (species .. "_" .. form) or species
   if kind:find("_shiny", 1, true) then key = "shiny:" .. key end
   local hit = store[key]
-  if hit then return hit end
+  if hit then return pic_touch(hit) end
   -- false marks a pic file known to be missing, so draw loops that probe
   -- backPic then frontPic every frame do not re-read the filesystem.
   if hit == false then return nil end
@@ -1653,8 +1682,8 @@ local function spinda_pic(personality, shiny)
   local p = (tonumber(personality) or 0) % 4294967296
   local key = (shiny and "spinda_shiny:" or "spinda:") .. p
   Pokemon._spindaPics = Pokemon._spindaPics or {}
-  if Pokemon._spindaPics[key] then return Pokemon._spindaPics[key] end
-  return pic_entry(Pokemon._spindaPics, key, spinda_rgba(p, shiny))
+  if Pokemon._spindaPics[key] then return pic_touch(Pokemon._spindaPics[key]) end
+  return pic_entry(Pokemon._spindaPics, key, spinda_rgba(p, shiny), Pokemon.SPINDA_CAP)
 end
 
 -- pokefirered/src/battle_gfx_sfx_util.c:354

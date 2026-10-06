@@ -2098,6 +2098,29 @@ function tasks.exitSearchWait(s)
   end
 end
 
+-- pokeruby/src/pokedex.c:3900, pokeemerald/src/pokedex.c:4039
+function Pokedex.caughtFlashOn(timer)
+  return math.floor(timer / 16) % 2 == 1
+end
+
+-- pokeruby/src/pokedex.c:3816
+function Pokedex.caughtPalettes(pal, palettes, rs)
+  if rs then
+    for i = 0, 239 do pal[i] = 0 end
+    for i = 1, 79 do pal[32 + i] = palettes.hoenn[i + 1] end
+  end
+  local slot = rs and 80 or 48
+  local on, off = {}, {}
+  for i = 0, 255 do on[i], off[i] = pal[i], pal[i] end
+  for i = 1, 7 do
+    -- pokeruby/src/pokedex.c:3902, pokeemerald/src/pokedex.c:4041
+    on[slot + i] = palettes.hoenn[i + 1]
+    -- pokeruby/src/pokedex.c:3904, pokeemerald/src/pokedex.c:4045
+    off[slot + i] = rs and palettes.registrationFlash[i + 1] or palettes.hoenn[49 + i]
+  end
+  return pal, on, off
+end
+
 -- pokeemerald/src/pokedex.c:3957
 function tasks.caught(s)
   local st = s.state
@@ -2108,25 +2131,17 @@ function tasks.caught(s)
       s.state = 1
     end
   elseif st == 1 then
-    local pal = Gfx.bgPalette("hoenn")
     local map = Gfx.map("info")
     if nativeRs() then
-      local source = Gfx.manifest().palettes.hoenn
-      for i = 0, 239 do pal[i] = 0 end
-      for i = 1, 79 do pal[32 + i] = source[i + 1] end
       for i = 0, math.min(639, map.n - 1) do map[i] = (map[i] + 0x2000) % 65536 end
       s.descriptionPage = 0
     end
+    local pal, on, off = Pokedex.caughtPalettes(Gfx.bgPalette("hoenn"), Gfx.manifest().palettes, nativeRs())
     c.basePal = pal
     c.map = map
     s.bg = { [3] = layer("info", Gfx.renderMap(map, "menu", pal), 3) }
-    local flash = {}; for i = 0, 255 do flash[i] = pal[i] end
-    for i = 1, 7 do
-      if nativeRs() then flash[80 + i] = Gfx.manifest().palettes.registrationFlash[i + 1]
-      else flash[48 + i] = Gfx.manifest().palettes.hoenn[49 + i] end
-    end
-    c.flashPal = flash
-    c.normalImg, c.flashImg = s.bg[3].img, Gfx.renderMap(map, "menu", flash)
+    c.onPal, c.offPal = on, off
+    c.onImg, c.offImg = Gfx.renderMap(map, "menu", on), Gfx.renderMap(map, "menu", off)
     c.footprint = footprintImage(c.dexNum)
     s.state = 2
   elseif st == 2 then
@@ -2163,7 +2178,8 @@ function tasks.caughtInput(s, inp)
     s.descriptionPage = 1
     c.text = monInfo(s, c.dexNum, s.nationalEnabled, true, true)
     for _, i in ipairs({0x165, 0x185}) do c.map[i] = c.map[i] + 1 end
-    c.normalImg, c.flashImg = Gfx.renderMap(c.map, "menu", c.basePal), Gfx.renderMap(c.map, "menu", c.flashPal)
+    c.onImg, c.offImg = Gfx.renderMap(c.map, "menu", c.onPal), Gfx.renderMap(c.map, "menu", c.offPal)
+    s.bg[3].img = Gfx.renderMap(c.map, "menu", c.basePal)
     se("SE_PIN")
   end
   if (new.a and not flipped) or new.b then
@@ -2174,7 +2190,7 @@ function tasks.caughtInput(s, inp)
     return
   end
   c.palTimer = c.palTimer + 1
-  c.flash = (c.palTimer % 32) < 16
+  c.flash = Pokedex.caughtFlashOn(c.palTimer)
 end
 
 -- pokeemerald/src/pokedex.c:4049
@@ -2490,7 +2506,7 @@ local function drawCaught(s)
   if not c then return end
   local l = s.bg[3]
   if l then
-    l.img = c.flash and c.flashImg or (nativeRs() and c.normalImg or l.img)
+    if c.palTimer and c.palTimer > 0 then l.img = c.flash and c.onImg or c.offImg end
     drawLayer(l)
   end
   drawText(c.text, nativeRs() and textColors(s) or { fg = Gfx.color(c.basePal[15]), shadow = Gfx.color(c.basePal[3]), bg = { 0, 0, 0, 0 } })

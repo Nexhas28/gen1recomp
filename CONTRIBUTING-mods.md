@@ -197,6 +197,14 @@ have; on Ruby, Sapphire and Emerald those requires are reported like any other n
 adapter. `python3 tools/modkit.py gen3check` reads `"frlg"` and `"rse"` as a
 Gen 3 claim.
 
+On every Gen 3 game, `pokemon.sprite` and `pokemon.icon` fire for battle pics
+and for menu icons (party, summary, PC, trade, naming). The icon hook gets the
+Gen 1 `ctx` (`species`, `mon`, `kind = "icon"`, `data`) plus `gen3Species`,
+and the vanilla path is the cache `.rgba`. Return a PNG path to swap the icon:
+a 32x64 sheet gives both animation frames, a 32x32 image is one frame shown on
+both. Returning `nil` or `false` draws a blank icon. `ctx.mon` is `nil` where a
+screen asks by species alone (Pokedex, trainer card, a remote online party).
+
 `docs/mod-api-gen2-compat.md` is the compatibility matrix: what works on Gold,
 Silver and Crystal today (40 of the 46 registries, 40 event and 44 hook names
 shared with Gen 1, and 24 Gen 2-only ones), which registries have no Gen 2 home
