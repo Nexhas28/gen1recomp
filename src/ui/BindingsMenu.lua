@@ -9,6 +9,7 @@ local ListMenu = require("src.ui.ListMenu")
 local ChoiceBox = require("src.ui.ChoiceBox")
 local Input = require("src.core.Input")
 local Strings = require("src.core.Strings")
+local GamepadMap = require("src.core.GamepadMap")
 
 local BindingsMenu = setmetatable({}, { __index = ListMenu })
 BindingsMenu.__index = BindingsMenu
@@ -68,7 +69,17 @@ local PAD_SHORT = {
   leftshoulder = "LB", rightshoulder = "RB",
   triggerleft = "L2", triggerright = "R2",
   lefttrigger = "L2", righttrigger = "R2",
-  leftstick = "LS", rightstick = "RS", guide = "GUIDE",
+  leftstick = "LS", rightstick = "RS",
+  leftstick_up = "LS-UP", leftstick_down = "LS-DN",
+  leftstick_left = "LS-LT", leftstick_right = "LS-RT",
+  lsup = "LS-UP", lsdown = "LS-DN", lsleft = "LS-LT", lsright = "LS-RT",
+  rightstick_up = "RS-UP", rightstick_down = "RS-DN",
+  rightstick_left = "RS-LT", rightstick_right = "RS-RT",
+  rsup = "RS-UP", rsdown = "RS-DN", rsleft = "RS-LT", rsright = "RS-RT",
+  guide = "GUIDE", back = "BACK", start = "START",
+  misc1 = "MISC1", touchpad = "PAD",
+  paddle1 = "P1", paddle2 = "P2", paddle3 = "P3", paddle4 = "P4",
+  x = "X", y = "Y", a = "A", b = "B",
 }
 local function shortName(name, shorts)
   local s = shorts[name]
@@ -223,6 +234,9 @@ function BindingsMenu:storeBinding(slot, value)
   self:endCapture()
   local game = self.game
   if not (item and value and game.save and game.save.options) then return end
+  if slot == "pad" and GamepadMap.normalizePad then
+    value = GamepadMap.normalizePad(value)
+  end
   local opts = game.save.options
   opts.bindings = opts.bindings or {}
   -- Swap, never steal (#589): when the captured input is another row's

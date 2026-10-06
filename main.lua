@@ -806,6 +806,7 @@ function love.load(args)
     end
   end
   love.graphics.setDefaultFilter("nearest", "nearest")
+  pcall(function() require("src.core.GamepadMap").initGamepadMappings() end)
   -- NX: handheld 720p / docked 1080p. Runs for every boot path (launcher,
   -- editor, scripted); no-op on desktop/mobile.
   NxDisplay.sync()
