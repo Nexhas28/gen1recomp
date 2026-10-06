@@ -1047,6 +1047,18 @@ function Game:gamepadaxis(joystick, axis, value)
       end
       return
     end
+    local stickEvents = Input.stickAxisEvents and Input:stickAxisEvents(axis, value)
+    if stickEvents then
+      for i = 1, #stickEvents do
+        local ev = stickEvents[i]
+        if ev.phase == "pressed" then
+          padPressedBody(self, joystick, ev.button)
+        elseif ev.phase == "released" then
+          padReleasedBody(self, joystick, ev.button)
+        end
+      end
+      return
+    end
     Input:gamepadaxis(joystick, axis, value)
   end
   if not ModRuntime.wantsHook("input.gamepad") then return vanilla() end
