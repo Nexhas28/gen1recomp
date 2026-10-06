@@ -1,6 +1,6 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 love = love or require("tests.love_stub")
-print = function() end
+rawset(_G, "print", function() end)
 
 local root, templatesPath = arg[1], arg[2]
 assert(root and templatesPath,
