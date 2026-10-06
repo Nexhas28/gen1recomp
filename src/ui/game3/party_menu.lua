@@ -137,6 +137,7 @@ local function action_texts(list)
   PartyMenu._actionTexts = { list = list, texts = texts }
   return texts
 end
+PartyMenu._actionTextsFor = action_texts
 
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
 local function textInsets()

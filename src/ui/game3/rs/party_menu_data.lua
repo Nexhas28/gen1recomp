@@ -179,7 +179,8 @@ function Data.drawActions(ui, item)
   local Font = require("src.ui.game3.frlg_font")
   prompt(item and ui._submenuKind ~= "MAIL" and 13 or 5, item and (ui._submenuKind == "MAIL" and 18 or 21) or 17)
   require("src.ui.game3.chrome").stdFrame(left + 1, top + 1, width - 1, count * 2)
-  for i, action in ipairs(actions) do Font.draw(Data.actionText(action, ui._fieldMoveData), (left + 1) * 8, (top + 1) * 8 + (i - 1) * 16,
+  local texts = ui._actionTextsFor(actions)
+  for i in ipairs(actions) do Font.draw(texts[i], (left + 1) * 8, (top + 1) * 8 + (i - 1) * 16,
     require("src.ui.game3.rs.party_chrome").textOptions("menu")) end
   local cursor = item and ui.itemActionCursor or ui.actionCursor
   require("src.ui.game3.rs.menu_cursor").draw((left + 1) * 8, (top + 1) * 8 + (cursor - 1) * 16, (width - 1) * 8)

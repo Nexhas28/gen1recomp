@@ -242,6 +242,20 @@ check(PartyData.actionText("SUMMARY") == "RESUME", "a party action reads the cac
 check(PartyData.actionText("TAKE_MAIL") == "PRENDRE", "the mail's TAKE reads its own label")
 check(PartyData.actionText("SWITCH") == "SWITCH", "an action missing from the cache keeps the pack's copy")
 check(PartyData.actionText("CUT", { index = { CUT = 0 }, moves = { 15 } }) == "COUPE", "a field move prints its move's name")
+MANIFESTS["rse/party"] = { prompts = setmetatable({}, { __index = function() return "PROMPT" end }) }
+local drawn, resolved = {}, 0
+local font, chrome, cursor, partyChrome = package.loaded["src.ui.game3.frlg_font"], package.loaded["src.ui.game3.chrome"],
+  package.loaded["src.ui.game3.rs.menu_cursor"], package.loaded["src.ui.game3.rs.party_chrome"]
+package.loaded["src.ui.game3.frlg_font"] = { draw = function(text) drawn[#drawn + 1] = text end }
+package.loaded["src.ui.game3.chrome"] = { stdFrame = function() end }
+package.loaded["src.ui.game3.rs.menu_cursor"] = { draw = function() end }
+package.loaded["src.ui.game3.rs.party_chrome"] = { textOptions = function() return {} end }
+local menu = { ACTIONS = { "SUMMARY", "CANCEL" }, actionCursor = 1,
+  _actionTextsFor = function(list) resolved = resolved + 1 return { "RESUME", "RETOUR" } end }
+PartyData.drawActions(menu, false)
+check(drawn[2] == "RESUME" and drawn[3] == "RETOUR" and resolved == 1, "the action menu draws the texts resolved for its list")
+package.loaded["src.ui.game3.frlg_font"], package.loaded["src.ui.game3.chrome"] = font, chrome
+package.loaded["src.ui.game3.rs.menu_cursor"], package.loaded["src.ui.game3.rs.party_chrome"] = cursor, partyChrome
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
