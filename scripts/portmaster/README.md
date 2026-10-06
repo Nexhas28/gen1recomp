@@ -58,7 +58,8 @@ converting new SHADER FX presets on-device is unavailable in this package.
 
 ## Testing status
 
-The user reports that the existing standalone SBC build works on TrimUI Brick.
-That is not yet a test of this catalogue launcher. Its hardware, firmware,
-resolution, import/save, exit and suspend tests remain pending. See the project's
-`docs/portmaster-submission.md` for the testing checklist.
+Nexhas confirmed the catalogue candidate from source revision `fce5f086` works
+on TrimUI Brick on 6 October 2026. Firmware/version and individual import/save,
+exit and suspend checks have not been specified. Other devices and firmware
+remain unverified. See `docs/portmaster-submission.md` for the candidate checksum
+and testing checklist.

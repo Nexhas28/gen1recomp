@@ -36,7 +36,12 @@ The repository-built ZIP is preferred for community testing.
 
 - Existing standalone SBC build: Nexhas reports it worked on TrimUI Brick.
 - Firmware/version and exact build for that report: not yet recorded.
-- New catalogue package: no ARM hardware results yet.
+- Catalogue testing ZIP: Nexhas confirmed it works on TrimUI Brick on
+  6 October 2026, after testing the candidate supplied in this chat.
+- Tested candidate source: `fce5f08650618846ae35142475441ac65937fd2f`.
+- Supplied ZIP SHA-256: `7298d2720cf4701f48d5fd31b5f27d03f1351375730e0d0c11cb47553c3ce519`.
+- Firmware/version and individual import/save, exit and suspend checks for the
+  catalogue test: not yet specified; the report confirms general operation.
 - Discord #testing-n-dev thread: not yet created.
 
 Record build SHA/checksum, firmware/version, device and resolution with each
@@ -44,8 +49,8 @@ result. Check cold launch, missing/wrong ROM handling, import, controls,
 new game, save/reload, exit shortcut, suspend/resume, offline play, and an
 update preserving saves. Test 640x480 and a higher resolution; request help
 for AmberELEC, dArkOS/ArkOS, muOS, ROCKNIX (Libmali/Panfrost), and Knulli.
-Keep untested cells unchecked. Do not claim the old Brick result validates
-the new launcher. Retest the Brick before broad distribution.
+Keep untested cells unchecked. The Brick confirmation applies to the candidate
+identified above; it does not establish compatibility with other firmware.
 
 ## Testing-thread draft
 
@@ -56,8 +61,8 @@ extracts assets from a user-supplied supported US ROM; no ROMs or generated
 cache are included. The project owner has explicitly permitted PortMaster
 distribution of the launcher, recorded in the included license.
 
-The previous standalone SBC build worked on my TrimUI Brick. This candidate
-uses PortMaster's LÖVE 11.5 runtime and needs a fresh device test. I'm looking
+I tested this catalogue candidate on my TrimUI Brick and confirmed it works.
+It uses PortMaster's LÖVE 11.5 runtime. I'm looking
 for testing on the firmware and resolutions listed above, especially import,
 save/reload, controller exit and suspend/resume. Please include device,
 firmware, package checksum, result and `gen1recomp/log.txt` when reporting a
