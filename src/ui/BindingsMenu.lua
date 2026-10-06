@@ -25,8 +25,8 @@ local BUTTONS = {
   { id = "b", label = "B", key = "x", pad = "b" },
   { id = "start", label = "START", key = "escape", pad = "start" },
   { id = "select", label = "SELECT", key = "tab", pad = "back" },
-  { id = "speedDown", label = "SPEED -", pad = "leftshoulder", action = true },
-  { id = "speedUp", label = "SPEED +", pad = "rightshoulder", action = true },
+  { id = "speedDown", label = "SPEED -", key = "0", pad = "leftshoulder", action = true },
+  { id = "speedUp", label = "SPEED +", key = "1", pad = "rightshoulder", action = true },
 }
 BindingsMenu.BUTTONS = BUTTONS
 
@@ -35,8 +35,8 @@ BindingsMenu.GEN3_BUTTONS = {
   BUTTONS[5], BUTTONS[6], BUTTONS[7], BUTTONS[8],
   { id = "l", label = "L", key = "q", pad = "leftshoulder" },
   { id = "r", label = "R", key = "e", pad = "rightshoulder" },
-  { id = "speedDown", label = "SPEED -", pad = "triggerleft", action = true },
-  { id = "speedUp", label = "SPEED +", pad = "triggerright", action = true },
+  { id = "speedDown", label = "SPEED -", key = "0", pad = "triggerleft", action = true },
+  { id = "speedUp", label = "SPEED +", key = "1", pad = "triggerright", action = true },
 }
 
 -- a binding is a plain key string or { key, pad }; absent = the fixed
@@ -84,7 +84,8 @@ end
 local function boundRight(overlay, def)
   local pad = boundPad(overlay, def)
   if def.action then
-    return pad and shortName(pad, PAD_SHORT) or Strings("OFF")
+    local p = pad and shortName(pad, PAD_SHORT) or Strings("OFF")
+    return def.key and (def.key .. "/" .. p) or p
   end
   local key = shortName(boundKey(overlay, def), KEY_SHORT)
   if pad then return key .. "/" .. shortName(pad, PAD_SHORT) end
@@ -235,7 +236,8 @@ function BindingsMenu:storeBinding(slot, value)
   if handover == nil and item.button.action then handover = item.button.pad end
   if value ~= prev then
     for _, other in ipairs(self.items) do
-      if other ~= item and effective(opts.bindings, other.button) == value then
+      if other ~= item and not (slot == "key" and other.button.action)
+          and effective(opts.bindings, other.button) == value then
         if other.button.action then
           opts.bindings[other.button.id] = false
         else

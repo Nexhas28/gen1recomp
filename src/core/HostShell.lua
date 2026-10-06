@@ -218,28 +218,15 @@ function HostShell.pumpHostEvents()
   pcall(love.event.pump)
 end
 
+local function winApi()
+  local ok, mod = pcall(require, "src.core.WinApi")
+  if ok and type(mod) == "table" then return mod end
+  return nil
+end
+
 local function windowsModulePath()
-  local ok, ffi = pcall(require, "ffi")
-  if not ok then return nil end
-  pcall(ffi.cdef, [[
-    unsigned long GetModuleFileNameW(void *hModule, wchar_t *lpFilename, unsigned long nSize);
-    int WideCharToMultiByte(unsigned int CodePage, unsigned long dwFlags,
-      const wchar_t *lpWideCharStr, int cchWideChar,
-      char *lpMultiByteStr, int cbMultiByte,
-      const char *lpDefaultChar, int *lpUsedDefaultChar);
-  ]])
-  local okk, k32 = pcall(ffi.load, "kernel32")
-  if not okk or not k32 then return nil end
-  local buf = ffi.new("wchar_t[32768]")
-  local n = k32.GetModuleFileNameW(nil, buf, 32768)
-  if n == 0 then return nil end
-  local bytes = k32.WideCharToMultiByte(65001, 0, buf, n, nil, 0, nil, nil)
-  if not bytes or bytes <= 0 then return nil end
-  local out = ffi.new("char[?]", bytes)
-  if k32.WideCharToMultiByte(65001, 0, buf, n, out, bytes, nil, nil) <= 0 then
-    return nil
-  end
-  return ffi.string(out, bytes)
+  local api = winApi()
+  return api and api.modulePath() or nil
 end
 
 -- Restart the whole app. The obvious love.event.quit("restart") re-runs LÖVE's
@@ -300,9 +287,10 @@ function HostShell.restart()
     if type(exe) ~= "string" or exe == "" then
       exe = windowsModulePath()
     end
-    if exe and exe ~= "" then
-      local cmd = 'start "" "' .. exe:gsub("/", "\\") .. '"'
-      if os.execute(cmd) then
+    local api = winApi()
+    if api and exe and exe ~= "" then
+      exe = exe:gsub("/", "\\")
+      if api.spawn(exe, {}, { cwd = api.dirOf(exe) }) then
         love.event.quit()
         return
       end
@@ -414,10 +402,6 @@ function HostShell.quote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
--- Launch another instance of this packaged app without waiting for it.  The
--- same path works on all process-capable desktop hosts; only the shell's
--- background spelling differs.  Source checkouts include their game folder,
--- while fused releases and AppImages already carry it in the executable.
 function HostShell.spawnSelfDetached(args)
   if not require("src.core.Platform").canSpawnProcess() then return false end
   local fs = love and love.filesystem
@@ -432,16 +416,19 @@ function HostShell.spawnSelfDetached(args)
   end
   for _, value in ipairs(args or {}) do argv[#argv + 1] = tostring(value) end
 
+  local osName = love.system and love.system.getOS and love.system.getOS()
+  if osName == "Windows" then
+    local api = winApi()
+    if not api then return false end
+    executable = executable:gsub("/", "\\")
+    return api.spawn(executable, argv, { cwd = api.dirOf(executable) })
+  end
+
   local command = HostShell.quote(executable)
   for _, value in ipairs(argv) do
     command = command .. " " .. HostShell.quote(value)
   end
-  local osName = love.system and love.system.getOS and love.system.getOS()
-  if osName == "Windows" then
-    command = 'start "" /b ' .. command .. " >NUL 2>&1"
-  else
-    command = HostShell.envPrefix() .. command .. " >/dev/null 2>&1 &"
-  end
+  command = HostShell.envPrefix() .. command .. " >/dev/null 2>&1 &"
   local ok, _, code = os.execute(command)
   return ok == true or ok == 0 or code == 0
 end

@@ -3223,6 +3223,7 @@ function World:renameMon(mon, onDone, opts)
   end
   local ok = self:pushScreen("Gen2NamingScreen", {
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
     initial = (opts and opts.blank) and ""
       or (mon.nickname or mon.name or mon.species or ""),
@@ -11149,9 +11150,6 @@ function World:nameHatchling(mon, onDone)
   local game = self.game
   if not (game and game.stack) then return onDone() end
   local data = game.data or {}
-  local icons = data.gen2Icons
-  local iconId = icons and icons.species and icons.species[mon.species]
-  local entry = iconId and icons.icons and icons.icons[iconId]
   local done = function(name)
     game.stack:pop()
     -- _InitString's blank test, not a length one: "zero or more spaces
@@ -11163,8 +11161,8 @@ function World:nameHatchling(mon, onDone)
   end
   Screens.push(game, "Gen2NamingScreen", {
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
-    iconPath = entry and entry.image or nil,
     menuGfx = data.gen2MenuGfx,
     onDone = done,
     onCancel = function() done(nil) end,

@@ -2034,6 +2034,8 @@ local function saveActions(imp, scope, version, slot)
         imp._saveExport = { scope = scope, version = version, slotId = slot.id,
           label = slot.label or slot.name or Strings("NEW GAME") }
       end }
+    actions[#actions + 1] = { label = Strings("Duplicate"), icon = "copy", key = key .. "-dup",
+      action = function() imp:_duplicateSlot(scope, slot.id) end }
   end
   if not imp.android then
     actions[#actions + 1] = { label = Strings("Rename"), icon = "pencil", key = key .. "-rename",
@@ -2446,7 +2448,7 @@ end
 -- A row's control key is a pure function of its id, but concatenating it per
 -- visible row per frame is ~1200 strings a second.  Memoised on the launcher,
 -- NOT on the entry: index entries are the same tables ModIndex.writeCache
--- persists into options.modIndexCache, and view state must not ride along.
+-- persists into mod_index_cache.lua, and view state must not ride along.
 local function rowKeyFor(imp, prefix, id)
   local keys = imp._rowKeys
   if not keys then keys = {}; imp._rowKeys = keys end

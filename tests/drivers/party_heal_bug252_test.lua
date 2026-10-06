@@ -6,12 +6,14 @@
 --     POKEPORT_IDENTITY=bug252 POKEPORT_TOUCH=0 POKEPORT_VERSION=red love .
 return function(game)
   local U = dofile("tests/drivers/util.lua")
-  local DIR = os.getenv("SHOT_DIR") or "/tmp/shots"
+  local DIR = os.getenv("POKEPORT_SHOT_DIR") or os.getenv("SHOT_DIR")
+    or "/tmp/shots"
   local Pokemon = require("src.pokemon.Pokemon")
   local Bag = require("src.inventory.Bag")
   local ItemEffects = require("src.inventory.ItemEffects")
   local PartyMenu = require("src.ui.PartyMenu")
   local TextBox = require("src.render.TextBox")
+  local Timing = require("src.core.Timing")
 
   local pass, fail = 0, 0
   local function check(label, ok)
@@ -82,8 +84,6 @@ return function(game)
   end
 
   -- ---- the fixture --------------------------------------------------------
-  -- CHARIZARD L50 sits near 150 max HP, so a MAX_POTION from 1 HP is the full
-  -- 96-frame fill across the whole 48-pixel bar.
   local lead = Pokemon.new(game.data, "CHARIZARD", 50)
   local fainted = Pokemon.new(game.data, "PIKACHU", 30)
   local poisoned = Pokemon.new(game.data, "SNORLAX", 40)
@@ -190,18 +190,23 @@ return function(game)
     -- (UpdateHPBar2 blocks).  U.frame() is the real yield count: the taps below
     -- each burn a frame, so an iteration counter would under-report.
     local startFrame, samples, blocked = U.frame(), {}, true
-    local iter, shot1, shot2 = 0, false, false
-    for _ = 1, 400 do
-      if not picker.heal then break end
+    local iter, shot1, shot2, paused = 0, false, false, 0
+    local expect = Timing.hpDrainFrames(hpBefore, lead.stats.hp, lead.stats.hp, true)
+    local function stillShot(path)
+      local before = U.frame()
+      U.still(game, path)
+      paused = paused + (U.frame() - before)
+    end
+    while picker.heal and U.frame() - startFrame - paused < 2000 do
       local shown = picker.heal.shown
       samples[#samples + 1] = shown
       local frac = shown / math.max(1, lead.stats.hp)
       if not shot1 and frac > 0.33 then
         shot1 = true
-        U.shot(game, DIR .. "/bug252_fill_third.png")
+        stillShot(DIR .. "/bug252_fill_third.png")
       elseif not shot2 and frac > 0.66 then
         shot2 = true
-        U.shot(game, DIR .. "/bug252_fill_two_thirds.png")
+        stillShot(DIR .. "/bug252_fill_two_thirds.png")
       else
         -- mash B and A: neither may do anything while the bar is filling
         U.tap(game, (iter % 2 == 0) and "b" or "a")
@@ -210,11 +215,14 @@ return function(game)
       iter = iter + 1
       U.wait(1)
     end
-    local frames = U.frame() - startFrame
-    U.log(("fill ran ~%d frames (%.2f s at 60 Hz)"):format(frames, frames / 60))
+    local frames = U.frame() - startFrame - paused
+    U.log(("fill ran ~%d frames (%.2f s at 60 Hz), UpdateHPBar2 budget %d")
+            :format(frames, frames / 60, expect))
     check("the fill took more than half a second (it animates, not snaps)",
           frames > 30)
-    check("the fill is not absurdly long (< 3 s)", frames < 180)
+    -- engine/gfx/hp_bar.asm:81-135
+    check(("the fill runs the D + 2P + 6 budget (%d ~ %d)"):format(frames, expect),
+          math.abs(frames - expect) <= 2)
     check("A and B did nothing while the bar filled", blocked)
     local rose = #samples >= 2 and samples[#samples] > samples[1]
     check("the drawn HP climbed over those frames", rose)
@@ -273,22 +281,6 @@ return function(game)
   end
   backToOverworld()
 
-  -- ---- verdict, then re-arm and hand off ----------------------------------
   U.log(("======== machine checks: %d passed, %d failed ========"):format(pass, fail))
-
-  lead.hp = 1
-  fainted.hp = 0
-  poisoned.status = "PSN"
-  local rearmed = openPickerFor("MAX_POTION")
-  if rearmed then cursorTo(rearmed, 1) end
-
-  U.log("The bag, USE and the party picker are re-opened with the cursor on a")
-  U.log("1 HP CHARIZARD and a MAX POTION chosen. Press A, watch slot 1's bar:")
-  U.log("the list stays up, the bar lengthens over ~1.5s with the number, and")
-  U.log("buttons do nothing until it lands. #252 was the list snapping shut.")
-  U.log("Spare items are in the bag if you want to run it again.")
-
-  while true do
-    coroutine.yield()
-  end
+  love.event.quit(fail == 0 and 0 or 1)
 end

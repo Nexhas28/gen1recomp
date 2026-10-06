@@ -114,8 +114,13 @@ tests/engine/game3_em_bike_doors_2637.lua
 tests/engine/game3_em_catch_prompt_2637.lua
 tests/engine/game3_frontier_obedience_2638.lua
 tests/engine/game3_post_dex_background_2637.lua
+tests/engine/game3_rs_bag_cursor_width_2709.lua
+tests/engine/game3_rs_item_use_text_2699_test.lua
+tests/engine/game3_rs_starter_choose_scale_2703.lua
+tests/engine/game3_rs_summary_memo_location_2707.lua
 tests/engine/game3_speed_hotkey_test.lua
 tests/engine/game3_tent_save_reload_2638.lua
+tests/engine/game3_wailmer_pail_2697_test.lua
 tests/engine/game_display_chord_test.lua
 tests/engine/game_speed_categories_test.lua
 tests/engine/game2_faithful_res.lua
@@ -360,6 +365,8 @@ tests/engine/gen2_world_overdraw_perf_test.lua
 tests/engine/gen2_world_scissor_bug2191.lua
 tests/engine/gen2_yesno_typing_bug2085.lua
 tests/engine/gen3_dex_summary_keys_2461.lua
+tests/engine/gen3_jp_names_2706.lua
+tests/engine/gen3_pokemon_icon_hook_bug2693.lua
 tests/engine/gen3_save_rs_tv_test.lua
 tests/engine/gen3_shim_engine_require.lua
 tests/engine/generated_data_decoder_test.lua
@@ -382,6 +389,7 @@ tests/engine/host_shell_fetch_errors.lua
 tests/engine/host_shell_postlog.lua
 tests/engine/host_shell_request_headers.lua
 tests/engine/hostshell_spawn_self.lua
+tests/engine/hostshell_win_restart_2721.lua
 tests/engine/importer_worker_failure_cleanup.lua
 tests/engine/importers_asset_packs.lua
 tests/engine/indigo_statues_bug2683.lua
@@ -514,6 +522,7 @@ tests/engine/online_trade.lua
 tests/engine/open_menu_bugs_949_1149.lua
 tests/engine/options_backup_rollforward_bug828.lua
 tests/engine/options_partial_write_bug932.lua
+tests/engine/options_size_budget_2694.lua
 tests/engine/options_submenu_marquee_test.lua
 tests/engine/options_write_readback_bug828.lua
 tests/engine/orientation_option.lua
@@ -605,13 +614,16 @@ tests/engine/saffron_cries_bug2248_2249.lua
 tests/engine/save_confirm_layout_bug1522.lua
 tests/engine/save_convert_extra_flags.lua
 tests/engine/save_convert_toggle_objects.lua
+tests/engine/save_editor_berry_powder_2698.lua
 tests/engine/save_editor_buena_points_2640.lua
+tests/engine/save_editor_custom_maps.lua
 tests/engine/save_export_map_window_bug1691.lua
 tests/engine/save_export_portable_bug752.lua
 tests/engine/save_export_same_map_moved_2468.lua
 tests/engine/save_map_context_bug889.lua
 tests/engine/save_menu_badges_bug2405.lua
 tests/engine/save_menu_location_bug2328.lua
+tests/engine/save_slot_duplicate_2484.lua
 tests/engine/save_slots.lua
 tests/engine/screen_position.lua
 tests/engine/scripted_battle_checkpoint_test.lua
@@ -727,6 +739,7 @@ tests/engine/yellow_gifts_gotmon_2159.lua
 tests/engine/yellow_oak_back_pikapic.lua
 tests/engine/yellow_viridian_old_man_bug2122.lua
 tests/engine/zero_damage_miss_ruleset_bug2153.lua
+tests/game3_back_pic_anims_2702_test.lua
 tests/game3_battle_anims_phase1_test.lua
 tests/game3_battle_rendering_test.lua
 tests/game3_battle_shiny_test.lua
@@ -744,6 +757,7 @@ tests/game3_corner_screen_test.lua
 tests/game3_cry_modes_test.lua
 tests/game3_cut_grass_mow_test.lua
 tests/game3_cycling_road_bike_test.lua
+tests/game3_daycare_menu_emerald_test.lua
 tests/game3_display_fit_test.lua
 tests/game3_doors_viewport_test.lua
 tests/game3_elevation_oam_priority_test.lua
@@ -780,6 +794,9 @@ tests/game3_printer_clip_test.lua
 tests/game3_quest_log_integration_test.lua
 tests/game3_reflection_neighbor_test.lua
 tests/game3_renewable_hidden_items_test.lua
+tests/game3_resident_caches_2695_test.lua
+tests/game3_rs_naming_kb_crop_2701_test.lua
+tests/game3_rs_pokedex_palette_2710_test.lua
 tests/game3_runtime_reset_test.lua
 tests/game3_safari_zone_warp_exit_test.lua
 tests/game3_save_frames_test.lua
@@ -790,6 +807,7 @@ tests/game3_scenario_menu_test.lua
 tests/game3_se_source_cache_test.lua
 tests/game3_seagallop_anim_test.lua
 tests/game3_seam_warm_budget_test.lua
+tests/game3_set_invisible_2712_test.lua
 tests/game3_special_ids_test.lua
 tests/game3_ss_anne_departure_test.lua
 tests/game3_stitchfield_flash_test.lua

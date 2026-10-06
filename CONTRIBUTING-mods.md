@@ -357,6 +357,30 @@ Legal posture is unchanged and non-negotiable: no pack, and nothing derived
 from one, is ever redistributed. An importer reads a dump the player already
 owns, on their machine, into their own save directory.
 
+### 4c. Authored maps (`mod.content.maps:register`)
+
+Pick an `index` of 1000 or above for a new Gen 1 map, so it never collides
+with a vanilla map number. The cart treats every map from `FIRST_INDOOR_MAP`
+(37) up as indoor for wild encounters: unless the tileset is `FOREST`, every
+step rolls, not just steps in grass. A mod map is held to that rule unless
+it says otherwise:
+
+| Map record | Wild encounters off grass and water |
+| --- | --- |
+| `outdoor = true` | never, like a vanilla route |
+| tileset `OVERWORLD`, no `outdoor` field | never |
+| `outdoor = false`, or any other tileset with no `outdoor` field | on every step (caves, towers) |
+| tileset `FOREST` | never |
+
+The same `outdoor` field also lets Fly and Teleport be used on the map, so
+an outdoor route on a custom tileset sets `outdoor = true` once.
+
+```lua
+mod.content.maps:register("MY_ROUTE", {
+  index = 1000, tileset = "MY_TILES", outdoor = true, ...
+})
+```
+
 ### 5. What a mod's code can reach
 
 Your code runs in a sandbox (`src/mods/Sandbox.lua`), not against the

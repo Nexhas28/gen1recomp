@@ -138,23 +138,12 @@ Timing.FAINT_SLIDE_STEP   = 8 / Timing.FAINT_SLIDE_ROW -- 4px per frame at 1x
 Timing.TRAINER_SLIDE_COL  = 2  -- core.asm:1267-1268, per column
 
 -- HP bar (engine/gfx/hp_bar.asm) ---------------------------------------------
---
--- UpdateHPBar steps ONE HP point per loop iteration (:81-120).  Each
--- iteration pays:
---   * 1 frame in UpdateHPBar_PrintHPNumber's DelayFrame (:234) -- but only
---     when wHPBarType is nonzero (:207-209), i.e. the player's own HUD and
---     the party menu, never the enemy HUD; and
---   * 2 frames per pixel the bar actually moved, from
---     UpdateHPBar_AnimateHPBar's `ld c, 2 / call DelayFrames` (:147-148).
--- The drain closes with one more pixel step and a Delay3 (:133-135).
---
--- So a player-side drain of D HP across P pixels costs D + 2P + 6 frames,
--- while the same drain on the enemy HUD costs only 2P + 5.  A 150 HP mon
--- losing everything takes 150 + 96 + 6 = 252 frames on hardware.
 
 Timing.HP_BAR_PIXELS      = 48 -- the bar is 48 px wide (GetHPBarLength)
-Timing.HP_BAR_PIXEL_STEP  = 2  -- frames per pixel of bar movement
-Timing.HP_BAR_HP_STEP     = 1  -- frames per HP point, player-side HUD only
+Timing.HP_BAR_PIXEL_STEP  = 2  -- engine/gfx/hp_bar.asm:147-148
+Timing.HP_BAR_HP_STEP     = 1  -- engine/gfx/hp_bar.asm:207-209, 234
+Timing.HP_BAR_STEP_CYCLES = 7000  -- engine/gfx/hp_bar.asm:244-269
+Timing.FRAME_CYCLES       = 17556
 
 -- Pixels the bar shows for `hp` out of `maxHP`.  GetHPBarLength floors the
 -- 48ths and clamps the result to at least 1 for any nonzero HP
@@ -167,37 +156,44 @@ function Timing.hpBarPixels(hp, maxHP)
   return px
 end
 
--- Frames one single-HP step of the drain costs: the per-HP number print
--- (player side only) plus two frames for every pixel that step moved.
-function Timing.hpDrainStepFrames(fromHP, toHP, maxHP, playerSide)
-  local pixels = math.abs(Timing.hpBarPixels(toHP, maxHP)
-                          - Timing.hpBarPixels(fromHP, maxHP))
-  local frames = pixels * Timing.HP_BAR_PIXEL_STEP
-  if playerSide then frames = frames + Timing.HP_BAR_HP_STEP end
-  return frames
+function Timing.hpBarCpuLag(cycles)
+  if not cycles or cycles <= 0 then return 0 end
+  return math.ceil(cycles / Timing.FRAME_CYCLES) - 1
 end
 
--- After the loop, .animateHPBarDone prints the number one last time, runs
--- AnimateHPBar for a single pixel and falls into Delay3 (hp_bar.asm:132-135)
--- -- so the tail costs 6 frames on the player's HUD and 5 on the enemy's.
-function Timing.hpDrainClosingFrames(playerSide)
+-- engine/gfx/hp_bar.asm:121-135
+function Timing.hpDrainClosingFrames(playerSide, cycles)
   local frames = Timing.HP_BAR_PIXEL_STEP + Timing.DELAY3
-  if playerSide then frames = frames + Timing.HP_BAR_HP_STEP end
-  return frames
+  if playerSide then return frames + Timing.HP_BAR_HP_STEP end
+  return frames + Timing.hpBarCpuLag(cycles)
 end
 
--- Total cost of draining `fromHP` to `toHP`, for tests and for anything that
--- needs to budget the whole animation up front.
+-- engine/gfx/hp_bar.asm:81-120
 function Timing.hpDrainFrames(fromHP, toHP, maxHP, playerSide)
-  local total = 0
+  local total, cycles = 0, 0
   local hp = fromHP
   local dir = (toHP < fromHP) and -1 or 1
   while hp ~= toHP do
     local nextHP = hp + dir
-    total = total + Timing.hpDrainStepFrames(hp, nextHP, maxHP, playerSide)
+    local pixels = math.abs(Timing.hpBarPixels(nextHP, maxHP)
+                            - Timing.hpBarPixels(hp, maxHP))
+    if playerSide then
+      total = total + Timing.HP_BAR_HP_STEP + pixels * Timing.HP_BAR_PIXEL_STEP
+    else
+      cycles = cycles + Timing.HP_BAR_STEP_CYCLES
+      if pixels > 0 then
+        total = total + pixels * Timing.HP_BAR_PIXEL_STEP
+                + Timing.hpBarCpuLag(cycles)
+        cycles = 0
+      end
+    end
     hp = nextHP
   end
-  return total + Timing.hpDrainClosingFrames(playerSide)
+  -- engine/gfx/hp_bar.asm:127-129
+  if not playerSide and toHP ~= 0 then
+    cycles = cycles + Timing.HP_BAR_STEP_CYCLES
+  end
+  return total + Timing.hpDrainClosingFrames(playerSide, cycles)
 end
 
 return Timing

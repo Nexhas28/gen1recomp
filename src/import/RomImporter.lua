@@ -1862,11 +1862,17 @@ function RomImporter:focus(f)
       self.pickerPendingModId = nil
       self.pickerPendingImportId = nil
       self.requiredImportLegacyRomPick = nil
+    elseif self.cartLegacyModPick and self.pickerPendingKind == "cart"
+        and pickError:find("picked_mod", 1, true) then
+      self.pickerPendingKind, self.pickerPendingVersion = nil, nil
+      self.cartLegacyModPick = nil
+      self._cartNotice = text
     elseif pickError:find("picked_mod", 1, true) then
       if self.pickerPendingKind == "skin" then
         self.pickerPendingKind = nil
         self._skinNotice = { ok = false, text = text }
       else
+        self.pickerPendingKind = nil
         self.modNotice = { ok = false, text = text }
       end
     elseif self.pickerPendingKind == "box" then
@@ -1880,6 +1886,7 @@ function RomImporter:focus(f)
         or self.pickerPendingKind == "cart" then
       self.pickerPendingKind = nil
       self.pickerPendingVersion = nil
+      self.cartLegacyModPick = nil
       self._cartNotice = text
     else
       self:setError(text)
@@ -1937,6 +1944,14 @@ function RomImporter:focus(f)
   end
   local modName = findPendingMod(false, self.pickSkip)
   if modName then
+    if self.pickerPendingKind == "cart" and self.cartLegacyModPick then
+      local version = self.pickerPendingVersion or self._cartPopup or self.tab
+      self.pickerPendingKind, self.pickerPendingVersion = nil, nil
+      self.cartLegacyModPick = nil
+      consumePick(self, modName, "picked_mod.zip",
+        self:_installCartFile(modName, version))
+      return
+    end
     if self.pickerPendingKind == "skin" then
       self.pickerPendingKind = nil
       self:_installSkinZip(modName)
@@ -1944,6 +1959,7 @@ function RomImporter:focus(f)
         self._skinNotice and self._skinNotice.ok)
       return
     end
+    self.pickerPendingKind = nil
     self:_installMod(modName)
     consumePick(self, modName, "picked_mod.zip",
       self.modNotice and self.modNotice.ok)
@@ -2705,7 +2721,11 @@ function RomImporter:chooseMod()
       return
     end
     self._modPickOpenWait = nil
+    self.pickerPendingKind = "mod"
+    self.pickerPendingVersion = nil
+    self.cartLegacyModPick = nil
     if not pickFile("mod") then
+      self.pickerPendingKind = nil
       self._modPickStalled = true
       self.modNotice = { ok = false,
         text = self:_modInboxHint(Strings("Could not open the file picker.")) }
@@ -3231,6 +3251,8 @@ function RomImporter:chooseSaveImport(version)
       return
     end
     self.androidPendingVersion = version
+    self.pickerPendingKind, self.pickerPendingVersion = nil, nil
+    self.cartLegacyModPick = nil
     if not pickFile("sav") then
       self.androidPendingVersion = nil
       self.saveNotice[version] = { ok = false,
@@ -3416,9 +3438,14 @@ function RomImporter:choose(version)
     local name, data = findPendingRom(self, self.chooseVersion)
     if name then
       self:startData(data, name)
-    elseif consumePickedRomError(self) then
+      return
+    end
+    if consumePickedRomError(self) then
       return   -- a rejected pick explains itself instead of silently reopening
-    elseif not pickFile() then
+    end
+    self.pickerPendingKind, self.pickerPendingVersion = nil, nil
+    self.cartLegacyModPick = nil
+    if not pickFile() then
       -- Picker unavailable (API < 19, or no document-picker app installed):
       -- fall back to the USB folder-drop path as a friendly notice, not an
       -- error (which would read as a rejected file).
@@ -5710,16 +5737,25 @@ function RomImporter:importCartFile(version)
       consumePick(self, name, PICKED_CART, installed)
       return installed
     end
-    if pickerHasKind("cart") and pickFile("cart") then
-      self.pickerPendingKind = "cart"
-      self.pickerPendingVersion = version
+    local kind
+    if pickerHasKind("cart") then
+      kind = "cart"
+    elseif pickerHasKind("mod") or love.system.pickFileKinds == nil then
+      kind = "mod"
+    end
+    self.pickerPendingKind = "cart"
+    self.pickerPendingVersion = version
+    self.cartLegacyModPick = (kind == "mod") or nil
+    if kind and pickFile(kind) then
       self.pickPending = true
       self.pickTimer = 0
       return true
     end
+    self.pickerPendingKind, self.pickerPendingVersion = nil, nil
+    self.cartLegacyModPick = nil
     local dir = love.filesystem.getSaveDirectory()
     self._cartNotice = Strings(
-      "Could not open the file picker. Copy a .g1rcart into:\n%s", dir)
+      "Could not open the file picker. Update the app, or copy a .g1rcart into:\n%s", dir)
     return false
   end
   if handheldHost() and self:_openCartBrowser(version) then return true end
@@ -6911,6 +6947,35 @@ function RomImporter:_newSlot(scope)
   self:_refreshSlots(scope)
   self.activeSlot[scope] = id
   self.slotScroll[scope] = math.huge
+end
+
+function RomImporter:_duplicateSlot(scope, id)
+  if self.workState == "working" then return end
+  local SaveData = require("src.core.SaveData")
+  local cart = cartOfScope(scope)
+  local base
+  for _, slot in ipairs(self.slots[scope] or {}) do
+    if slot.id == id then base = slot.label or slot.name break end
+  end
+  base = (type(base) == "string" and base ~= "") and base or tostring(id)
+  local label = utf8Cap(Strings("%s copy", utf8Cap(base, MAX_SLOT_LABEL - 5)),
+    MAX_SLOT_LABEL)
+  local newId, err
+  if cart then
+    newId, err = SaveData.duplicateCartSlot(cart, id, label)
+  else
+    newId, err = SaveData.duplicateSlot(scope, id, label)
+  end
+  if not newId then
+    self.saveNotice[scope] = { ok = false, text = tostring(err) }
+    return
+  end
+  self:_selectSlot(scope, newId)
+  self:_refreshSlots(scope)
+  self.activeSlot[scope] = newId
+  local eng = self:_syncEngine()
+  if eng then pcall(eng.noteSaveWritten, eng) end
+  self.saveNotice[scope] = { ok = true, text = Strings("Copied to %s.", label) }
 end
 
 -- Mouse wheel: forwarded into the FlexLove view (installed onto the global
@@ -8697,7 +8762,7 @@ end
 -- Release stats for a FIND MODS row, resolved the same way the MODS tab
 -- does it: the mod's own GitHub releases through ModUpdate's cached fetch,
 -- so an installed mod's repo is instant and every result lands in
--- options.modUpdateCache for six hours.  A feed that publishes stats wins
+-- mod_update_cache.lua for six hours.  A feed that publishes stats wins
 -- outright (fresher, zero network); otherwise the repo is fetched, one
 -- entry per frame so opening the tab cannot stall for the whole listing.
 -- The result is memoized per id for the session; a repo with no releases

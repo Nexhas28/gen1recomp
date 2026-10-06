@@ -37,10 +37,7 @@ T.eq(Timing.WARP_FADE_IN, 0, "there is no fade in: LoadGBPal restores in one wri
 
 -- ---------------------------------------------------------------- HP bar
 
--- UpdateHPBar walks one HP point per iteration.  On the player's HUD each
--- point costs a frame (PrintHPNumber's DelayFrame, gated on wHPBarType) and
--- each pixel of bar movement costs two more; on the enemy HUD only the
--- pixels cost anything.
+-- engine/gfx/hp_bar.asm:81-135
 T.eq(Timing.hpBarPixels(150, 150), 48, "a full bar is 48 px")
 T.eq(Timing.hpBarPixels(75, 150), 24, "half HP is half the bar")
 T.eq(Timing.hpBarPixels(0, 150), 0, "an empty bar is 0 px")
@@ -48,8 +45,10 @@ T.eq(Timing.hpBarPixels(1, 150), 1, "GetHPBarLength clamps a sliver to 1 px")
 
 T.eq(Timing.hpDrainFrames(150, 0, 150, true), 150 + 96 + 6,
   "a 150 HP player mon drains in D + 2P + 6 = 252 frames")
-T.eq(Timing.hpDrainFrames(150, 0, 150, false), 96 + 5,
-  "the same drain on the enemy HUD costs only 2P + 5 = 101 frames")
+T.eq(Timing.hpDrainFrames(150, 0, 150, false), 3 * 48 + 5,
+  "the same drain on the enemy HUD lags a frame per pixel: 3P + 5 = 149")
+T.eq(Timing.hpDrainFrames(40, 0, 40, false), 2 * 48 + 5,
+  "a sub-48 HP enemy crosses a pixel every step, so no lag: 2P + 5")
 
 -- The engine's per-frame stepper has to agree with that closed form, or the
 -- bar is animating at a rate nothing else measures.

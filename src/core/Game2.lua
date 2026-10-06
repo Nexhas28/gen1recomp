@@ -2133,7 +2133,7 @@ end
 -- path binds them in (src/core/Game.lua keypressed), driving the same shared
 -- modules so a player's muscle memory carries between the two games:
 --
---   F1/F2  write / reload the save        1  GAME SPEED
+--   F1/F2  write / reload the save        1  GAME SPEED (0 steps down)
 --   -  =   zoom one step out / in         2  COLOR
 --   4      cycle ZOOM                     3  TILT (mnemonic: 3D)
 --
@@ -2161,6 +2161,12 @@ function Game2:hotkey(key)
     if self:speedLocked() then return true end
     local GameSpeed = require("src.core.GameSpeed")
     options.speed = GameSpeed.cycle(options.speed, 1)
+    persist()
+    return true
+  elseif hk == "0" then
+    if self:speedLocked() then return true end
+    local GameSpeed = require("src.core.GameSpeed")
+    options.speed = GameSpeed.cycle(options.speed, -1)
     persist()
     return true
   elseif hk == "2" then

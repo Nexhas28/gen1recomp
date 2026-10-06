@@ -886,6 +886,9 @@ function Game3:_hotkey(key)
   elseif hk == "1" then
     self:_cycleSpeed(1)
     return true
+  elseif hk == "0" then
+    self:_cycleSpeed(-1)
+    return true
   elseif hk == "3" then
     if self:zoomGateOK() then
       local Tilt = lazyReq("src.render.Tilt")

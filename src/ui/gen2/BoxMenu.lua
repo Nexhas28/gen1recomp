@@ -751,6 +751,7 @@ function BoxMenu:askNickname()
     -- The "nickname" kind is MON_NAME_LENGTH - 1 wide and takes its header
     -- from the mon rather than from a fixed prompt.
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
     initial = mon.nickname or "",
     onDone = function(name)

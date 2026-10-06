@@ -134,7 +134,7 @@ Rebind any of these in-game under **OPTIONS > CONTROLS**.
 | Key       | What it does                                           |
 | --------- | ------------------------------------------------------ |
 | `-` / `=` | Zoom out / in (overworld; also mouse wheel)            |
-| `1`       | Cycle GAME SPEED up (controller: R2 faster, L2 slower) |
+| `1` / `0` | GAME SPEED up / down (controller: R2 faster, L2 slower) |
 | `2`       | Cycle COLORS                                           |
 | `3`       | Cycle TILT (free-roam overworld)                       |
 | `4`       | Cycle ZOOM through every level (free-roam overworld)   |

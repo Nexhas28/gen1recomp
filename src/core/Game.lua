@@ -883,6 +883,9 @@ function Game:keypressed(key)
       -- shoulders/triggers on gamepad do the same (see gamepadpressed)
       self:_cycleSpeed(1)
       return
+    elseif hk == "0" then
+      self:_cycleSpeed(-1)
+      return
     elseif hk == "2" then
       -- cycle COLORS (GBC / OG / OG INV / GBC INV / CLASSIC); the pack change
       -- forces Game.overworld:reloadMap, which rebuilds the live NPC array, so
