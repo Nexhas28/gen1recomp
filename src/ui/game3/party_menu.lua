@@ -945,6 +945,7 @@ function PartyMenu.show(sessionParty, moveOverlay, opts)
   end
   opts = opts or {}
   PartyMenu._order = nil
+  PartyMenu._rsPrompt = nil
   if opts.mode == "battle_switch" or opts.mode == "battle_faint" or (opts.mode == "use" and opts.battleOrder) then
     local party0 = sessionParty or (opts.session and opts.session.party)
     local ov0 = moveOverlay or (opts.session and (opts.session.move_overlay or opts.session.moveOverlay))
