@@ -872,7 +872,8 @@ function Game3:_hotkey(key)
     if self:quickSaveAllowed() then self:saveGame() end
     return true
   elseif key == "f2" then
-    if self.phase == "field" then
+    local okLoad, saved = pcall(SaveData.load)
+    if self.phase == "field" and okLoad and saved and saved.engine == "game3" then
       pcall(function() lazyReq("src.ui.game3.stack").clear() end)
       pcall(function()
         local R = lazyReq("src.core.game3.runtime")
