@@ -1215,6 +1215,8 @@ function Player.update(game, input)
   if Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning() then
     return
   end
+  -- pokeemerald/src/field_control_avatar.c:150
+  if Space and Space._pendingOnFrame then return end
 
   -- Menu Dismissal Frame Trap & Idle Sight Check: check sight before D-pad input polling
   local okTs, TrainerSight = pcall(lazyReq, "src.core.game3.trainer_sight")
