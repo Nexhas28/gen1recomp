@@ -12,12 +12,23 @@ local function menuData()
   return assert(require("src.ui.game3.rse.scene_kit").manifest(Data.manifest).party)
 end
 
+-- pokeruby/src/pokemon_menu.c:126
+Data.actionLabels = {"OtherText_Summary", "OtherText_Switch2", "OtherText_Item", "gOtherText_CancelNoTerminator",
+  "OtherText_Give2", "OtherText_Take2", "OtherText_Take", "OtherText_Mail", "OtherText_Read2",
+  "gOtherText_CancelNoTerminator"}
+
 function Data.actionText(action, fields)
+  local RomText = require("src.core.game3.rom_text")
   local nativeId = Data.actionIds[action]
-  if nativeId then return assert(menuData().cursorOptions[nativeId + 1]) end
-  if Data.extraLabels[action] then return require("src.core.game3.rom_text").plain(Data.extraLabels[action]) end
+  if nativeId then
+    local label = Data.actionLabels[nativeId + 1]
+    if RomText.has(label) then return RomText.plain(label) end
+    return assert(menuData().cursorOptions[nativeId + 1])
+  end
+  if Data.extraLabels[action] then return RomText.plain(Data.extraLabels[action]) end
   assert(fields and fields.index[action] ~= nil, "unknown native RS party action: " .. tostring(action))
-  return action
+  local move = fields.moves and fields.moves[fields.index[action] + 1]
+  return move and require("src.core.game3.pokemon").moveName(move) or action
 end
 
 function Data.buildActions(mon, party, fields)

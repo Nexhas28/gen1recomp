@@ -230,6 +230,18 @@ EASY.word = function() return "ともだち" end
 check(lastQuote() == "RAW513", "a word the cart cannot print keeps the cart's word")
 EASY.word, Rse.session, Tv.state = word, rseSession, tvState
 
+
+-- The party menu's actions (pokeruby/src/pokemon_menu.c:126) read the
+-- script cache by their pret labels, and a field move prints its move's name.
+MANIFESTS["rse/menus"] = { party = { cursorOptions = { "SUMMARY", "SWITCH", "ITEM", "CANCEL", "GIVE", "TAKE",
+  "TAKE", "MAIL", "READ", "CANCEL", "CUT" } } }
+package.loaded["src.core.game3.pokemon"].moveName = function(move) return move == 15 and "COUPE" or nil end
+local PartyData = require("src.ui.game3.rs.party_menu_data")
+BUNDLE.text = { OtherText_Summary = ir("RESUME"), OtherText_Take = ir("PRENDRE") }
+check(PartyData.actionText("SUMMARY") == "RESUME", "a party action reads the cache by its label")
+check(PartyData.actionText("TAKE_MAIL") == "PRENDRE", "the mail's TAKE reads its own label")
+check(PartyData.actionText("SWITCH") == "SWITCH", "an action missing from the cache keeps the pack's copy")
+check(PartyData.actionText("CUT", { index = { CUT = 0 }, moves = { 15 } }) == "COUPE", "a field move prints its move's name")
 if failed > 0 then
   print(failed .. " check(s) failed")
   os.exit(1)
