@@ -248,42 +248,18 @@ end
 -- ("Failed to initialize filesystem: already initialized") and the relaunch
 -- crashes. So on an AppImage we relaunch the executable; the fresh process's
 -- Boot step mounts any downloaded update exactly as a manual relaunch would.
--- Android hits the same wall (#575): the vendored love.cpp loops runlove()
--- in-process on "restart", and PHYSFS_deinit in the old Filesystem module's
--- destructor fails ("files still open") whenever any physfs handle survives
--- lua_close, so the second PHYSFS_init throws the same "already initialized"
--- and the app dies. There we relaunch through the GameActivity.restartApp
--- JNI bridge (love.system.restartApp), which schedules our launch intent
--- and kills the process so no native state can leak into the fresh run.
--- iOS is the same class of problem with a sharper edge: love.cpp under
--- LOVE_IOS forces DONE_RESTART for *every* quit (Apple forbids programmatic
--- exit) and comments that leftover threads make that restart unreliable --
--- which our ChipAudio / Fetch / Check workers are.  There is no
--- restartApp bridge on iOS, so callers that want "back to launcher" must
--- use main.lua's in-process returnToLauncher (love.quit aborts the quit);
--- HostShell.restart itself refuses quit("restart") and falls back to a
--- bare quit() so a mod that still calls restart does not pick the worst
--- path on purpose.
+-- Android (#575) and iOS restart in-process: love.quit joins every worker
+-- first, so no physfs handle outlives lua_close.  iOS turns every quit into
+-- DONE_RESTART in love.cpp, so a bare quit() is the restart there.
 function HostShell.restart()
   if not (love and love.event and love.event.quit) then return end
 
   local osName = love.system and love.system.getOS and love.system.getOS()
   if osName == "Android" then
-    -- restartApp kills the process on success, so a true return is never
-    -- observed; false means the bridge could not schedule the relaunch.
-    -- An older APK whose liblove predates the bridge (love.system.restartApp
-    -- is nil) has no crash-free in-process restart, so quit to the OS
-    -- cleanly and let the player relaunch by hand -- worse than restarting,
-    -- but better than the guaranteed crash of quit("restart") (#575).
-    if love.system.restartApp and love.system.restartApp() then return end
-    love.event.quit()
+    love.event.quit("restart")
     return
   end
   if osName == "iOS" then
-    -- No process-kill bridge.  A bare quit still becomes DONE_RESTART in
-    -- love.cpp, but quit("restart") is the path that also runs our
-    -- endProcess worker joins first and then re-enters runlove -- the
-    -- combination that crashes EXIT GAME.  Prefer the softer quit.
     love.event.quit()
     return
   end

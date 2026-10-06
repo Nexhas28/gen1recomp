@@ -230,6 +230,26 @@ end
 local launchedIntoGame = false
 local RELAUNCH_MARKER = "relaunch_to_launcher.txt"
 local launchOptionsSuppressed = false
+local quitToLauncher = false
+local processEnded = false
+
+local function endProcessOnce()
+  if processEnded then return end
+  processEnded = true
+  pcall(function()
+    require("src.core.DiscordPresence").shutdown()
+  end)
+  require("src.core.SessionLifecycle").endProcess()
+end
+
+local function readRelaunchHandoff()
+  if not love.filesystem.getInfo(RELAUNCH_MARKER) then return nil end
+  local raw = love.filesystem.read(RELAUNCH_MARKER)
+  pcall(love.filesystem.remove, RELAUNCH_MARKER)
+  local data = require("src.core.SaveSerializer").decode(raw or "",
+    { maxBytes = 65536 })
+  return type(data) == "table" and data or {}
+end
 
 local onlineClient, onlineClientResolved
 local function onlineClientModule()
@@ -506,58 +526,25 @@ local function makeLauncher(launcherOpts)
 end
 
 local function returnToLauncher(opts)
-  if not Game then return end
+  if not Game or quitToLauncher then return end
+  quitToLauncher = true
+  opts = opts or {}
+  local handoff = { tab = opts.tab, invite = opts.invite, request = opts.request }
+  local okEncode, body = pcall(require("src.core.SaveSerializer").encode, handoff)
+  pcall(love.filesystem.write, RELAUNCH_MARKER, okEncode and body or "return {}\n")
 
-  if require("src.core.RequireGuard").repair() then
-    print("boot: restored love.filesystem searcher (see #2001)")
-  end
-
-  local GameVersion = require("src.core.GameVersion")
-  local currentVersion = GameVersion.get()
   SessionLifecycle.endGameSession(Game)
   Game = nil
-  pcall(function() require("src.online.Trade").hostIsLive = nil end)
-  local syncEngine = package.loaded["src.sync.SyncEngine"]
-  if type(syncEngine) == "table" and type(syncEngine._shared) == "table" then
-    pcall(syncEngine._shared.protectPlaythrough, syncEngine._shared, nil, nil)
-  end
   autopilot = nil
   driverCo = nil
-  -- Leave the cart's scope behind: the launcher's own settings and slots are
-  -- the base game's, not the cart's.  The speed ladder is cart state too, so
-  -- a 1x/2x cart must not pin the launcher or the next game.
-  local SaveData = require("src.core.SaveData")
-  local cartId = SaveData.getCart()
-  SaveData.setCart(nil)
-  require("src.core.GameSpeed").setAllowed(nil)
-
-  SessionLifecycle.endMountedSession(currentVersion)
-
-  -- Slot lists are resolved once per process.  Invalidate only the game
-  -- (and cart, if any) we just left so the new launcher can migrate a flat
-  -- in-game SAVE into a visible slot -- nothing else is rewritten.
-  SaveData.refreshSlotResolution(currentVersion)
-  if cartId then SaveData.refreshSlotResolution("cart_" .. cartId) end
-
-  applySavedOrientation()
-
-  local preload = require("src.mods.LauncherMods").translationStrings()
-  if preload then require("src.core.Strings").load({ strings = preload }) end
-
-  if love.window and love.window.setTitle then
-    local Version = require("src.core.Version")
-    love.window.setTitle(Version.title("Gen 1 Recompilation Project"))
-  end
-
-  Importer = makeLauncher({ initialTab = opts and opts.tab or nil,
-    invite = opts and opts.invite or nil })
-  -- Finger that confirmed EXIT GAME is often still down over Import Save.
-  if Importer.ignoreReturningPointer then
-    Importer:ignoreReturningPointer()
-  end
+  endProcessOnce()
+  require("src.core.HostShell").restart()
 end
 
 local pendingLauncherReturn
+local driverHost = {
+  returnToLauncher = function(o) pendingLauncherReturn = o or {} end,
+}
 
 function bootGame(version, cartId, opts)
   opts = opts or {}
@@ -701,19 +688,19 @@ local function startLaunchRequest(request)
     return true
   end
 
+  if Game then
+    returnToLauncher({ request = request })
+    return true
+  end
+
   local version = request.game
   if request.launcher or not version then
-    if Game then
-      returnToLauncher({ tab = version })
-    else
-      showLauncher(version)
-    end
+    showLauncher(version)
     autoUpdateMods(request, not version and "mods" or nil)
     return true
   end
 
   local RomImporter = require("src.import.RomImporter")
-  if Game then returnToLauncher() end
   Importer = nil
   if Prelaunch then return true end
 
@@ -873,6 +860,10 @@ function love.load(args)
     scriptedOpts = { arena = spec }
   end
 
+  local handoff = readRelaunchHandoff()
+  local relaunched = handoff ~= nil
+  if relaunched and os.getenv("POKEPORT_DRIVER") then scripted = nil end
+
   if scripted then
     if forceImport or not ready then
       -- The importer detects the dropped/loaded ROM's version by SHA-1 and
@@ -917,11 +908,7 @@ function love.load(args)
   -- marker behind: consume it and stay on the launcher, or the shortcut below
   -- would boot the same game again and that close would restart again,
   -- forever (#887).  Consumed on read, so the very next launch is normal.
-  local relaunched = love.filesystem.getInfo(RELAUNCH_MARKER) ~= nil
-  if relaunched then
-    launchOptionsSuppressed = true
-    pcall(love.filesystem.remove, RELAUNCH_MARKER)
-  end
+  if relaunched then launchOptionsSuppressed = true end
 
   if not relaunched and resolvedLaunch.game and not resolvedLaunch.launcher
       and startLaunchRequest(resolvedLaunch) then
@@ -937,12 +924,23 @@ function love.load(args)
   -- by its SHA-1 (GameVersion.forSha1); pressing Play boots that game (Gold
   -- goes to its own service owner, src/core/Game2.lua -- docs/gold-phase1.md).
   -- Edit on a save row opens the bundled editor on that slot (openEditor).
-  Importer = makeLauncher()
   if not relaunched then
+    Importer = makeLauncher()
     launcherSplash = require("src.import.LauncherSplash").new()
     autoUpdateMods(resolvedLaunch,
       not resolvedLaunch.game and "mods" or nil)
+    return
   end
+  Importer = makeLauncher({
+    initialTab = type(handoff.tab) == "string" and handoff.tab or nil,
+    invite = type(handoff.invite) == "string" and handoff.invite or nil,
+  })
+  if Importer.ignoreReturningPointer then Importer:ignoreReturningPointer() end
+  local driverPath = os.getenv("POKEPORT_DRIVER")
+  if driverPath then
+    driverCo = coroutine.create(assert(loadfile(driverPath))())
+  end
+  if type(handoff.request) == "table" then startLaunchRequest(handoff.request) end
 end
 
 function love.update(dt)
@@ -986,6 +984,18 @@ function love.update(dt)
   if Importer then
     require("src.import.LauncherWindow").observe(dt)
     Importer._inputBlocked = splashBlocksInput()
+    if driverCo and not Game then
+      local ok, err = coroutine.resume(driverCo, Importer)
+      if not ok then
+        print("driver error: " .. tostring(err))
+        love.event.quit(1)
+        return
+      end
+      if coroutine.status(driverCo) == "dead" then
+        love.event.quit()
+        return
+      end
+    end
     return Importer:update(dt)
   end
   if not Game then return end
@@ -1010,7 +1020,7 @@ function love.update(dt)
     local i = 0
     while i < iterations do
       i = i + 1
-      local ok, err = coroutine.resume(driverCo, Game)
+      local ok, err = coroutine.resume(driverCo, Game, driverHost)
       if not ok then
         print("driver error: " .. tostring(err))
         love.event.quit(1)
@@ -1563,12 +1573,6 @@ function love.textinput(text)
   end
 end
 
--- #785: set once love.quit has routed a window close into HostShell.restart,
--- so the follow-up quit event the restart itself raises (quit("restart") on
--- desktop; AppImage and Android relaunch the process instead, #575) falls
--- through to the normal shutdown below instead of restarting forever.
-local quitToLauncher = false
-
 function love.quit()
   if launcherSplash then launcherSplash:release(); launcherSplash = nil end
   if Importer and Importer._themeVideo then
@@ -1605,36 +1609,17 @@ function love.quit()
   -- docs/modding.md's core.quit_to_launcher entry) may veto returning to
   -- this Lua launcher via that hook. Vanilla behavior (used when no mod
   -- claims the hook) is exactly the condition below.
-  --
-  -- Android and iOS both tear down LOVE in-process rather than
-  -- love.event.quit("restart"): Android's vendored love.cpp PHYSFS-crashes
-  -- on a second init (#575), and iOS's love.cpp forces DONE_RESTART for
-  -- every quit while warning that leftover threads make that unreliable.
-  -- SessionLifecycle workers (ChipAudio / Fetch / Check) make that warning
-  -- real -- endProcess joins them, then the native restart still blows up.
   local osName = love.system and love.system.getOS and love.system.getOS()
-  local inProcessReturn = (osName == "Android" or osName == "iOS")
+  local mobile = (osName == "Android" or osName == "iOS")
   local wouldReturnToLauncher = PlatformHooks.quitToLauncher(function()
     return Game and not Importer and not quitToLauncher and not scripted
-      and (inProcessReturn or not launchedIntoGame)
+      and (mobile or not launchedIntoGame)
   end)
   if wouldReturnToLauncher then
-    if inProcessReturn then
-      returnToLauncher()
-      return true -- abort this quit; stay in the same LOVE run
-    end
-    quitToLauncher = true
-    -- Tell the fresh boot to ignore any boot-straight-into-a-game option this
-    -- once, so the restart really does land in the launcher (#887).  A failed
-    -- write only costs that suppression, so it must never block the restart.
-    pcall(love.filesystem.write, RELAUNCH_MARKER, "1")
-    require("src.core.HostShell").restart()
-    return true -- abort this quit; the restart lands back in the launcher
+    returnToLauncher()
+    return true
   end
-  pcall(function()
-    require("src.core.DiscordPresence").shutdown()
-  end)
-  SessionLifecycle.endProcess()
+  endProcessOnce()
 end
 
 function love.filedropped(file)
@@ -1725,7 +1710,7 @@ function love.run()
             -- teardown, so the relaunched task re-enters an activity whose
             -- native main already returned; end the process outright once the
             -- love.quit hook has run (#339)
-            if love.system and love.system.getOS() == "Android" then
+            if a ~= "restart" and love.system and love.system.getOS() == "Android" then
               os.exit(a or 0)
             end
             return a or 0
