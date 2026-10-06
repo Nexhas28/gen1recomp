@@ -30,6 +30,7 @@ local PAL = {
   red         = { 255, 80, 90 },   -- destructive
   blue        = { 76, 163, 240 },  -- links, in-panel navigation
   buttonBlue  = { 36, 106, 181 }, -- darker fill for white action labels
+  buttonPurple = { 88, 44, 140 },
   steel       = { 120, 120, 120 }, -- disabled
   -- the version rail is the one piece of brand colour that stays
   railRed     = { 255, 60, 72 },

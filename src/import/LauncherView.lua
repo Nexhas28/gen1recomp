@@ -2328,13 +2328,19 @@ local function buildGamePanel(imp, x, y, w, availH, m, version, budgetH)
       action = function() imp._gameManage = version end,
     })
     ly = ly + cartH + gap
-    btn(imp, lx, ly, lw, m.btnH, "carts-" .. version,
+    local halfW = math.floor((lw - bgap) / 2)
+    btn(imp, lx, ly, halfW, m.btnH, "carts-" .. version,
       Strings("Custom Carts"), {
         kind = "accent", font = "small",
         action = function()
           imp._cartPopup = version
           imp._cartNotice = nil
         end,
+      })
+    btn(imp, lx + halfW + bgap, ly, lw - halfW - bgap, m.btnH, "idsync-" .. version,
+      Strings("ID Sync"), {
+        kind = "accent", fill = PAL.buttonPurple, font = "small",
+        action = function() imp:askIdSync(version) end,
       })
     ly = ly + m.btnH + gap
     local sealH = buildCartCard(imp, lx, ly, lw, m, version)
@@ -6481,7 +6487,7 @@ local MODAL_KEYS = {
   "_cartPopup", "_modScopePopup", "_filterPopup", "_indexManage",
   "_syncModal", "_pcPicker", "_tradeModal", "_skinActions", "_modActions",
   "_findEntry", "_gameManage", "_saveExport", "_savePicker", "_modGames",
-  "_pinModal", "_invitePicker", "_secretPopup",
+  "_pinModal", "_invitePicker", "_secretPopup", "_idSyncResult",
 }
 
 LauncherView.MODAL_KEYS = MODAL_KEYS
@@ -6500,7 +6506,8 @@ local function modalUp(imp)
     or imp._profileRenamePrompt or imp._findEntry or imp._gameManage
     or imp._saveExport or imp._savePicker or imp._modGames
     or imp._tradeModal or imp._bugModal or imp._pcPicker
-    or imp._pinModal or imp._invitePicker or imp._secretPopup) ~= nil
+    or imp._pinModal or imp._invitePicker or imp._secretPopup
+    or imp._idSyncResult) ~= nil
 end
 
 local function modalKey(imp)
@@ -6618,6 +6625,11 @@ local function buildModals(imp, m)
     return true
   end
   if imp._modConfirm then buildConfirmModal(imp, m) return true end
+  if imp._idSyncResult then
+    buildTextModal(imp, m, "idsync-result", imp._idSyncResult.title,
+      imp._idSyncResult.body, function() imp._idSyncResult = nil end)
+    return true
+  end
   if imp._appPatchNotes then
     local PatchNotes = require("src.update.PatchNotes")
     local ModUpdate = require("src.mods.ModUpdate")
