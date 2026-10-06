@@ -79,8 +79,10 @@ imported side by side. Gen 2 support is still under construction.
    [latest release](https://github.com/bryanthaboi/gen1recomp/releases/latest).
 2. Launch it. The packaged app contains no ROM and no game data, so the
    launcher will ask for one.
-3. Choose your legally obtained `.gb` / `.gbc` / `.gba` file, or drop it onto
-   the window. Import takes a few seconds and the game starts automatically.
+3. Choose your legally obtained `.gb` / `.gbc` / `.gba` file, a `.zip` /
+   `.7z` that holds one (offered only where your platform's build supports
+   archives), or drop it onto the window. Import takes a few seconds and the
+   game starts automatically.
 4. Repeat for any other game you own. Each one gets its own tab in the launcher.
 
 Only the canonical US English ROMs below are accepted. The importer checks the
