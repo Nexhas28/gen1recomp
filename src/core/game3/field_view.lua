@@ -1812,6 +1812,14 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     end
   end
 
+  if underActors or overActors then
+    local LinkTags = package.loaded["src.ui.game3.link_tags"]
+    if LinkTags and LinkTags.draw then
+      LinkTags.draw(underActors, overActors, camX, camY, canvasW, canvasH,
+        FieldView._billboard and pushBillboard or nil)
+    end
+  end
+
   -- pokefirered/src/field_effect.c:1024
   if not opts.actorsOnly then
     local Heal = modHeal()
