@@ -98,6 +98,8 @@ local function isMatchingFilter(name, isDir, mode)
     return (ext == "gb" or ext == "gbc" or ext == "gba" or ext == "zip")
   elseif mode == "save" then
     return (ext == "sav" or ext == "lua")
+  elseif mode == "box" then
+    return (ext == "gci" or ext == "sav")
   elseif mode == "mod" then
     return (ext == "zip")
   elseif mode == "cart" then

@@ -2672,6 +2672,9 @@ function SaveData.load(version)
   SaveData.runMigrations(data)
   data.options = SaveData.loadOptions()
   local loadInfo = type(data.version) == "string" and GameVersion.info(data.version)
+  if loadInfo and loadInfo.generation == 3 then
+    pcall(function() require("src.save_convert.Gen3Save").repairJapaneseNames(data) end)
+  end
   if loadInfo and loadInfo.generation == 2 then
     data.options = require("src.core.gen2.Save").loadOptions()
   end

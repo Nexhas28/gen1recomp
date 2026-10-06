@@ -793,6 +793,7 @@ end
 local function player_identity(player)
   player = player or {}
   local id = player.trainerId or player.id or player.playerId
+  local sid = player.secretId
   local name = player.name or player.playerName or player.otName
   if id == nil or name == nil then
     local Runtime = package.loaded["src.core.game3.runtime"]
@@ -801,17 +802,18 @@ local function player_identity(player)
     end)
     if ok and sess then
       id = id or sess.trainerId or sess.id or sess.playerId
+      sid = sid or sess.secretId
       name = name or sess.name or sess.playerName
     end
   end
-  return tonumber(id), name
+  return require("src.core.TrainerIdentity").packed(id, sid), name
 end
 
 -- pokefirered/src/pokemon.c:5974 IsOtherTrainer
 function Pokemon.isOtherTrainer(otId, otName, player)
   local playerId, playerName = player_identity(player)
   if playerId == nil then return false end
-  if tonumber(otId) ~= playerId then return true end
+  if require("src.core.TrainerIdentity").packed(otId) ~= playerId then return true end
   local mine = tostring(playerName or "")
   local theirs = tostring(otName or "")
   for i = 1, #theirs do
@@ -820,10 +822,43 @@ function Pokemon.isOtherTrainer(otId, otName, player)
   return false
 end
 
+-- pokefirered/src/new_game.c:56
+function Pokemon.playerSecretId(session)
+  if type(session) ~= "table" then return 0 end
+  local Identity = require("src.core.TrainerIdentity")
+  local sec = Identity.u16(session.secretId) or Identity.u16(session.otSecretId)
+  local tid = Identity.u16(session.trainerId or session.id or session.playerId)
+  local name = session.name or session.playerName
+  local function scan(list)
+    for _, m in pairs(type(list) == "table" and list or {}) do
+      local otName = type(m) == "table" and (m.otName or m.ot)
+      if type(m) == "table" and Identity.u16(m.otId) == tid
+          and not (type(name) == "string" and type(otName) == "string" and otName ~= name) then
+        local packed = Identity.packed(m.otId, m.otSecretId)
+        if packed and (Identity.u16(m.otSecretId) or packed >= 65536) then
+          return math.floor(packed / 65536)
+        end
+      end
+    end
+  end
+  if sec == nil and tid then
+    sec = scan(session.party)
+    local storage = session.storage
+    for _, box in pairs((sec == nil) and type(storage) == "table" and type(storage.boxes) == "table"
+        and storage.boxes or {}) do
+      sec = sec or scan(type(box) == "table" and box.mons or nil)
+    end
+  end
+  sec = sec or 0
+  session.secretId = sec
+  return sec
+end
+
 -- pokefirered/src/pokemon.c:5965 IsTradedMon
 function Pokemon.isTradedMon(mon, player)
   if type(mon) ~= "table" or mon.otId == nil then return false end
-  return Pokemon.isOtherTrainer(mon.otId, mon.otName or mon.ot, player)
+  local id = require("src.core.TrainerIdentity").packed(mon.otId, mon.otSecretId)
+  return Pokemon.isOtherTrainer(id, mon.otName or mon.ot, player)
 end
 
 local function friendship_bonuses(mon, friendship, ctx)
