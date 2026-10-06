@@ -5,6 +5,12 @@ local Sync = require("src.core.TrainerIdSync")
 local Identity = require("src.core.TrainerIdentity")
 local Compat = require("src.save_convert.Compat")
 local K = require("tests.save_compat._codec")
+for _, version in ipairs({ "red", "blue", "yellow" }) do
+  if not pcall(K.gen1Data, version) then
+    print("trainer_identity_sync skipped (needs Gen 1 fixture caches; set RED_CACHE, BLUE_CACHE, YELLOW_CACHE)")
+    os.exit(0)
+  end
+end
 local G1 = require("tests.fixtures.save.gen1_build")
 local G2 = require("tests.fixtures.save.gen2_build")
 local Gen3Save = require("src.save_convert.Gen3Save")
