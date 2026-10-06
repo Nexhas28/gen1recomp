@@ -1953,6 +1953,55 @@ function SaveData.duplicateCartSlot(cartId, slotId, label)
   return duplicateSlotIn(key, slotId, label)
 end
 
+local function playthroughIdTaken(fs, opts, key, slotId, id)
+  if type(opts.playthroughIds) == "table" then
+    for scope, ids in pairs(opts.playthroughIds) do
+      if type(ids) == "table" then
+        for sid, pid in pairs(ids) do
+          if pid == id and not (scope == key and sid == slotId) then return true end
+        end
+      end
+    end
+  end
+  local reg = registryOf(opts, key)
+  for _, other in ipairs(reg and type(reg.list) == "table" and reg.list or {}) do
+    if other ~= slotId then
+      local body = readSlotSourceIn(key, other, fs)
+      local save = body and SaveSerializer.decode(body)
+      local meta = type(save) == "table" and save.meta
+      if type(meta) == "table" and meta.playthroughId == id then return true end
+    end
+  end
+  return false
+end
+
+function SaveData.claimImportPlaythroughId(version, slotId, save)
+  version = version or GameVersion.get()
+  if not knownVersion(version) or type(slotId) ~= "string" then return nil end
+  local meta = type(save) == "table" and save.meta
+  local id = type(meta) == "table" and meta.playthroughId
+  if type(id) ~= "string" or id == "" then return nil end
+  local fs = persistFs(nil)
+  ensureSlots(version, fs)
+  local opts = SaveData.loadOptions(fs)
+  if playthroughIdTaken(fs, opts, version, slotId, id) then
+    local newId = SaveData.newPlaythroughId()
+    if id:match("^[%w_-]+$") and version:match("^[%w_-]+$") then
+      copyTree(fs, "mod_storage/" .. version .. "/" .. id,
+        "mod_storage/" .. version .. "/" .. newId)
+    end
+    id = newId
+    meta.playthroughId = id
+  end
+  opts.playthroughIds = type(opts.playthroughIds) == "table" and opts.playthroughIds or {}
+  opts.playthroughIds[version] = opts.playthroughIds[version] or {}
+  if opts.playthroughIds[version][slotId] ~= id then
+    opts.playthroughIds[version][slotId] = id
+    SaveData.saveOptions(opts, fs)
+  end
+  return id
+end
+
 -- Drop the process-global "have we resolved slots for this scope" cache so
 -- the next listSlots/saveNames re-reads disk (and can migrate a flat legacy
 -- SAVE into slot1).  Pass a version id or cart scope key to invalidate just

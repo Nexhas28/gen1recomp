@@ -23,7 +23,20 @@ local DECLS = {
     void *hProcess; void *hThread; uint32_t dwProcessId; uint32_t dwThreadId;
   } PP_PROCESS_INFORMATION;]],
   "int CreateProcessW(const uint16_t *app, uint16_t *cmd, void *pa, void *ta, int inherit, uint32_t flags, void *env, const uint16_t *cwd, PP_STARTUPINFOW *si, PP_PROCESS_INFORMATION *pi);",
+  -- SECURITY_ATTRIBUTES: 24 bytes on x64, 12 on x86
+  [[typedef struct {
+    uint32_t nLength; void *lpSecurityDescriptor; int bInheritHandle;
+  } PP_SECURITY_ATTRIBUTES;]],
+  "int CreatePipe(void **rd, void **wr, PP_SECURITY_ATTRIBUTES *sa, uint32_t size);",
+  "int SetHandleInformation(void *h, uint32_t mask, uint32_t flags);",
+  "int ReadFile(void *h, void *buf, uint32_t n, uint32_t *got, void *ov);",
+  "uint32_t WaitForSingleObject(void *h, uint32_t ms);",
+  "int GetExitCodeProcess(void *h, uint32_t *code);",
 }
+
+local HANDLE_FLAG_INHERIT = 0x00000001
+local STARTF_USESTDHANDLES = 0x00000100
+local INFINITE = 0xFFFFFFFF
 
 local loaded = nil
 
@@ -154,6 +167,69 @@ function WinApi.spawn(exe, args, opts)
     return true
   end)
   return ok and spawned == true
+end
+
+function WinApi.run(exe, args, opts)
+  local ffi = lib()
+  if not ffi or type(exe) ~= "string" or exe == "" then return nil end
+  opts = opts or {}
+  local C = ffi.C
+  local ok, out, code = pcall(function()
+    local cmd = WinApi.wide(opts.commandLine or WinApi.commandLine(exe, args))
+    if not cmd then return nil end
+    local app = nil
+    if opts.useApplicationName ~= false then
+      app = WinApi.wide(exe)
+      if not app then return nil end
+    end
+    local cwd = nil
+    if type(opts.cwd) == "string" and opts.cwd ~= "" then
+      cwd = WinApi.wide(opts.cwd)
+      if not cwd then return nil end
+    end
+    local sa = ffi.new("PP_SECURITY_ATTRIBUTES")
+    sa.nLength = ffi.sizeof("PP_SECURITY_ATTRIBUTES")
+    sa.bInheritHandle = 1
+    local rd, wr = ffi.new("void *[1]"), ffi.new("void *[1]")
+    local pi = ffi.new("PP_PROCESS_INFORMATION")
+    local flags = opts.flags or WinApi.CREATE_NO_WINDOW
+    local started, attempted = false, false
+    local function launch()
+      if attempted then return end
+      attempted = true
+      pcall(function()
+        if C.CreatePipe(rd, wr, sa, 0) == 0 then return end
+        C.SetHandleInformation(rd[0], HANDLE_FLAG_INHERIT, 0)
+        local si = ffi.new("PP_STARTUPINFOW")
+        si.cb = ffi.sizeof("PP_STARTUPINFOW")
+        si.dwFlags = STARTF_USESTDHANDLES
+        si.hStdOutput = wr[0]
+        si.hStdError = wr[0]
+        started = C.CreateProcessW(app, cmd, nil, nil, 1, flags, nil, cwd, si, pi) ~= 0
+        C.CloseHandle(wr[0])
+        if not started then C.CloseHandle(rd[0]) end
+      end)
+    end
+    if type(opts.lock) == "function" then opts.lock(launch) else launch() end
+    if not started then return nil end
+    C.CloseHandle(pi.hThread)
+    local chunks = {}
+    local size = 65536
+    local buf = ffi.new("uint8_t[?]", size)
+    local got = ffi.new("uint32_t[1]")
+    while C.ReadFile(rd[0], buf, size, got, nil) ~= 0 and got[0] > 0 do
+      chunks[#chunks + 1] = ffi.string(buf, got[0])
+    end
+    C.CloseHandle(rd[0])
+    C.WaitForSingleObject(pi.hProcess, INFINITE)
+    local exit = ffi.new("uint32_t[1]")
+    local status = nil
+    if C.GetExitCodeProcess(pi.hProcess, exit) ~= 0 then status = tonumber(exit[0]) end
+    C.CloseHandle(pi.hProcess)
+    return table.concat(chunks), status
+  end)
+  if ok and type(out) == "string" then return out, code end
+  return nil
 end
 
 return WinApi

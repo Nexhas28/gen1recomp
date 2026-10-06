@@ -1375,6 +1375,7 @@ function Game2:logicSpeed()
 end
 
 function Game2:update(dt)
+  require("src.core.DeferredWrite").tick()
   -- _UpdateSound is a VBlank job, so it runs at 60Hz off real time whatever the
   -- logic multiplier is (audio/engine.asm:84, home/vblank.asm:141-143).
   local step = FixedStep.STEP
@@ -2204,7 +2205,7 @@ function Game2:storeZoom()
   self.options = options
   options.zoom = require("src.render.Zoom").offset
   if self.save then self.save.options = options end
-  self:persistOptions()
+  require("src.core.DeferredWrite").schedule("options", function() self:persistOptions() end)
 end
 
 function Game2:zoomStep(delta)
@@ -2417,7 +2418,7 @@ end
 function Game2:focus(f)
   Input:reset()
   TouchControls:reset()
-  if f then Input:reconcile() end
+  if f then Input:reconcile() else require("src.core.DeferredWrite").flush("options") end
   self:cancelPointers()
 end
 
@@ -2425,6 +2426,7 @@ function Game2:visible(v)
   if v then
     self:onResume()
   else
+    require("src.core.DeferredWrite").flush("options")
     Input:reset()
     TouchControls:reset()
     self:cancelPointers()
@@ -2674,6 +2676,7 @@ end
 -- Same rule as Gen1: only release known GPU owners -- never fan out
 -- arbitrary field:release() (shared modules use :release as a handle API).
 function Game2:reset()
+  require("src.core.DeferredWrite").flush("options")
   if self.stack and self.stack.clear then
     pcall(function() self.stack:clear() end)
   end

@@ -1254,9 +1254,13 @@ end
 -- engine/gfx/hp_bar.asm:121-135
 function BattleState:hpDrainClose(b, goal)
   local cycles = b.drainCycles or 0
+  local roundUp = b.drainRoundUp
   b.drainCycles = nil
+  b.drainRoundUp = nil
   if goal ~= 0 then cycles = cycles + Timing.HP_BAR_STEP_CYCLES end
-  return Timing.hpDrainClosingFrames(b == self.player, cycles)
+  -- engine/gfx/hp_bar.asm:133-134
+  b.shownPx = Timing.hpBarPixels(goal, math.max(1, b.mon.stats.hp))
+  return Timing.hpDrainClosingFrames(b == self.player, cycles, roundUp)
 end
 
 -- engine/gfx/hp_bar.asm:81-120
@@ -1273,7 +1277,8 @@ function BattleState:stepHPDrain()
       end
       local maxHP = math.max(1, b.mon.stats.hp)
       local playerSide = (b == self.player)
-      local targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+      local barPx = b.draining and Timing.hpBarLength or Timing.hpBarPixels
+      local targetPx = barPx(b.shownHP, maxHP)
       if not b.shownPx then b.shownPx = targetPx end
       if (b.drainHold or 0) > 0 then
         b.drainHold = b.drainHold - 1
@@ -1306,7 +1311,7 @@ function BattleState:stepHPDrain()
             -- engine/gfx/hp_bar.asm:96
             b.drainCycles = (b.drainCycles or 0) + Timing.HP_BAR_STEP_CYCLES
           end
-          targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+          targetPx = Timing.hpBarLength(b.shownHP, maxHP)
         until b.shownHP == goal or targetPx ~= b.shownPx or spent >= 1
         b.draining = true
         if spent > 0 then
@@ -1314,8 +1319,9 @@ function BattleState:stepHPDrain()
         elseif targetPx ~= b.shownPx then
           -- engine/gfx/hp_bar.asm:140-148
           b.shownPx = b.shownPx + ((b.shownPx > targetPx) and -1 or 1)
-          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1
-                        + Timing.hpBarCpuLag(b.drainCycles)
+          local lag, tie = Timing.hpBarCpuLag(b.drainCycles, b.drainRoundUp)
+          if tie then b.drainRoundUp = (b.drainRoundUp == false) end
+          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1 + lag
           b.drainCycles = 0
         else
           b.draining = nil

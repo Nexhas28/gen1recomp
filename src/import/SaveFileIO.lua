@@ -174,6 +174,7 @@ local function importLuaSlot(bytes, version)
   end
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
     SaveData.deleteSlot(version, slotId)
@@ -194,6 +195,7 @@ local function importGen3Cart(bytes, version)
   save.meta = SaveData.buildMeta(nil, save.meta)
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
     SaveData.deleteSlot(version, slotId)
@@ -265,8 +267,10 @@ function SaveFileIO.importToSlot(source, version, force)
   save.meta = SaveData.buildMeta(nil, save.meta)
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
+    SaveData.deleteSlot(version, slotId)
     return false, "could not write the imported save: " .. tostring(writeErr)
   end
   SaveData.setActiveSlot(version, slotId)

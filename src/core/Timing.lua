@@ -142,48 +142,64 @@ Timing.TRAINER_SLIDE_COL  = 2  -- core.asm:1267-1268, per column
 Timing.HP_BAR_PIXELS      = 48 -- the bar is 48 px wide (GetHPBarLength)
 Timing.HP_BAR_PIXEL_STEP  = 2  -- engine/gfx/hp_bar.asm:147-148
 Timing.HP_BAR_HP_STEP     = 1  -- engine/gfx/hp_bar.asm:207-209, 234
-Timing.HP_BAR_STEP_CYCLES = 7000  -- engine/gfx/hp_bar.asm:244-269
+Timing.HP_BAR_STEP_CYCLES = 6144  -- engine/gfx/hp_bar.asm:81-120, 244-269
+Timing.VBLANK_CYCLES      = 2196  -- home/vblank.asm:1
 Timing.FRAME_CYCLES       = 17556
 
--- Pixels the bar shows for `hp` out of `maxHP`.  GetHPBarLength floors the
--- 48ths and clamps the result to at least 1 for any nonzero HP
--- (engine/gfx/hp_bar.asm:42-45); an empty bar is 0.
-function Timing.hpBarPixels(hp, maxHP)
+-- engine/gfx/hp_bar.asm:6-45
+function Timing.hpBarLength(hp, maxHP)
   if not maxHP or maxHP <= 0 then return 0 end
-  if hp <= 0 then return 0 end
-  local px = math.floor(hp * Timing.HP_BAR_PIXELS / maxHP)
+  local px
+  if maxHP >= 256 then
+    -- engine/gfx/hp_bar.asm:19-34
+    px = math.floor(math.floor(hp * Timing.HP_BAR_PIXELS / 4)
+                    / math.floor(maxHP / 4))
+  else
+    px = math.floor(hp * Timing.HP_BAR_PIXELS / maxHP)
+  end
   if px < 1 then px = 1 end
   return px
 end
 
-function Timing.hpBarCpuLag(cycles)
-  if not cycles or cycles <= 0 then return 0 end
-  return math.ceil(cycles / Timing.FRAME_CYCLES) - 1
+function Timing.hpBarPixels(hp, maxHP)
+  if not maxHP or maxHP <= 0 then return 0 end
+  if hp <= 0 then return 0 end
+  return Timing.hpBarLength(hp, maxHP)
+end
+
+function Timing.hpBarCpuLag(cycles, roundUp)
+  if not cycles or cycles <= 0 then return 0, false end
+  local budget = Timing.FRAME_CYCLES - Timing.VBLANK_CYCLES
+  local whole = math.floor(cycles / budget)
+  if cycles % budget ~= 0 then return whole, false end
+  if roundUp == false then return whole - 1, true end
+  return whole, true
 end
 
 -- engine/gfx/hp_bar.asm:121-135
-function Timing.hpDrainClosingFrames(playerSide, cycles)
+function Timing.hpDrainClosingFrames(playerSide, cycles, roundUp)
   local frames = Timing.HP_BAR_PIXEL_STEP + Timing.DELAY3
   if playerSide then return frames + Timing.HP_BAR_HP_STEP end
-  return frames + Timing.hpBarCpuLag(cycles)
+  return frames + Timing.hpBarCpuLag(cycles, roundUp)
 end
 
 -- engine/gfx/hp_bar.asm:81-120
 function Timing.hpDrainFrames(fromHP, toHP, maxHP, playerSide)
-  local total, cycles = 0, 0
+  local total, cycles, roundUp = 0, 0, true
   local hp = fromHP
   local dir = (toHP < fromHP) and -1 or 1
   while hp ~= toHP do
     local nextHP = hp + dir
-    local pixels = math.abs(Timing.hpBarPixels(nextHP, maxHP)
-                            - Timing.hpBarPixels(hp, maxHP))
+    local pixels = math.abs(Timing.hpBarLength(nextHP, maxHP)
+                            - Timing.hpBarLength(hp, maxHP))
     if playerSide then
       total = total + Timing.HP_BAR_HP_STEP + pixels * Timing.HP_BAR_PIXEL_STEP
     else
       cycles = cycles + Timing.HP_BAR_STEP_CYCLES
       if pixels > 0 then
-        total = total + pixels * Timing.HP_BAR_PIXEL_STEP
-                + Timing.hpBarCpuLag(cycles)
+        local lag, tie = Timing.hpBarCpuLag(cycles, roundUp)
+        if tie then roundUp = not roundUp end
+        total = total + pixels * Timing.HP_BAR_PIXEL_STEP + lag
         cycles = 0
       end
     end
@@ -193,7 +209,7 @@ function Timing.hpDrainFrames(fromHP, toHP, maxHP, playerSide)
   if not playerSide and toHP ~= 0 then
     cycles = cycles + Timing.HP_BAR_STEP_CYCLES
   end
-  return total + Timing.hpDrainClosingFrames(playerSide, cycles)
+  return total + Timing.hpDrainClosingFrames(playerSide, cycles, roundUp)
 end
 
 return Timing

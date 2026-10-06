@@ -58,6 +58,11 @@ return function(game)
       check(id .. " does NOT animate the bar (status cure / PP)",
             ItemEffects.healsHP(id) ~= true)
     end
+    for _, id in ipairs({ "ANTIDOTE", "PARLYZ_HEAL", "AWAKENING", "BURN_HEAL",
+                          "ICE_HEAL", "FULL_HEAL", "FULL_RESTORE" }) do
+      check(id .. " keeps the party menu up for its message",
+            ItemEffects.keepsPartyMenuOpen(id) == true)
+    end
   end
   for _, id in ipairs({ "POTION", "MAX_POTION", "REVIVE", "ANTIDOTE" }) do
     check(id .. " resolves in the item table", game.data.items[id] ~= nil)
@@ -160,6 +165,18 @@ return function(game)
     return top() == game.overworld
   end
 
+  local function dismissMessage()
+    for _ = 1, 30 do
+      if not inStack(isPicker) then return true end
+      U.tap(game, "a")
+      for _ = 1, 8 do
+        if not inStack(isPicker) then return true end
+        U.wait(1)
+      end
+    end
+    return not inStack(isPicker)
+  end
+
   -- ======== scripted run: MAX_POTION on the 1 HP lead ======================
   U.log("======== #252 scripted run: MAX POTION on a 1 HP CHARIZARD ========")
   local picker, why = openPickerFor("MAX_POTION")
@@ -244,17 +261,10 @@ return function(game)
     U.wait(60) -- let the line type out, so the shot shows the text not an empty box
     U.shot(game, DIR .. "/bug252_message_over_party.png")
 
-    -- TextBox pops BEFORE it fires onDone, which is what makes
-    -- PartyMenu:close's identity check land on the picker
-    for _ = 1, 30 do
-      if not inStack(isPicker) then break end
-      U.tap(game, "a")
-      U.wait(8)
-    end
-    check("the picker is gone once the message is dismissed", not inStack(isPicker))
+    check("the picker is gone once the message is dismissed", dismissMessage())
     local flashed = isFlash(top())
     check("the return to the bag whites out (#2125)", flashed)
-    if flashed then U.shot(game, DIR .. "/bug2125_white.png") end
+    if flashed then U.still(game, DIR .. "/bug2125_white.png") end
     for _ = 1, 40 do
       if not isFlash(top()) then break end
       U.wait(1)
@@ -265,19 +275,48 @@ return function(game)
   end
   backToOverworld()
 
-  -- ======== contrast: ANTIDOTE must NOT animate ===========================
-  U.log("======== #252 contrast: ANTIDOTE (no bar fill at all) ========")
+  -- engine/items/item_effects.asm:1223-1237
+  U.log("======== #252 ANTIDOTE: cure message over the party menu ========")
   local cure = openPickerFor("ANTIDOTE")
   if check("party picker opened for ANTIDOTE", cure ~= nil) then
-    check("keepOpen is off for a status cure", cure.keepOpen ~= true)
-    cursorTo(cure, 3) -- the poisoned SNORLAX
+    check("keepOpen is on for a status cure", cure.keepOpen == true)
+    cursorTo(cure, 3)
     U.tap(game, "a")
     U.wait(6)
     check("no fill was started for a status cure", cure.heal == nil)
-    check("the picker popped itself, like every non-medicine item",
-          not inStack(isPicker))
-    U.shot(game, DIR .. "/bug252_antidote_message.png")
     check("PSN was cured", poisoned.status == nil)
+    for _ = 1, 60 do
+      if isBox(top()) then break end
+      U.wait(1)
+    end
+    local box = top()
+    check("the cure message opened", isBox(box))
+    check("...over the still-drawn party menu", inStack(isPicker))
+    check("...with the menu cursor erased", cure.cursorsErased == true)
+    if isBox(box) then
+      local out = {}
+      for _, page in ipairs(box.pages or {}) do
+        for _, line in ipairs(page) do out[#out + 1] = line end
+      end
+      local said = table.concat(out, " ")
+      U.log("box reads:", said)
+      check("...and it is the poison-cured line",
+            said:find("poison", 1, true) ~= nil)
+    end
+    U.wait(60)
+    U.shot(game, DIR .. "/bug252_antidote_message.png")
+    check("the picker is gone once the cure message is dismissed",
+          dismissMessage())
+    local flashed = isFlash(top())
+    check("the return to the bag whites out after the cure", flashed)
+    if flashed then U.still(game, DIR .. "/bug252_antidote_white.png") end
+    for _ = 1, 40 do
+      if not isFlash(top()) then break end
+      U.wait(1)
+    end
+    local back = top()
+    check("and the cure returns to the ITEM list",
+          back ~= nil and back.screenId == "BagMenu")
   end
   backToOverworld()
 

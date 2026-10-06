@@ -3,6 +3,7 @@
 
 local Data = require("src.core.Data")
 local FixedStep = require("src.core.FixedStep")
+local DeferredWrite = require("src.core.DeferredWrite")
 local Input = require("src.core.Input")
 local Logger = require("src.core.Logger")
 local Renderer = require("src.render.Renderer")
@@ -428,6 +429,7 @@ function Game:update(dt)
   -- Fast-forward scales only the logic clock (see src/core/GameSpeed.lua).
   -- Give the accumulator room for one full frame at the current speed,
   -- or the anti-spiral clamp quietly caps every level above ~15X.
+  DeferredWrite.tick()
   local speed = self:logicSpeed()
   self._frameSpeed = speed
   FixedStep.maxAccum = FixedStep.catchupLimit(speed, dt)
@@ -777,7 +779,7 @@ function Game:zoomStep(delta)
   local offset = Zoom.step(delta, Renderer:fitScale())
   if self.save and self.save.options then
     self.save.options.zoom = offset
-    self:writeOptions()
+    DeferredWrite.schedule("options", function() self:writeOptions() end)
   end
 end
 
@@ -1127,6 +1129,8 @@ function Game:focus(f)
     Input:reconcile()
     local eng = self:syncEngine()
     if eng then pcall(eng.noteResumed, eng) end
+  else
+    DeferredWrite.flush("options")
   end
   TouchControls:reset()
   self:cancelPointers()
@@ -1136,6 +1140,7 @@ function Game:visible(v)
   if v then
     self:onResume()
   else
+    DeferredWrite.flush("options")
     Input:reset()
     TouchControls:reset()
     self:cancelPointers()
@@ -1585,6 +1590,7 @@ end
 -- been observed to leave Game.load nil after EXIT GAME on Android.
 -- Explicit GPU owners are released below; everything else is just dropped.
 function Game:reset()
+  DeferredWrite.flush("options")
   if self.stack and self.stack.clear then
     pcall(function() self.stack:clear() end)
   end

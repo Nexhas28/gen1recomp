@@ -291,6 +291,7 @@ tests/engine/gen2_map_bake_dpi.lua
 tests/engine/gen2_menu_whites_s6.lua
 tests/engine/gen2_mod_battle_theme.lua
 tests/engine/gen2_mod_options_persist.lua
+tests/engine/gen2_naming_header_2708_test.lua
 tests/engine/gen2_naming_screen_translation_test.lua
 tests/engine/gen2_new_seams.lua
 tests/engine/gen2_night_shade_text_pal_bug1961.lua
@@ -389,7 +390,9 @@ tests/engine/host_shell_fetch_errors.lua
 tests/engine/host_shell_postlog.lua
 tests/engine/host_shell_request_headers.lua
 tests/engine/hostshell_spawn_self.lua
+tests/engine/hostshell_win_http_nonascii.lua
 tests/engine/hostshell_win_restart_2721.lua
+tests/engine/hp_bar_speed_bug2723.lua
 tests/engine/importer_worker_failure_cleanup.lua
 tests/engine/importers_asset_packs.lua
 tests/engine/indigo_statues_bug2683.lua
@@ -681,6 +684,7 @@ tests/engine/textbox_arrow_cell_bug2674.lua
 tests/engine/textbox_pause_bug1818.lua
 tests/engine/textbox_sfx_speed_bug2087_test.lua
 tests/engine/thrash_setup_anim_bug1532.lua
+tests/engine/timing_parity.lua
 tests/engine/title_fill_scale.lua
 tests/engine/title_fill_skin_lock.lua
 tests/engine/title_mon_cycle.lua
@@ -729,6 +733,7 @@ tests/engine/warp_fade_obp0_identity_bug2689.lua
 tests/engine/warp_fade_palette_2180.lua
 tests/engine/warp_sprite_hidden_bug916.lua
 tests/engine/wave_channel_mix_bug429.lua
+tests/engine/wheel_zoom_persist_debounce.lua
 tests/engine/wide_battle_layout.lua
 tests/engine/wide_battle_shake_bug562.lua
 tests/engine/worker_fs_nx_test.lua
@@ -825,6 +830,7 @@ tests/game3_weather_test.lua
 tests/gen2_fly_map_test.lua
 tests/gen2_menus_test.lua
 tests/modkit/cases/bag_capacity.lua
+tests/modkit/cases/mod_map_outdoor_encounters.lua
 tests/parity_F.lua
 tests/parity_ball_shake_anim.lua
 tests/parity_battle_intro_chrome.lua

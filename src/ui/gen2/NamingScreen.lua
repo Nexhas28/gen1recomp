@@ -147,9 +147,9 @@ function NamingScreen.new(game, opts)
   self.gfx = opts.menuGfx or data.gen2MenuGfx
   if self.gfx and self.gfx.naming then self.gfx = self.gfx.naming end
   -- engine/menus/naming_screen.asm:47
-  -- engine/gfx/cgb_layouts.asm:488
+  -- engine/gfx/cgb_layouts.asm:495
   local diploma = data.gen2Diploma
-  self.palette = diploma and diploma.palettes and diploma.palettes[1]
+  self.palette = diploma and diploma.bgPalette
   self.tiles = {}
   if self.gfx then
     for _, key in ipairs({ "border", "middleLine", "underLine", "cursor" }) do
@@ -170,8 +170,10 @@ function NamingScreen:loadMonHeader(data, mon)
   local PartyMenu = require("src.ui.gen2.PartyMenu")
   local iconId = PartyMenu.iconIdFor({ icons = icons }, mon)
   local entry = iconId and icons and icons.icons and icons.icons[iconId]
-  local path = require("src.pokemon.Sprites").iconPath(
-    data, mon, entry and entry.image, { name = iconId })
+  local path, trueColor = require("src.pokemon.Sprites").iconPath(
+    data, mon, entry and entry.image,
+    { name = iconId, trueColor = entry and entry.trueColor })
+  self.iconTrueColor = trueColor
   self.iconImage = nil
   if path then
     local ok, img = pcall(Assets.image, path)
@@ -561,7 +563,8 @@ function NamingScreen:drawPanel()
       quad:setViewport(0, frameY, math.min(16, w), math.min(16, h), w, h)
     end
     local ix, iy = self:iconOrigin()
-    if self.iconColors and GbcPalette.available() then
+    if self.iconColors and GbcPalette.available()
+        and not (self.iconTrueColor and GbcPalette.mode == "gbc") then
       local previous = G.getShader and G.getShader() or nil
       GbcPalette.use(self.iconColors)
       G.draw(self.iconImage, quad, ix, iy)

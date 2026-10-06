@@ -109,4 +109,33 @@ do
     "a partial enemy drain matches the closed form exactly")
 end
 
+local function cartDrain(side, maxHP, fromHP, toHP)
+  local b = newBattle(100)
+  local battler = b[side]
+  battler.mon.stats.hp = maxHP
+  battler.mon.hp = fromHP
+  battler.shownHP = fromHP
+  battler.shownPx = nil
+  battler.drainHold = nil
+  return drainFrames(b, battler, toHP), battler
+end
+
+-- engine/gfx/hp_bar.asm:81-135
+for _, m in ipairs({
+  { "enemy", 200, 200, 1, 152 }, { "enemy", 150, 150, 0, 147 },
+  { "enemy", 400, 400, 0, 243 }, { "enemy", 300, 300, 263, 29 },
+  { "enemy", 240, 240, 1, 171 },
+  { "player", 150, 150, 0, 250 }, { "player", 399, 399, 199, 254 },
+  { "player", 256, 256, 0, 356 },
+}) do
+  local frames, battler = cartDrain(m[1], m[2], m[3], m[4])
+  T.eq(frames, m[5], string.format("%s stepper %d -> %d of %d runs %d frames",
+    m[1], m[3], m[4], m[2], m[5]))
+  T.eq(frames, Timing.hpDrainFrames(m[3], m[4], m[2], m[1] == "player"),
+    string.format("%s stepper %d -> %d of %d matches the closed form",
+      m[1], m[3], m[4], m[2]))
+  T.eq(battler.shownPx, Timing.hpBarPixels(m[4], m[2]),
+    string.format("%s bar settles on %d px", m[1], Timing.hpBarPixels(m[4], m[2])))
+end
+
 T.finish("hp bar speed")
