@@ -21,6 +21,23 @@ for _, version in ipairs({ "ruby", "sapphire", "emerald", "firered", "leafgreen"
   tables[prefix.."data/generated/gba/items/pack.lua"] = Serializer.encode({items=items})
 end
 CacheFs.readAt=function(path) return tables[path] end;Catalog.reset()
+Events.autoFetch=false
+local Gift=require("src.core.game3.mystery_gift")
+local EON_EVENT=require("src.core.Base64").decode("AQAAAAICAAIAAAAEAIABAAAQfhYAAB4AAAKaAgACBggBAWEAAAL7AQACCwEFEwEF+wEAAgLB4wDn2dkA7ePp5gDa1ejc2eYA1egA6NzZAMHTxwDd4v7Kv867xrzPzMGt/7hhAAACRxMBAQAhDYABALsBvwAAAkoTAQEAIQ2AAQC7Ab8AAAIrzgC7Ab8AAAJqWr3JAAACZm1GEwEBACENgAAAuwHAAAACGgCAEwEaAYABAAkAKVMIvQYBAAJmbWwNvYYBAAJmbWwCvru+8AD9AasAwePj2ADo4wDn2dkA7ePpq/7O3Nnm2bTnANUA4Nno6NnmANzZ5tkA2uPmAO3j6bgA/QGt/767vvAAw+gA1eTk2dXm5wDo4wDW2QDVANrZ5ubtAM7DvcW/zrj+1unoAMO06tkA4tnq2eYA59nZ4gDj4tkA4N3f2QDd6ADW2drj5tmt+9Pj6QDn3OPp4NgA6t3n3egAxsPG073J0L8A1eLYANXn3/7V1uPp6ADd6ADo3Nnm2a3/vru+8AD9AbgA6NzZAMW/0wDDzr/HzQDKyb3Fv84A3eL+7ePp5gC8u8EA3ecA2ung4K37x+Pq2QDn4+HZAN/Z7QDd6Nnh5wDa4+YA59Xa2d/Z2eTd4tv+3eIA7ePp5gDKvbgA6NzZ4gDX4+HZAOfZ2QDh2a3/uPsBAAJHEwEBACENgAEAuwFBAgACShMBAQAhDYABALsBQQIAAivOALsBQQIAAkYTAQEAIQ2AAAC7AUkCAAK+NQAAAg4CAr5RAgACDgMCvnUCAAIOAwLO3N3nAL/Qv8jOAOHV7QDW2QDk4NXt2dgA4+Lg7QDj4tfZrf/T4+nmALy7wbTnAMW/0wDDzr/HzQDKyb3Fv84A3ecA2ung4K3/")
+T.eq(Gift.eventRecordMixingItem(EON_EVENT),275,"the relay eon event hands out ITEM_EON_TICKET by record mixing")
+for _,version in ipairs({"firered","leafgreen","emerald","ruby","sapphire"}) do
+  T.check(not Events.receive({version=version,flags={},vars={},modData={},bag=require("src.core.game3.bag").new()},
+    version=="emerald" and "aurora" or (Events.FAMILY[version]=="rs" and "eon" or "aurora"),2),
+    version.." hands out no ticket before the relay feed arrives")
+end
+local function feedFor(version)
+  local fam=Events.FAMILY[version]
+  if fam=="rs" then return {cards={},news={},events={{key="rs_eon_ticket",label="EON TICKET",bytes=EON_EVENT}}} end
+  local cards={}
+  for _,b in ipairs(Gift.builtins(fam)) do cards[#cards+1]={key=b.key,card=b.card} end
+  return {cards=cards,news={}}
+end
+for _,version in ipairs({"firered","leafgreen","emerald","ruby","sapphire"}) do Events.setFeed(version,feedFor(version)) end
 T.check(not Events.allowed("oldSeaMap","emerald",2),"English Emerald cannot receive Old Sea Map")
 T.check(Events.allowed("oldSeaMap","emerald",1)~=nil,"Japanese Emerald has historical Old Sea Map distribution")
 T.check(not Events.allowed("aurora","emerald",1),"Japanese Emerald has no historical AuroraTicket distribution")
@@ -104,5 +121,13 @@ for _,version in ipairs({"emerald","firered","leafgreen"}) do
   T.eq(Events.status(save,row),"Event already completed",version.." completed encounter is visible before receiving card")
   T.check(not Events.receive(save,"mystic",2),"completed encounter cannot create undeliverable pending card")
 end
+Events.setFeed("firered",{cards={},news={}})
+do
+  local save,why=Events.receive({version="firered",flags={},vars={},modData={},bag=require("src.core.game3.bag").new()},"aurora",2)
+  T.check(save==nil and tostring(why):find("not offering"),"a ticket the relay does not publish cannot be received: "..tostring(why))
+end
+Events.setFeed("ruby",{cards={},news={},events={}})
+T.check(not Events.receive({version="ruby",flags={},vars={},modData={},bag=require("src.core.game3.bag").new()},"eon",2),
+  "Ruby gets no Eon Ticket without the relay e-Reader event")
 CacheFs.readAt=oldRead;Catalog.reset()
 T.finish("Box events")

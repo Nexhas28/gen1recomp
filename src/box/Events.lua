@@ -14,6 +14,44 @@ Events.ROWS = {
   { id="oldSeaMap",name="Old Sea Map",item="ITEM_OLD_SEA_MAP",versions={emerald={[1]=true}},
     card="rse_old_sea_map",route="Faraway Island",method="Wonder Card" },
 }
+Events.FAMILY={firered="frlg",leafgreen="frlg",emerald="rse",ruby="rs",sapphire="rs"}
+Events._feeds,Events._jobs={},{}
+function Events.setFeed(version,list) Events._feeds[version]=list end
+function Events.poll(version,opts)
+  local family=Events.FAMILY[version]
+  if not family then return "error","no_family" end
+  if Events._feeds[version] then return "ok",Events._feeds[version] end
+  local Gift=require("src.core.game3.mystery_gift")
+  local job=Events._jobs[version]
+  if not job then
+    opts=opts or {}
+    job=Gift.fetchOnline({family=family,version=version,transport=opts.transport,client=opts.client})
+    Events._jobs[version]=job
+  end
+  local status,result=Gift.pollOnline(job)
+  if status=="pending" then return status end
+  Events._jobs[version]=nil
+  if status=="ok" then Events._feeds[version]=result end
+  return status,result
+end
+local function relayOffer(save,row)
+  local status,list=Events.poll(save.version)
+  if status=="pending" then return nil,"Checking the relay for tickets. Try again in a moment." end
+  if status~="ok" then return nil,"The relay could not be reached, so no tickets can be received." end
+  local Gift=require("src.core.game3.mystery_gift")
+  local item=require("src.core.game3.constants").of(save.version):require("items",row.item)
+  if Events.FAMILY[save.version]=="rs" then
+    for _,ev in ipairs(list.events or {}) do
+      if Gift.eventRecordMixingItem(ev.bytes)==item then return ev end
+    end
+  else
+    for _,entry in ipairs(list.cards or {}) do
+      if entry.card.gift and entry.card.gift.kind=="item" and entry.card.gift.item==item then return entry end
+    end
+  end
+  return nil,"The relay is not offering this ticket right now."
+end
+Events.relayOffer=relayOffer
 function Events.allowed(id,version,language)
   for _,row in ipairs(Events.ROWS) do
     if row.id==id then return row.versions[version] and row.versions[version][language] and row or nil end
@@ -22,6 +60,7 @@ end
 function Events.list(version,language)
   local out={}
   for _,row in ipairs(Events.ROWS) do if Events.allowed(row.id,version,language) then out[#out+1]=row end end
+  if #out>0 and Events.autoFetch~=false then pcall(Events.poll,version) end
   return out
 end
 local function session(save)
@@ -67,6 +106,8 @@ function Events.receive(save,id,language)
   if not status then return nil,why end
   if status~="Available" then return nil,"This event has already been received." end
   return Context.withItems(save.version,function()
+    local offer,offerWhy=relayOffer(save,row)
+    if not offer then return nil,offerWhy end
     local out=Store.copy(save)
     local s=session(out)
     local C=require("src.core.game3.constants").of(save.version)
@@ -85,11 +126,7 @@ function Events.receive(save,id,language)
         local flag=Gift.receivedGiftFlag(existing.flagId,s)
         if flag and not Gift.getFlag(s,flag) then return nil,"Collect your existing Wonder Card gift before receiving another card." end
       end
-      local family=save.version=="emerald" and "rse" or "frlg"
-      local key=family=="rse" and (row.rseCard or row.card) or row.card
-      local card
-      for _,candidate in ipairs(Gift.builtins(family)) do if candidate.key==key then card=candidate.card end end
-      if not card or not Gift.receiveCard(s,card) then return nil,"The game's ticket delivery card could not be prepared." end
+      if not Gift.receiveCard(s,offer.card) then return nil,"The game's ticket delivery card could not be prepared." end
     end
     apply(s,out);return out
   end)
