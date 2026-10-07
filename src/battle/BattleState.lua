@@ -7035,10 +7035,12 @@ function BattleState:drawTextArea()
       and self:arrowOwnsCell()
     for li, line in ipairs(self.shown or {}) do
       local y = (ys[li] or 128) + off
+      local pen = 8
       for i = 1, #line do
         if not (arrowCell and li == 2 and i == 18) then
-          drawGlyph(line[i], 8 + (i - 1) * 8, y)
+          drawGlyph(line[i], pen, y)
         end
+        pen = pen + Font.advanceOf(line[i])
       end
     end
     -- the blinking down arrow ('▼', glyph $EE) while a \v CONT wait
