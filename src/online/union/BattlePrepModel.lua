@@ -6,6 +6,7 @@ local Project = require("src.online.xgen.Project")
 local Rentals = require("src.online.xgen.Rentals")
 local TradeConvert = require("src.online.xgen.TradeConvert")
 local Identity = require("src.online.xgen.Identity")
+local Recommend = require("src.recommend.Recommend")
 
 local Model = {}
 Model.__index = Model
@@ -56,6 +57,7 @@ local TEXT = {
   sub_level = "Level {level}.",
   rental_tag = "RENTAL",
   rental_info = "A rental Pokémon. It is only for this battle.",
+  rentals_loading = "Getting the rental Pokémon…",
   leave_out = "It stays out of this battle.",
 
   move_pick = "Choose a move for its place.",
@@ -161,6 +163,8 @@ function Model.new(opts)
   self.gameplayMods = opts.gameplayMods == true
   self.rulesOverride = opts.rules
   self.ownedSource = opts.owned
+  self.recommendOpts = opts.recommend
+  self.rentalRev = 0
   self.step = "rules"
   self.cursor = 1
   self.view = nil
@@ -248,16 +252,49 @@ function Model:reset()
 end
 
 function Model:rebuildRules()
+  self:cancelRentals()
   self.unsupported = {}
   self.rentalSet = { rentals = {}, excluded = {} }
+  self.rentalRev = self.rentalRev + 1
   local target = self:target()
   if not target or target.ruleset == "native" or type(self.data) ~= "table" then return end
   if self.data.generation == target.gen and self.data.generation <= 2 then
     local Table = require("src.battle.g3u.Table")
     for _, row in ipairs(Table.unsupportedMoves(self.data)) do self.unsupported[#self.unsupported + 1] = row.id end
   end
+  local ruleset = Policy.ruleset(target.ruleset)
+  local names = Rentals.speciesNames(target.ruleset, self.data)
+  if not ruleset or #names == 0 then return self:settleRentals(nil, "unknown_ruleset") end
+  self.rentalJob = Recommend.request(ruleset.gen, names, self.recommendOpts)
+  self.rentalSet.pending = true
+  self:pollRentals()
+end
+
+function Model:settleRentals(sets, why)
+  local target = self:target()
   self.rentalSet = Rentals.build(target.ruleset, self.data, { unsupported = self.unsupported,
-    legacyPresent = target.legacyPresent })
+    legacyPresent = target.legacyPresent, sets = sets })
+  self.rentalSet.offline = why
+  self.rentalRev = self.rentalRev + 1
+  self.memo, self.memoCount, self.pageMemo = nil, nil, nil
+end
+
+function Model:pollRentals()
+  local job = self.rentalJob
+  if not job then return end
+  local status, result = Recommend.poll(job)
+  if status == "pending" then return end
+  self.rentalJob = nil
+  if status == "ok" then
+    self:settleRentals(result, nil)
+  else
+    self:settleRentals(nil, result or "offline")
+  end
+end
+
+function Model:cancelRentals()
+  if self.rentalJob then Recommend.cancel(self.rentalJob) end
+  self.rentalJob = nil
 end
 
 function Model:entries()
@@ -320,7 +357,7 @@ function Model:teamKey()
 end
 
 function Model:report(withSize)
-  local key = (withSize and "1" or "0") .. self:teamKey() .. self:prepKey()
+  local key = (withSize and "1" or "0") .. self.rentalRev .. self:teamKey() .. self:prepKey()
   self.memo = self.memo or {}
   local hit = self.memo[key]
   if hit then return hit.r, hit.list end
@@ -619,6 +656,7 @@ function Model:enterConfirm(notice)
 end
 
 function Model:discard()
+  self:cancelRentals()
   self.team = {}
   self.owned = {}
   self.final = nil
@@ -672,6 +710,7 @@ function Model:handlePrepEvent(e)
 end
 
 function Model:poll()
+  self:pollRentals()
   local p = self.prep
   if p then
     for _, e in ipairs(p:poll()) do self:handlePrepEvent(e) end
@@ -855,6 +894,7 @@ function Model:pageSubstitute()
   local detail = copy(sb.detail or {})
   detail.national = detail.national or (sb.view and sb.view.national)
   local lines = { Messages.text(sb.code or "bad_record", detail, names), say("sub_intro", { name = wantName }) }
+  if self.rentalSet.pending then lines[#lines + 1] = say("rentals_loading") end
   local owned, rentals = self:replacementOptions(e)
   local items = {}
   for _, row in ipairs(owned) do
@@ -1003,7 +1043,7 @@ function Model:pageView()
       end
     end
     items[#items + 1] = item("back", TEXT.item_back)
-    return { title = TEXT.title_rentals, lines = {}, items = items }
+    return { title = TEXT.title_rentals, lines = self.rentalSet.pending and { say("rentals_loading") } or {}, items = items }
   elseif v.kind == "mon" then
     return { title = TEXT.title_mon, lines = v.lines, items = {}, pager = true }
   elseif v.kind == "size" then
@@ -1027,7 +1067,7 @@ end
 function Model:page()
   local v = self.view
   local key = TradeConvert.canonical({ self.step, v and v.kind, v and v.lines and #v.lines, self.subIndex,
-    self.moveIndex, self.outcome }) .. self:teamKey() .. self:prepKey()
+    self.moveIndex, self.outcome, self.rentalRev }) .. self:teamKey() .. self:prepKey()
   local raw = self.pageMemo and self.pageMemo.key == key and self.pageMemo.page
   if not raw then
     raw = self:rawPage()

@@ -136,7 +136,7 @@ local function expAt(data,species,level)
   end
   return require("src.pokemon.Growth").expForLevel(data.pokemon[species].growthRate,level)
 end
-function Migration.convert(entry,version)
+function Migration.convert(entry,version,opts)
   local from,to=Catalog.get(entry.version),Catalog.get(version)
   local g1,g2=entry.generation,GameVersion.generation(version)
   if not g2 or g1==g2 then return nil,"Choose a different generation; same-generation Pokémon can be withdrawn directly." end
@@ -171,23 +171,39 @@ function Migration.convert(entry,version)
       if not targetItem then return nil,"The destination cannot represent this held item." end
     end
   end
-  local moves,pps,ups={},{},{}
-  for _,move in ipairs(mon.moves or {}) do
-    local key=type(move)=="table" and (move.moveId or move.id or move.move or move.name) or move
-    if key and key~=0 then
-      if not from.moves[key] then return nil,"A move is unknown in the source game." end
-      local id=mapped(to.moves,label(from.moves[key],key))
-      local row=id and (g2==3 and to.battleMoves[id] or to.moves[id])
-      if not row or not row.pp then return nil,"The destination cannot represent move "..label(from.moves[key],key).."." end
-      local detail=d.moveDetails[#pps+1]
-      local bonus=detail and detail.ppUps or 0
-      local max=row.pp+bonus*(g2==3 and math.floor(row.pp/5) or math.min(7,math.floor(row.pp/5)))
-      local pp=clamp(detail and detail.pp or max,0,max)
-      moves[#moves+1]=g2==3 and id or {id=id,pp=pp,ppUps=bonus,maxPp=max}
-      pps[#pps+1],ups[#ups+1]=pp,bonus
+  local moves,pps,ups,missing={},{},{},{}
+  local override=opts and opts.moves
+  if override~=nil then
+    if type(override)~="table" or #override==0 then return nil,"The replacement moveset is empty." end
+    local seen={}
+    for _,id in ipairs(override) do
+      local row=g2==3 and to.battleMoves[id] or g2<3 and to.moves[id]
+      if seen[id] or not row or not row.pp then return nil,"The replacement moveset does not fit the destination." end
+      seen[id]=true
+      moves[#moves+1]=g2==3 and id or {id=id,pp=row.pp,ppUps=0,maxPp=row.pp}
+      pps[#pps+1],ups[#ups+1]=row.pp,0
+    end
+  else
+    for _,move in ipairs(mon.moves or {}) do
+      local key=type(move)=="table" and (move.moveId or move.id or move.move or move.name) or move
+      if key and key~=0 then
+        if not from.moves[key] then return nil,"A move is unknown in the source game." end
+        local id=mapped(to.moves,label(from.moves[key],key))
+        local row=id and (g2==3 and to.battleMoves[id] or to.moves[id])
+        if not row or not row.pp then
+          missing[#missing+1]=tostring(label(from.moves[key],key))
+        else
+          local detail=d.moveDetails[#pps+#missing+1]
+          local bonus=detail and detail.ppUps or 0
+          local max=row.pp+bonus*(g2==3 and math.floor(row.pp/5) or math.min(7,math.floor(row.pp/5)))
+          local pp=clamp(detail and detail.pp or max,0,max)
+          moves[#moves+1]=g2==3 and id or {id=id,pp=pp,ppUps=bonus,maxPp=max}
+          pps[#pps+1],ups[#ups+1]=pp,bonus
+        end
+      end
     end
   end
-  if #moves>4 then return nil,"The destination can represent at most four moves." end
+  if #moves+#missing>4 then return nil,"The destination can represent at most four moves." end
   local out={species=species,nickname=nickname,ot=ot,otName=ot,otId=clamp(mon.otId,0,65535),
     level=clamp(d.level,1,100),moves=moves,isEgg=mon.isEgg or nil,item=targetItem,traded=mon.traded,
     pokerus=g2>=2 and clamp(mon.pokerus,0,255) or nil}
@@ -315,7 +331,18 @@ function Migration.convert(entry,version)
   fact("EXP",oldExp and math.floor(oldExp)~=experience and (math.floor(oldExp).." → "..experience) or experience,oldExp and math.floor(oldExp)~=experience and "new" or "kept")
   if targetItem and g2>1 and g1==3 or targetItem and g1==2 and g2==3 then fact("Held item",label(to.items[targetItem],targetItem),"kept") end
   fact("HP","Restored to full","new")
-  note("Moves and held item mapped by exact name; current PP is capped to destination maximum, PP Ups retained.")
+  if #missing>0 then
+    return nil,"The destination cannot represent move "..missing[1]..".",{moveBlock=true,missing=missing,
+      species=tostring(g2==3 and to.names and to.names[species] or def.name or species)}
+  end
+  if override then
+    local names={}
+    for _,id in ipairs(override) do names[#names+1]=tostring(label(to.moves[id],id)) end
+    fact("Moves",table.concat(names,", "),"new")
+    note("Moves replaced with the recommended set at full PP, no PP Ups. Held item mapped by exact name.")
+  else
+    note("Moves and held item mapped by exact name; current PP is capped to destination maximum, PP Ups retained.")
+  end
   if g2==1 then note("Friendship, Pokérus, gender and met data remain only in the archive.") end
   return out,lines
 end
@@ -326,26 +353,52 @@ function Migration.natureSteps(exp)
   table.sort(rows,function(a,b) return a.add<b.add end)
   return rows
 end
-function Migration.preview(state,refs,version)
+function Migration.preview(state,refs,version,opts)
   local preview={revision=state.revision,destination=version,rows={},allowed=true}
-  local seen={}
+  local seen,overrides={},opts and opts.moves or {}
   if type(refs)~="table" or #refs==0 then return nil,"Select warehouse Pokémon to preview." end
   for _,ref in ipairs(refs) do
     local entry=Store.at(state,ref.box,ref.slot)
     if not entry or seen[entry.id] then return nil,"A selected Pokémon is missing or repeated." end
     seen[entry.id]=true
-    local converted,lines=Migration.convert(entry,version)
-    preview.rows[#preview.rows+1]={id=entry.id,name=entry.display.name,original=Serializer.encode(entry),
+    local override=overrides[entry.id]
+    local converted,lines,info=Migration.convert(entry,version,{moves=override})
+    local row={id=entry.id,name=entry.display.name,original=Serializer.encode(entry),
       converted=converted,lines=converted and lines or {lines}}
+    if converted and override then
+      preview.moves=preview.moves or {};preview.moves[entry.id]=Store.copy(override);row.recommended=true
+    end
+    if not converted and type(info)=="table" and info.moveBlock then
+      row.moveBlock,row.missing,row.species=true,info.missing,info.species
+    end
+    preview.rows[#preview.rows+1]=row
     if not converted then preview.allowed=false end
   end
   return preview
 end
-function Migration.apply(state,refs,version,preview)
+function Migration.moveBlocked(preview)
+  local rows={}
+  for _,row in ipairs(type(preview)=="table" and preview.rows or {}) do if row.moveBlock then rows[#rows+1]=row end end
+  return rows
+end
+function Migration.recommendedMoves(preview,job,version)
+  local Recommend=require("src.recommend.Recommend")
+  local moves,failed={},{}
+  for _,row in ipairs(Migration.moveBlocked(preview)) do
+    local hit=Recommend.get(job,row.species)
+    local keys=hit and Recommend.resolveMoves(hit,version) or {}
+    if #keys>0 then
+      moves[row.id]={}
+      for i=1,math.min(4,#keys) do moves[row.id][i]=keys[i] end
+    else failed[#failed+1]=row.name end
+  end
+  return moves,failed
+end
+function Migration.apply(state,refs,version,preview,opts)
   if type(preview)~="table" or preview.revision~=state.revision or preview.destination~=version then
     return nil,"Storage changed. Preview the migration again."
   end
-  local fresh,why=Migration.preview(state,refs,version)
+  local fresh,why=Migration.preview(state,refs,version,{moves=opts and opts.moves or preview.moves})
   if not fresh then return nil,why end
   if not fresh.allowed then return nil,"The destination cannot represent every selected Pokémon." end
   if Serializer.encode(preview)~=Serializer.encode(fresh) then return nil,"The preview changed. Review it again." end

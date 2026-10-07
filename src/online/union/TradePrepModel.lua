@@ -268,6 +268,54 @@ function Model:moveOptions(slot)
   return opts and opts[tonumber(slot) or -1] or nil
 end
 
+function Model:movesBlocked()
+  local m = self.mine
+  local opts = m and m.report and m.report.options and m.report.options.moves
+  return opts ~= nil and next(opts) ~= nil
+end
+
+function Model:recommendTarget()
+  local m = self.mine
+  if not (m and self:movesBlocked()) then return nil end
+  local src = Model.datasetFor(self.version)
+  local dst, dstUsed = Model.datasetFor(self.peerVersion)
+  local view = src and dst and Project.read(m.rec, src)
+  local sp = view and dst.species[view.national]
+  if not sp then return nil end
+  return { generation = dst.generation, species = sp.name, version = dstUsed, national = view.national,
+    level = view.level, slots = math.min(#view.moves, Policy.MAX_MOVES) }
+end
+
+function Model.recommendedMoves(entry, dst, dstVersion, national, level)
+  local keys = require("src.recommend.Recommend").resolveMoves(entry, dstVersion)
+  local legal = Datasets.learnSources(dst, national, level)
+  local out, dropped, seen = {}, {}, {}
+  for _, key in ipairs(keys) do
+    local id = dst.localToMove[key]
+    if id and dst.moves[id] and legal[id] and not seen[id] then
+      seen[id] = true
+      out[#out + 1] = id
+    else
+      dropped[#dropped + 1] = key
+    end
+  end
+  return out, dropped
+end
+
+function Model:applyRecommended(entry, target)
+  local m = self.mine
+  target = target or self:recommendTarget()
+  if not (m and target) then return nil, "not_blocked" end
+  local dst = Model.datasetFor(target.version)
+  if not dst then return nil, "missing_import" end
+  local moves, dropped = Model.recommendedMoves(entry, dst, target.version, target.national, target.level)
+  if #moves == 0 then return nil, "none_legal", dropped end
+  for slot = 1, Policy.MAX_MOVES do
+    m.adjust.moves[slot] = slot <= target.slots and moves[slot] or nil
+  end
+  return self:refresh(), nil, dropped
+end
+
 function Model:stagedMoves()
   local out = {}
   if not self.mine then return out end

@@ -903,6 +903,122 @@ function Ops.resetMoves(S, mon)
     :format(speciesName(S, mon.species), mon.level, #learned))
 end
 
+local function recommendSpecies(S, mon)
+  return speciesName(S, mon.speciesId or mon.species)
+end
+
+function Ops.recommendState(S, mon)
+  if not mon then return "none" end
+  local g = Gen.ofState(S)
+  if g == 3 and (mon.isEgg or mon.egg) then return "egg" end
+  if S.recommendJob and S.recommendJob.mon == mon then return "pending" end
+  local _, absent = require("src.recommend.Recommend").cached(g, recommendSpecies(S, mon))
+  return absent and "none" or "ready"
+end
+
+function Ops.recommendMoves(S, mon)
+  local state = Ops.recommendState(S, mon)
+  if state == "egg" then return Ops.say(S, "Eggs cannot use a recommended moveset", "info") end
+  if state == "pending" then return Ops.say(S, "Fetching recommended moveset...", "info") end
+  if state == "none" then
+    return Ops.say(S, mon and ("No recommended moveset for " .. recommendSpecies(S, mon))
+      or "Select a Pokemon first", "info")
+  end
+  local Recommend = require("src.recommend.Recommend")
+  if S.recommendJob then Recommend.cancel(S.recommendJob.job) end
+  local g, name = Gen.ofState(S), recommendSpecies(S, mon)
+  S.recommendJob = {
+    job = Recommend.request(g, name, { client = S.recommendClient }),
+    mon = mon, species = name,
+  }
+  local status = Ops.pollRecommendedMoves(S)
+  if status == "pending" then Ops.say(S, "Fetching recommended moveset...", "info") end
+  return status
+end
+
+function Ops.pollRecommendedMoves(S)
+  local pending = S.recommendJob
+  if not pending then return nil end
+  local Recommend = require("src.recommend.Recommend")
+  local status, reason = Recommend.poll(pending.job)
+  if status == "pending" then return "pending" end
+  S.recommendJob = nil
+  if status ~= "ok" then
+    Ops.say(S, ("Recommended moveset unavailable (%s)"):format(tostring(reason or "offline")), "warn")
+    return "error"
+  end
+  if S.editingMon ~= pending.mon then
+    Ops.say(S, "Recommended moveset dropped: the selected Pokemon changed", "info")
+    return "stale"
+  end
+  local entry = Recommend.get(pending.job, pending.species)
+  if not entry then
+    Ops.say(S, "No recommended moveset for " .. pending.species, "info")
+    return "none"
+  end
+  return Ops.setRecommendedMoves(S, pending.mon, entry) and "ok" or "error"
+end
+
+function Ops.setRecommendedMoves(S, mon, entry)
+  if not mon or type(entry) ~= "table" then return false end
+  local g = Gen.ofState(S)
+  if g == 3 and (mon.isEgg or mon.egg) then
+    return Ops.say(S, "Eggs cannot use a recommended moveset", "info")
+  end
+  local Recommend = require("src.recommend.Recommend")
+  local ok, keys, missing, hpType = pcall(Recommend.resolveMoves, entry, Gen.versionOf(S.save, S.version))
+  if not ok then return Ops.say(S, "Could not read the recommended moveset") end
+  local usable = {}
+  for _, key in ipairs(keys) do
+    if #usable < 4 and (g == 3 and tonumber(key) or Ops.moveUsable(S, key)) then
+      usable[#usable + 1] = key
+    elseif #usable < 4 then
+      missing[#missing + 1] = tostring(key)
+    end
+  end
+  if #usable == 0 then
+    return Ops.say(S, "None of the recommended moves exist in this game")
+  end
+  for slot = 1, 4 do MonOps.clearMove(mon, slot) end
+  mon.moves = {}
+  local count = 0
+  for _, key in ipairs(usable) do
+    local slot = count + 1
+    if pcall(MonOps.setMove, S.data, mon, slot, key) then
+      count = slot
+      local max = MonOps.calcMaxPp(MonOps.getBasePp(S.data, mon, slot), MonOps.getPpUps(mon, slot), g)
+      MonOps.setPp(S.data, mon, slot, max, g)
+    else
+      MonOps.clearMove(mon, slot)
+      missing[#missing + 1] = tostring(key)
+    end
+  end
+  local extra = ""
+  if hpType then
+    local ivs = type(entry.set) == "table" and type(entry.set.ivs) == "table" and entry.set.ivs or {}
+    local function iv(k)
+      return clamp(math.floor(tonumber(ivs[k]) or 31), 0, 31)
+    end
+    if g == 3 then
+      mon.ivs = mon.ivs or {}
+      for _, k in ipairs({ "atk", "def", "spa", "spd", "spe" }) do mon.ivs[k] = iv(k) end
+      MonOps.setIv(S.data, mon, "hp", iv("hp"), g)
+      extra = "; IVs set for Hidden Power " .. hpType
+    else
+      mon.dvs = mon.dvs or {}
+      for _, pair in ipairs({ { "attack", "atk" }, { "defense", "def" }, { "speed", "spe" }, { "special", "spa" } }) do
+        MonOps.setDv(S.data, mon, pair[1], math.floor(iv(pair[2]) / 2), g)
+      end
+      extra = "; DVs set for Hidden Power " .. hpType
+    end
+  end
+  if #missing > 0 then
+    extra = extra .. "; skipped " .. table.concat(missing, ", ")
+  end
+  return Ops.mark(S, ("Applied recommended moveset to %s (%d moves)%s")
+    :format(recommendSpecies(S, mon), count, extra))
+end
+
 function Ops.healMon(S, mon)
   if not mon then return false end
   if mon.hp == mon.stats.hp and not mon.status then

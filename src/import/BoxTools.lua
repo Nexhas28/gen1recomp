@@ -20,6 +20,62 @@ Tools.CONTROL_ICONS = { ["stage-slot"] = "save", ["stage-background"] = "paintbr
 local ACTION_ICONS = { ["migration-preview"] = "eye", ["exports-folder"] = "folder", arrange = "arrow-up-down",
   ["apply-marks"] = "check", compare = "arrow-left-right", ["stage-wallpaper"] = "paintbrush", ["stage-flip"] = "arrow-left-right" }
 
+local FETCH_ERRORS = { offline = "Couldn't reach the server. Moves unchanged.",
+  server = "The server has no movesets right now. Moves unchanged.", too_many = "Too many Pokémon at once." }
+
+function Tools.fetchRecommended(s, refs)
+  local Migration = require("src.box.Migration")
+  local preview = s.migrationPreview
+  local rows = Migration.moveBlocked(preview)
+  if #rows == 0 then return false end
+  local names = {}
+  for _, row in ipairs(rows) do names[#names + 1] = row.species end
+  local generation = require("src.core.GameVersion").generation(preview.destination)
+  s.migrationFetch = { preview = preview, refs = refs,
+    job = require("src.recommend.Recommend").request(generation, names) }
+  s.notice, s.noticeKind = "Getting recommended moves…", "info"
+  return true
+end
+
+function Tools.askRecommended(imp, s, refs)
+  local rows = require("src.box.Migration").moveBlocked(s.migrationPreview)
+  if #rows == 0 or s.migrationFetch then return false end
+  local game = require("src.core.GameVersion").info(s.migrationPreview.destination).label
+  UI.confirm(imp, "Replace moves?", "Some moves don't exist in " .. game .. ". Replace them with the recommended moveset"
+    .. (#rows > 1 and "s" or "") .. "?", "Replace", function() Tools.fetchRecommended(s, refs) end)
+  return true
+end
+
+function Tools.update(s)
+  local fetch = s and s.migrationFetch
+  if not fetch then return end
+  local Recommend = require("src.recommend.Recommend")
+  local status, reason = Recommend.poll(fetch.job)
+  if status == "pending" then return end
+  s.migrationFetch = nil
+  if fetch.preview ~= s.migrationPreview then return end
+  if status ~= "ok" then
+    s.notice, s.noticeKind = FETCH_ERRORS[reason] or "Couldn't get recommended moves.", "error"
+    return
+  end
+  local Migration = require("src.box.Migration")
+  local version = fetch.preview.destination
+  local moves, failed = Migration.recommendedMoves(fetch.preview, fetch.job, version)
+  if not s.migrationMoves or s.migrationMoves.version ~= version then s.migrationMoves = { version = version, moves = {} } end
+  local any = false
+  for id, keys in pairs(moves) do s.migrationMoves.moves[id], any = keys, true end
+  if any then
+    local fresh, why = Migration.preview(s.service.state, fetch.refs, version, { moves = s.migrationMoves.moves })
+    s.migrationPreview = fresh
+    if not fresh then s.notice, s.noticeKind = why, "error"; return end
+  end
+  if #failed > 0 then
+    s.notice, s.noticeKind = "No recommended moveset for " .. table.concat(failed, ", ") .. ".", "error"
+  else
+    s.notice, s.noticeKind = "Recommended moves set. Check them before converting.", "ok"
+  end
+end
+
 local function search(s, query, sort)
   local cache = s._toolsSearch
   if not cache or cache.state ~= s.service.state or cache.size >= 8 then
@@ -252,13 +308,20 @@ function Tools.draw(imp, s, x, y, w, m, api)
     if #versions>0 then
       s.migrationVersion=s.migrationVersion or versions[1]
       cycle("migration-destination","Destination",versions,s.migrationVersion,function(value)
-        s.migrationVersion,s.migrationPreview=value,nil
+        s.migrationVersion,s.migrationPreview,s.migrationMoves=value,nil,nil
       end)
       button("migration-preview","Review "..#refs.." selected",function()
-        local preview,why=Migration.preview(s.service.state,refs,s.migrationVersion)
+        local saved=s.migrationMoves and s.migrationMoves.version==s.migrationVersion and s.migrationMoves.moves or nil
+        local preview,why=Migration.preview(s.service.state,refs,s.migrationVersion,{moves=saved})
         s.migrationPreview=preview;if not preview then s.notice,s.noticeKind=why,"error" end
+        if preview then Tools.askRecommended(imp,s,refs) end
       end,#refs==0);nextRow()
       local preview=s.migrationPreview
+      if preview and #Migration.moveBlocked(preview)>0 then
+        button("migration-recommend",s.migrationFetch and "Getting recommended moves…" or "Use recommended moves",function()
+          Tools.askRecommended(imp,s,refs)
+        end,s.migrationFetch~=nil,nil,nil,false,"award");nextRow()
+      end
       if preview then
         local options, ready = {}, 0
         for i, row in ipairs(preview.rows) do
@@ -284,7 +347,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
         end
         button("migration-apply","Convert selected",function()
           operation(function() return s.service:migrate(refs,s.migrationVersion,preview) end,"Migration saved with archived originals.")
-          s.migrationPreview=nil
+          s.migrationPreview,s.migrationMoves=nil,nil
         end,not preview.allowed or preview.revision~=s.service.state.revision or s.diskStale);nextRow()
       end
     else text("Import both games first.",true) end

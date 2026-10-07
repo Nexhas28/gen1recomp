@@ -32,6 +32,13 @@ local TEXT = {
   changes = "Permanent changes:",
   blocked = "It can't be offered yet:",
   pick_move = "Choose a move {species} can learn in {game}, or remove the move.",
+  recommend_ask = "Some moves can't come along. Replace them with the recommended moveset?",
+  recommend_wait = "Getting the recommended moveset…",
+  recommend_offline = "Couldn't reach the server for a recommended moveset.",
+  recommend_server = "The server has no recommended moveset right now.",
+  recommend_missing = "There's no recommended moveset for {species}.",
+  recommend_none = "None of the recommended moves can come along.",
+  recommend_partial = "Some recommended moves can't come along. Fix the rest by hand.",
   move_row = "{type} Power {power} PP {pp}",
   evolves = "{species} may evolve when it arrives.",
   wait_offer = "Waiting for {name} to offer a Pokémon…",
@@ -62,6 +69,7 @@ local TEXT = {
 
   item_offer = "Offer",
   item_moves = "Fix moves",
+  item_recommend = "Use recommended moveset",
   item_back = "Back",
   item_trade = "Trade",
   item_change = "Change",
@@ -149,6 +157,8 @@ function Ctl.new(opts)
   self.done = false
   self.sentOffer = nil
   self.myData = Model.datasetFor(self.version)
+  self.recommendClient = opts.recommendClient
+  self.recommend = nil
   return self
 end
 
@@ -271,10 +281,66 @@ function Ctl:pageOffer()
   else
     lines[#lines + 1] = say("blocked")
     for _, l in ipairs(self:blockLines(r, self.myData)) do lines[#lines + 1] = l end
-    if r.options and r.options.moves and next(r.options.moves) then items[#items + 1] = item("moves", TEXT.item_moves) end
+    local rec = self:recommendState()
+    if rec and rec.note then lines[#lines + 1] = rec.note end
+    if r.options and r.options.moves and next(r.options.moves) then
+      if rec and rec.state == "pending" then
+        lines[#lines + 1] = say("recommend_wait")
+      elseif not rec then
+        lines[#lines + 1] = say("recommend_ask")
+        items[#items + 1] = item("recommend", TEXT.item_recommend)
+      end
+      items[#items + 1] = item("moves", TEXT.item_moves)
+    end
   end
   items[#items + 1] = item("back", TEXT.item_back)
   return { title = TEXT.title_offer, lines = lines, items = items, pager = self.pager }
+end
+
+function Ctl:recommendState()
+  local rec = self.recommend
+  if rec and rec.mine == self.model.mine then return rec end
+  return nil
+end
+
+function Ctl:startRecommend()
+  if self:recommendState() then return false end
+  local target = self.model:recommendTarget()
+  if not target then return false end
+  local Recommend = require("src.recommend.Recommend")
+  self.recommend = { mine = self.model.mine, target = target, state = "pending",
+    job = Recommend.request(target.generation, target.species, { client = self.recommendClient }) }
+  self:pumpRecommend()
+  return true
+end
+
+function Ctl:pumpRecommend()
+  local rec = self.recommend
+  if not (rec and rec.state == "pending") then return end
+  if rec.mine ~= self.model.mine then
+    require("src.recommend.Recommend").cancel(rec.job)
+    self.recommend = nil
+    return
+  end
+  local Recommend = require("src.recommend.Recommend")
+  local status, why = Recommend.poll(rec.job)
+  if status == "pending" then return end
+  rec.state = "done"
+  if status ~= "ok" then
+    rec.note = say(why == "server" and "recommend_server" or "recommend_offline")
+    return
+  end
+  local entry = Recommend.get(rec.job, rec.target.species)
+  if not entry then
+    rec.note = say("recommend_missing", { species = rec.target.species })
+    return
+  end
+  local report, code = self.model:applyRecommended(entry, rec.target)
+  if not report then
+    rec.note = say(code == "none_legal" and "recommend_none" or "recommend_offline")
+  elseif not report.ok then
+    rec.note = say("recommend_partial")
+  end
 end
 
 function Ctl:moveSlot()
@@ -506,6 +572,7 @@ function Ctl:poll(dt)
     for _, e in ipairs(p:poll()) do self:handlePrep(e) end
   end
   for _, e in ipairs(self.txn:pump(dt or 0)) do self:handleTxn(e) end
+  self:pumpRecommend()
   if self.step ~= "closed" and self.step ~= "trading" and self.step ~= "done" and p then
     self:receivePeer()
     if (self.step == "wait") and self:canConfirm() then self:go("confirm") end
@@ -535,6 +602,8 @@ function Ctl:choose(it)
     if self.step == "moves" then self:go("offer") else self:go("pick") end
   elseif id == "moves" then
     self:go("moves")
+  elseif id == "recommend" then
+    self:startRecommend()
   elseif id == "move" then
     self.model:stage(it.arg.slot, it.arg.move)
     self:go("offer")
@@ -589,7 +658,7 @@ end
 function Open.controller(game, room, prep, opts)
   opts = opts or {}
   return Ctl.new({ game = game, prep = prep, version = opts.version, adapter = opts.adapter, roomId = opts.roomId,
-    opponent = opts.opponent or Open.opponent(room, prep) })
+    opponent = opts.opponent or Open.opponent(room, prep), recommendClient = opts.recommendClient })
 end
 
 local function isActivity(v)

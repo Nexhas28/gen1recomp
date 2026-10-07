@@ -98,6 +98,7 @@ function BoxPanel.update(imp, dt)
   if not s then return end
   checkDisk(s, dt)
   s.artTime = (s.artTime or 0) + math.max(0, dt or 0)
+  if s.migrationFetch then require("src.import.BoxTools").update(s) end
   if s.animationEntry ~= s.inspect or s.animation and s.animation.released then animateInspection(s) end
   Animation.update(s.animation, dt)
   local Showcase = require("src.box.Showcase")

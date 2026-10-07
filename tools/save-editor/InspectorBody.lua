@@ -92,9 +92,9 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
   if report.errors > 0 then
     text(report.errors .. " saved value errors. Check the red fields.", PAL.red)
   end
-  local function button(label, fn, kind, help, id)
+  local function button(label, fn, kind, help, id, enabled)
     local issue = id and issues.fields[id]
-    local opts = { kind = kind, font = "small", invalid = issue ~= nil }
+    local opts = { kind = kind, font = "small", invalid = issue ~= nil, enabled = enabled }
     local buttonH = Kit.buttonHeight(label, inner, opts)
     if help then
       buttonH = Touch.action(S, Kit, label, help, fn, cx, cy, inner, kind, issue)
@@ -484,6 +484,11 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
     button("Reset to learnset", function()
       Ops.resetMoves(S, mon)
     end)
+    local recommend = Ops.recommendState(S, mon)
+    button(({ pending = "Fetching recommended moveset...", none = "No recommended moveset" })[recommend]
+      or "Use recommended moveset", function()
+      Ops.recommendMoves(S, mon)
+    end, "accent", nil, nil, recommend == "ready")
     button("Max all PP", function()
       Ops.maxAllPpUps(S, mon)
     end, "good")

@@ -1,6 +1,8 @@
 local Datasets = require("src.online.xgen.Datasets")
+local Identity = require("src.online.xgen.Identity")
 local Policy = require("src.online.xgen.Policy")
 local Project = require("src.online.xgen.Project")
+local Recommend = require("src.recommend.Recommend")
 
 local Rentals = {}
 
@@ -8,6 +10,13 @@ Rentals.VERSION = 1
 Rentals.LEVEL = 50
 Rentals.IV = 20
 Rentals.PERSONALITY = 150
+
+-- src/battle_script_commands.c:8909
+Rentals.HIDDEN_POWER_TYPES = { "FIGHTING", "FLYING", "POISON", "GROUND", "ROCK", "BUG", "GHOST", "STEEL",
+  "FIRE", "WATER", "GRASS", "ELECTRIC", "PSYCHIC", "ICE", "DRAGON", "DARK" }
+
+-- src/battle_script_commands.c:8898
+local HP_BITS = { "hp", "atk", "def", "spe", "spa", "spd" }
 
 Rentals.DEFINITIONS = {
   ["g3u-gen1"] = {
@@ -78,6 +87,13 @@ local function hasType(types, want)
   return false
 end
 
+function Rentals.moveCode(species, move, ruleset, data, unsupported)
+  if move > ruleset.moveMax or not data.moves[move] then return "move_not_in_ruleset" end
+  if unsupported and unsupported[move] then return "move_unsupported" end
+  if not Datasets.learnable(data, species, move, Rentals.LEVEL) then return "move_not_legal" end
+  return nil
+end
+
 function Rentals.validate(def, ruleset, data, unsupported)
   local sp = data.species[def.species]
   if def.species > ruleset.dexMax or not sp then return "species_not_in_ruleset" end
@@ -86,18 +102,104 @@ function Rentals.validate(def, ruleset, data, unsupported)
   for _, move in ipairs(def.moves) do
     if seen[move] then return "rental_duplicate_move", { move = move } end
     seen[move] = true
-    if move > ruleset.moveMax or not data.moves[move] then return "move_not_in_ruleset", { move = move } end
-    if unsupported and unsupported[move] then return "move_unsupported", { move = move } end
-    if not Datasets.learnable(data, def.species, move, Rentals.LEVEL) then return "move_not_legal", { move = move } end
+    local code = Rentals.moveCode(def.species, move, ruleset, data, unsupported)
+    if code then return code, { move = move } end
   end
   if #def.moves < 1 or #def.moves > Policy.MAX_MOVES then return "rental_bad_moves" end
   return nil
 end
 
+function Rentals.speciesNames(rulesetId, data)
+  local out = {}
+  for _, def in ipairs(Rentals.DEFINITIONS[rulesetId] or {}) do
+    local sp = type(data) == "table" and data.species[def.species]
+    if sp then out[#out + 1] = sp.name end
+  end
+  return out
+end
+
+function Rentals.hiddenPowerType(ivs)
+  local bits = 0
+  for i, k in ipairs(HP_BITS) do bits = bits + (math.floor(tonumber(ivs[k]) or 0) % 2) * 2 ^ (i - 1) end
+  return Rentals.HIDDEN_POWER_TYPES[math.floor(bits * 15 / 63) + 1]
+end
+
+function Rentals.hiddenPowerIvs(want, from)
+  local ivs = {}
+  for _, k in ipairs(HP_BITS) do
+    local v = math.floor(tonumber(type(from) == "table" and from[k]) or 31)
+    ivs[k] = math.max(0, math.min(31, v))
+  end
+  if Rentals.hiddenPowerType(ivs) == want then return ivs end
+  local best, bestCount
+  for bits = 0, 63 do
+    if Rentals.HIDDEN_POWER_TYPES[math.floor(bits * 15 / 63) + 1] == want then
+      local count = 0
+      for i = 0, 5 do count = count + math.floor(bits / 2 ^ i) % 2 end
+      if not best or count > bestCount then best, bestCount = bits, count end
+    end
+  end
+  if not best then return nil end
+  for i, k in ipairs(HP_BITS) do ivs[k] = math.floor(best / 2 ^ (i - 1)) % 2 == 1 and 31 or 30 end
+  return ivs
+end
+
+local function moveIndex(data)
+  local index = {}
+  for id, mv in pairs(data.moves) do
+    if mv.key then
+      if index[mv.key] == nil then index[mv.key] = id else index[mv.key] = false end
+    end
+  end
+  return index
+end
+
+local function resolveMove(index, name)
+  local hp = Recommend.hiddenPowerType(name)
+  local token = hp and "HIDDENPOWER" or Identity.normalize(tostring(name or ""))
+  if token and Recommend.RENAMED[token] and index[Recommend.RENAMED[token]] then token = Recommend.RENAMED[token] end
+  return token and index[token] or nil, hp
+end
+
+function Rentals.fromSet(def, entry, ruleset, data, unsupported, index)
+  local set = type(entry) == "table" and (entry.set or entry) or nil
+  if type(set) ~= "table" or type(set.moves) ~= "table" or not data.species[def.species] then return nil, {} end
+  index = index or moveIndex(data)
+  local moves, dropped, seen, hpType = {}, {}, {}, nil
+  for _, name in ipairs(set.moves) do
+    if type(name) == "table" then name = name[1] end
+    local id, hp = resolveMove(index, name)
+    local code
+    if not id then
+      code = "move_unknown"
+    elseif seen[id] then
+      code = "rental_duplicate_move"
+    elseif #moves >= Policy.MAX_MOVES then
+      code = "rental_bad_moves"
+    elseif hp and not Rentals.hiddenPowerIvs(hp, set.ivs) then
+      code = "hidden_power_type"
+    else
+      code = Rentals.moveCode(def.species, id, ruleset, data, unsupported)
+    end
+    if code then
+      dropped[#dropped + 1] = { move = tostring(name), id = id or nil, code = code }
+    else
+      seen[id] = true
+      moves[#moves + 1] = id
+      if hp then hpType = hp end
+    end
+  end
+  if #moves == 0 then return nil, dropped end
+  local out = { type = def.type, species = def.species, moves = moves }
+  if hpType then out.ivs = Rentals.hiddenPowerIvs(hpType, set.ivs) end
+  return out, dropped
+end
+
 function Rentals.build(rulesetId, data, opts)
   opts = opts or {}
   local ruleset = Policy.ruleset(rulesetId)
-  local out = { version = Rentals.VERSION, ruleset = rulesetId, rentals = {}, excluded = {} }
+  local out = { version = Rentals.VERSION, ruleset = rulesetId, rentals = {}, excluded = {}, dropped = {},
+    padded = {}, defaulted = {} }
   local defs = Rentals.DEFINITIONS[rulesetId]
   if not ruleset or not defs then
     out.excluded[1] = { code = "unknown_ruleset", detail = { ruleset = rulesetId } }
@@ -111,13 +213,40 @@ function Rentals.build(rulesetId, data, opts)
   for k, v in pairs(opts.unsupported or {}) do
     if v == true then unsupported[tonumber(k) or k] = true elseif tonumber(v) then unsupported[tonumber(v)] = true end
   end
-  for index, def in ipairs(defs) do
+  local sets = type(opts.sets) == "table" and opts.sets or nil
+  local byKey = sets and moveIndex(data) or nil
+  for index, base in ipairs(defs) do
+    local def, source = base, "default"
+    if sets then
+      local sp = data.species[base.species]
+      local entry = sp and sets[Recommend.key(sp.name)]
+      local made, dropped = Rentals.fromSet(base, entry, ruleset, data, unsupported, byKey)
+      for _, d in ipairs(dropped) do
+        d.index, d.type, d.species = index, base.type, base.species
+        out.dropped[#out.dropped + 1] = d
+      end
+      if made then
+        def, source = made, "recommended"
+        local have = {}
+        for _, m in ipairs(made.moves) do have[m] = true end
+        for _, m in ipairs(base.moves) do
+          if #made.moves < Policy.MAX_MOVES and not have[m] and not Rentals.moveCode(base.species, m, ruleset, data, unsupported) then
+            have[m] = true
+            made.moves[#made.moves + 1] = m
+            out.padded[#out.padded + 1] = { index = index, type = base.type, species = base.species, id = m }
+          end
+        end
+      else
+        out.defaulted[#out.defaulted + 1] = { index = index, type = base.type, species = base.species,
+          code = entry and "no_legal_moves" or "no_set" }
+      end
+    end
     local code, detail = Rentals.validate(def, ruleset, data, unsupported)
     if code then
       out.excluded[#out.excluded + 1] = { index = index, type = def.type, species = def.species, code = code, detail = detail }
     else
       local ivs, evs = {}, {}
-      for _, k in ipairs(Policy.STAT_ORDER) do ivs[k], evs[k] = Rentals.IV, 0 end
+      for _, k in ipairs(Policy.STAT_ORDER) do ivs[k], evs[k] = def.ivs and def.ivs[k] or Rentals.IV, 0 end
       local view = { gen = 3, national = def.species, level = Rentals.LEVEL, ivs = ivs, evs = evs,
         personality = Rentals.PERSONALITY, nature = Rentals.PERSONALITY % 25, otId = 0, otSecretId = 0,
         abilityNum = 0, item = 0, moves = {} }
@@ -126,7 +255,7 @@ function Rentals.build(rulesetId, data, opts)
       record.nickname = data.species[def.species].name
       local disclosed = {}
       for _, move in ipairs(def.moves) do disclosed[#disclosed + 1] = Project.moveRecord(data, move, 0) end
-      out.rentals[#out.rentals + 1] = { rental = true, index = index, type = def.type, national = def.species,
+      out.rentals[#out.rentals + 1] = { rental = true, index = index, source = source, type = def.type, national = def.species,
         name = data.species[def.species].name, types = Project.copy(data.species[def.species].types),
         level = Rentals.LEVEL, record = record, moves = disclosed,
         stats = { hp = record.maxHp, atk = record.atk, def = record.def, spAtk = record.spAtk,

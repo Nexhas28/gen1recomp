@@ -483,6 +483,7 @@ function App.update(dt)
   -- directly in App.draw() via Kit.beginFrame. Tile animation (water,
   -- flowers) still needs ticking so the Map tab isn't static.
   TileRenderer.tick()
+  if S and S.recommendJob then Ops.pollRecommendedMoves(S) end
   PadInput.update(dt)
   local notches = PadInput.takeWheel()
   if notches ~= 0 then

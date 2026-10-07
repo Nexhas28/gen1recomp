@@ -57,6 +57,9 @@ function D.run(game, cfg)
   end, { version = version, opponent = cfg.opponent, gameplayMods = false })
   ok(screen ~= nil and model ~= nil, "the prep screen opens")
   U.wait(10)
+  local deadline = love.timer.getTime() + 20
+  while model and model.rentalSet.pending and love.timer.getTime() < deadline do U.wait(1) end
+  ok(model and not model.rentalSet.pending, "the rentals settle")
 
   local function labels(pg)
     local out = {}

@@ -265,7 +265,27 @@ function Convert.refusalFor(mon, gen2Data, gen1Data)
   return nil
 end
 
-function Convert.toGen1(mon, gen2Data, gen1Data)
+function Convert.withMoves(mon, moves, gen1Data)
+  if type(mon) ~= "table" or type(moves) ~= "table" then return mon, false end
+  local list, seen = {}, {}
+  for _, id in ipairs(moves) do
+    if #list < 4 and not seen[id] and gen1Data and gen1Data.moves and gen1Data.moves[id] then
+      seen[id] = true
+      list[#list + 1] = { id = id, ppUps = 0 }
+    end
+  end
+  if #list == 0 then return mon, false end
+  local out = {}
+  for k, v in pairs(mon) do out[k] = v end
+  out.moves = list
+  return out, true
+end
+
+function Convert.toGen1(mon, gen2Data, gen1Data, opts)
+  local replaced, before = false, mon
+  if type(opts) == "table" and opts.moves then
+    mon, replaced = Convert.withMoves(mon, opts.moves, gen1Data)
+  end
   local reason, info = Convert.refusalFor(mon, gen2Data, gen1Data)
   if reason then return nil, reason, info end
 
@@ -319,6 +339,15 @@ function Convert.toGen1(mon, gen2Data, gen1Data)
       pp = math.max(0, math.min(tonumber(mv.pp) or maxPp, maxPp)),
       ppUps = ups,
     }
+  end
+
+  if replaced then
+    local was = {}
+    for _, mv in ipairs(before.moves or {}) do was[#was + 1] = mv.id end
+    local now = {}
+    for _, mv in ipairs(moves) do now[#now + 1] = mv.id end
+    entry(report.changed, "moves", "MOVES REPLACED WITH THE RECOMMENDED SET",
+      { from = was, to = now })
   end
 
   local status = mon.status and Convert.STATUS_2TO1[mon.status] or nil
@@ -416,9 +445,9 @@ local function previewLines(mon, report, reason, info)
   return lines, true
 end
 
-local function convertOne(mon, toGen, fromData, toData)
+local function convertOne(mon, toGen, fromData, toData, opts)
   if toGen == 1 then
-    local out, second, info = Convert.toGen1(mon, fromData, toData)
+    local out, second, info = Convert.toGen1(mon, fromData, toData, opts)
     if out then return out, second end
     return nil, second, info or {}
   end
@@ -427,8 +456,8 @@ local function convertOne(mon, toGen, fromData, toData)
   return nil, second, { species = mon and mon.species }
 end
 
-function Convert.preview(mon, fromGen, toGen, fromData, toData)
-  local out, second, info = convertOne(mon, toGen, fromData, toData)
+function Convert.preview(mon, fromGen, toGen, fromData, toData, opts)
+  local out, second, info = convertOne(mon, toGen, fromData, toData, opts)
   if out then return previewLines(mon, second) end
   return previewLines(mon, nil, second, info)
 end

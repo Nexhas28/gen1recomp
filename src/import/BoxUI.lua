@@ -84,6 +84,10 @@ function UI.open(imp, title, options, current, apply)
     end
   end
 end
+function UI.confirm(imp, title, message, label, action)
+  UI.open(imp, title, {}, nil)
+  imp._boxPopup.message, imp._boxPopup.confirm = message, { label = label, action = action }
+end
 function UI.help(imp, key, x, y, size, message)
   UI.button(imp, x, y, size, size, "help-" .. key, "", function()
     UI.open(imp, HELP_TITLES[key] or key, {}, nil)
@@ -146,7 +150,8 @@ function UI.keypressed(imp, key)
   if not p then return false end
   if key == "escape" then UI.close(imp)
   elseif key == "return" or key == "kpenter" then
-    if p.message then UI.close(imp) else choose(imp, p, filtered(p)[p.index]) end
+    if p.confirm then UI.close(imp); p.confirm.action()
+    elseif p.message then UI.close(imp) else choose(imp, p, filtered(p)[p.index]) end
   elseif not p.message and (key == "up" or key == "down" or key == "home" or key == "end") then
     local rows = filtered(p)
     if key == "home" then p.index = 1 elseif key == "end" then p.index = #rows
@@ -168,7 +173,7 @@ function UI.drawPopup(imp, m)
   local width = math.min((p.message and 390 or 460) * m.s, m.W - 2 * m.pad)
   local searchable = not p.message and #p.options > 8
   local inner = width - 2 * pad
-  local content = p.message and Kit.wrapHeight("small", Strings(p.message), inner, 6)
+  local content = p.message and Kit.wrapHeight("small", Strings(p.message), inner, 6) + (p.confirm and gap + row or 0)
     or math.max(row, math.min(7, #p.options) * (row + gap) - gap)
   local x, y, w, h = view().modalPanel(m, width, 2 * pad + row + gap + content + (searchable and row + gap or 0), { scrim = .76, slide = true })
   if Kit.press(0, 0, m.W, m.H) and not Kit.hit(x, y, w, h) then UI.close(imp); return end
@@ -177,7 +182,18 @@ function UI.drawPopup(imp, m)
   Kit.textBold("button", Strings(Kit.ellipsize("button", p.title, w - 2 * pad - row - gap)), x + pad,
     y + pad + (row - Kit.textHeight("button")) / 2, PAL.heading)
   local bx, by, bw = x + pad, y + pad + row + gap, w - 2 * pad
-  if p.message then Kit.textWrapped("small", Strings(p.message), bx, by, bw, PAL.text, 6); return end
+  if p.message then
+    Kit.textWrapped("small", Strings(p.message), bx, by, bw, PAL.text, 6)
+    if p.confirm then
+      local cw, cy = (bw - gap) / 2, y + h - pad - row
+      UI.button(imp, bx, cy, cw, row, "popup-cancel", "Cancel", function() UI.close(imp) end, { icon = "x" })
+      UI.button(imp, bx + cw + gap, cy, cw, row, "popup-confirm", p.confirm.label, function()
+        if imp._boxPopup ~= p then return end
+        UI.close(imp); p.confirm.action()
+      end, { face = "invert", icon = "check", ring = true })
+    end
+    return
+  end
   if searchable then
     local query = Kit.textfield("box-chooser-filter", bx, by, bw, row, p.query, Strings("Find an option"))
     if query ~= p.query then p.query, p.index, p.scroll, p.reveal = query, 1, 0, true end
