@@ -1809,6 +1809,9 @@ R.pokemon = {
     genderRatio = f.opt(f.int(0, 255)),
     -- the two wild held items, in the ROM's own order (rare then common)
     items = f.opt(f.list(f.id("items"))),
+    dexEntry = f.opt(f.rec{ kind = f.opt(f.str), text = f.opt(f.str),
+                            text2 = f.opt(f.str), heightM = f.opt(f.num),
+                            weightKg = f.opt(f.num) }),
     spriteFront = f.path, spriteBack = f.path, picSize = f.int(1, 7),
     source = f.opt(f.str),
     cry = f.opt(f.id("cries")), trueColor = f.opt(f.bool),
