@@ -1,7 +1,3 @@
--- Ruby and Sapphire read the cart strings a translation mod overrides from
--- the script cache, where the mod's text overrides land, as Emerald does
--- (game3_emerald_pack_text_test.lua); the extract's or the pack's copy stays
--- the fallback.
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
@@ -22,9 +18,7 @@ local function check(cond, msg)
   end
 end
 
--- Expanded placeholders (pokeruby/src/string_util.c:476): the teams, their
--- leaders and legendaries by edition, the version, the rival and the
--- honorific.
+-- pokeruby/src/string_util.c:476
 local Extract = require("src.import.gba.text_placeholders_extract")
 local ruby, sapphire = Extract.rsSymbols("ruby"), Extract.rsSymbols("sapphire")
 check(ruby.EVIL_TEAM == "gExpandedPlaceholder_Magma" and sapphire.EVIL_TEAM == "gExpandedPlaceholder_Aqua",
@@ -60,9 +54,6 @@ BUNDLE.text = { gExpandedPlaceholder_Archie = ir("ARTHUR"), gExpandedPlaceholder
 local sapphireLine = Message.cartPlaceholders({ EVIL_LEADER = "ARCHIE", byGender = {} }, "sapphire")
 check(sapphireLine.EVIL_LEADER == "ARTHUR", "Sapphire's evil leader is Archie's row")
 
--- The native Pokédex (src/ui/game3/rse/pokedex.lua): the entry's pages by
--- their own labels, its labels and the search screen by the labels the
--- packs name next to their copies.
 local MANIFEST = {
   assetLayout = "rs",
   strings = { UnknownPoke = "            ????? POKéMON", CryOf = "\252\019\002CRY OF", RegisterComplete = "REGISTERED",
@@ -106,8 +97,7 @@ check(page1:find("WOOD GECKO POKéMON", 1, true) ~= nil, "the category keeps the
 check(Pokedex.topBarDescription(0) == "Chercher des POKéMON.", "the search top bar reads its own label")
 check(Pokedex.itemDescription(0) == "List by the first letter.", "a search line missing from the cache keeps the copy")
 check(Pokedex.searchOptionTexts(Pokedex.SEARCH.NAME)[1].title == "ABC FR", "a search option reads its own label")
--- pokeruby/src/pokedex.c:4228: only the English cart follows the category
--- with the word after its unknown-category string's question marks.
+-- pokeruby/src/pokedex.c:4228
 local function infoRow(owned, y)
   for _, row in ipairs(Pokedex.monInfo({ descriptionPage = 0 }, 252, true, owned, false)) do
     if row.y == y then return row.text end
@@ -134,9 +124,7 @@ check(Entries.ready(entriesCache("return { [277] = { descriptionLabel = \"DexDes
   "an R/S cache with the labels keeps its entries")
 Registry.active = active
 
--- Native screens that keep a cart string in their pack under its pret label
--- read the script cache's text under that label first.
-local COPY = { 0xBD, 0xC9, 0xCA, 0xD3, 0xFF } -- "COPY"
+local COPY = { 0xBD, 0xC9, 0xCA, 0xD3, 0xFF }
 local Kit = require("src.ui.game3.rse.scene_kit")
 local MANIFESTS = {
   ["items/shop"] = { assetLayout = "rs", shopVersion = 2, textAliases = { gText_HowMayIServeYou = "gOtherText_HowMayIServe" },
@@ -152,8 +140,6 @@ BUNDLE.text = { gOtherText_HowMayIServe = ir("Que puis-je faire pour vous ?"),
 check(Shop.plain("gText_HowMayIServeYou") == "Que puis-je faire pour vous ?", "the shop reads the cache by its label")
 check(Shop.plain("gOtherText_Unnamed") == "COPY", "a shop line missing from the cache keeps the pack's copy")
 
--- The move relearner, the decoration menus and the museum's painting
--- captions, through the text function each screen hands its shared base.
 package.loaded["src.ui.game3.rse.move_relearner"] = { SUB = "tutor", show = function(_, opts) return opts end }
 local tutorText = require("src.ui.game3.rs.move_relearner").show({}, {}).text
 check(tutorText("gText_TeachWhichMoveToPkmn") == "Quelle capacité apprendre ?", "the move relearner reads the cache by its label")
@@ -181,8 +167,7 @@ local PAINT = { captionLayout = { museumStart = 5, nicknameBytes = 10 },
 BUNDLE.text = { gContestPaintingCool1 = ir("Le POKéMON ") }
 check(Painting.caption(5, { nickname = "ZIGZATON", contestCategory = 0 }, nil, PAINT) == "Le POKéMON ZIGZATONCOPY",
   "a painting's caption reads the cache by its labels, the pack's copy where the cache has none")
--- pokeruby/src/contest_painting.c:234: the European carts name the POKéMON
--- first ("ZIGZATON von MAY"), the US and Japanese ones the trainer.
+-- pokeruby/src/contest_painting.c:234
 PAINT.rankNames = { [0] = "gContestRankNormal" }
 PAINT.hallCaption, PAINT.hallPossessive = "gContestText_ContestWinner", "gOtherText_Unknown1"
 PAINT.captionLayout.hallLatinControl = {}
@@ -193,10 +178,7 @@ check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER MAY's ZIGZATON",
 BUNDLE.text.gOtherText_Unknown1 = ir(" von ")
 check(Painting.caption(0, winner, nil, PAINT) == "NORMAL WINNER ZIGZATON von MAY", "a European hall caption names the POKéMON first")
 
--- Easy Chat: what the player reads prints each word translated
--- (EasyChatText.word); what the scripts compare keeps the cart's word.
 package.loaded["src.core.game3.easy_chat_text"] = {
-  -- 1513 is 513's cart word under another id, translated differently
   rawWord = function(id) return "RAW" .. id % 1000 end, word = function(id) return "MOT" .. id end,
   group = function() return { words = { { id = 513, text = "RAW513" } } } end,
 }
@@ -209,8 +191,6 @@ check(trend.result == 1, "a new trend counts as a change")
 local same = Contracts.commit({ type = 9, wordCount = 2, before = { 1513, 514 }, session = {} }, { 513, 514 })
 check(same.result == 0, "the change is measured on the cart's words, not their translation")
 check(require("src.core.game3.rs.tv_playback").word(513) == "MOT513", "the TV prints a word translated")
--- Gabby and Ty's last quote is printed from the cart's bytes: a translated
--- word the cart's charset cannot hold keeps the cart's word.
 local Routes = require("src.core.game3.scripting.natives_rs_tv_routes")
 local Rse, Tv = require("src.core.game3.rse.init"), require("src.core.game3.rse.tv")
 local session, gabbyData = { version = "ruby" }, { quote = {} }
@@ -230,9 +210,7 @@ EASY.word = function() return "ともだち" end
 check(lastQuote() == "RAW513", "a word the cart cannot print keeps the cart's word")
 EASY.word, Rse.session, Tv.state = word, rseSession, tvState
 
-
--- The party menu's actions (pokeruby/src/pokemon_menu.c:126) read the
--- script cache by their pret labels, and a field move prints its move's name.
+-- pokeruby/src/pokemon_menu.c:126
 MANIFESTS["rse/menus"] = { party = { cursorOptions = { "SUMMARY", "SWITCH", "ITEM", "CANCEL", "GIVE", "TAKE",
   "TAKE", "MAIL", "READ", "CANCEL", "CUT" } } }
 package.loaded["src.core.game3.pokemon"].moveName = function(move) return move == 15 and "COUPE" or nil end
