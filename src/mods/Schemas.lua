@@ -1222,7 +1222,8 @@ local function monRecord(base, id)
   local entry = national and t.dex and t.dex[national]
   if entry then
     record.dexEntry = { kind = entry.category or "", height = entry.height or 0,
-                        weight = entry.weight or 0 }
+                        weight = entry.weight or 0, heightM = entry.heightM,
+                        weightKg = entry.weightKg }
   end
   return record
 end
@@ -1346,6 +1347,8 @@ local function writeMon(target, t, num, value)
       category = value.dexEntry.kind or old.category,
       height = value.dexEntry.height or old.height,
       weight = value.dexEntry.weight or old.weight,
+      heightM = value.dexEntry.heightM or old.heightM,
+      weightKg = value.dexEntry.weightKg or old.weightKg,
     }
   end
   local sprites = sideTable(target, "spriteOverrides")
@@ -1847,7 +1850,8 @@ R.pokemon = {
                                item = f.opt(f.id("items")),
                                param = f.opt(f.int(0)) }),
     dexEntry = f.opt(f.rec{ kind = f.str, height = f.int(0),
-                            weight = f.int(0) }),
+                            weight = f.int(0), heightM = f.opt(f.num),
+                            weightKg = f.opt(f.num) }),
     spriteFront = f.path, spriteBack = f.path,
     trueColor = f.opt(f.bool),
   },
