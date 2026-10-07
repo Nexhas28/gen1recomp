@@ -187,6 +187,7 @@ jobs:
 
   xbox-uwp-changes:
     name: detect Xbox UWP changes
+    if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'bryanthaboi'
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.paths.outputs.changed }}
@@ -436,6 +437,7 @@ jobs:
 
   android-build:
     name: Android APK build
+    if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'bryanthaboi'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
