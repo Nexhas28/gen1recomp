@@ -208,6 +208,17 @@ local function applySavedOrientation()
   end)
 end
 
+local function applySavedAudioMode()
+  local ok, savedOptions = pcall(function()
+    return require("src.core.SaveData").loadOptions()
+  end)
+  if not ok or type(savedOptions) ~= "table" then savedOptions = {} end
+  local mode = savedOptions.audioMode or "both"
+  if love and love.audio and love.audio.setMixWithSystem then
+    pcall(love.audio.setMixWithSystem, mode ~= "game_only")
+  end
+end
+
 local Game, EditorApp, Importer, TouchEditor, Studio, Prelaunch
 local launcherSplash
 
@@ -861,6 +872,7 @@ function love.load(args)
   -- the launcher would rotate freely until options are applied at boot.
   -- No-op on desktop / iOS / when options.lua does not exist yet.
   applySavedOrientation()
+  applySavedAudioMode()
 
   -- Standalone editor.  A bare `--editor` run has no launcher behind it, so
   -- Close quits; --save points it at a specific file, otherwise it opens the

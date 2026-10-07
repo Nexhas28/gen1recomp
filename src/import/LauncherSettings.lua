@@ -286,6 +286,9 @@ local function coreRows(opts, hooks)
       opts.musicFilter = ((opts.musicFilter or 0) + dir) % #FILTERS
       return true
     end)
+  add(Strings("AUDIO MODE"),
+    ladder(opts, "audioMode",
+      { { "both", "BOTH" }, { "external_only", "EXT ONLY" }, { "game_only", "GAME ONLY" } }, "both"))
 
   local okPerf, Performance = pcall(require, "src.core.Performance")
   if okPerf then
@@ -642,6 +645,9 @@ local function gen2Rows(opts, hooks, shared)
       opts.musicFilter = ((opts.musicFilter or 0) + dir) % #FILTERS
       return true
     end)
+  add(Strings("AUDIO MODE"),
+    ladder(opts, "audioMode",
+      { { "both", "BOTH" }, { "external_only", "EXT ONLY" }, { "game_only", "GAME ONLY" } }, "both"))
 
   local okPal, GbcPalette = pcall(require, "src.render.GbcPalette")
   if okPal then

@@ -610,6 +610,7 @@ function SaveData.defaultOptions()
     -- (the PIKACHU VOL row appears only on Yellow; see Sound.lua)
     pikaVol = 7,
     musicFilter = 0,
+    audioMode = "both",
     -- Per-category logic fast-forward multiplier (RFC 0007); audio is
     -- unaffected (GameSpeed.lua). Superseded from a single "speed" field --
     -- mergeOptions migrates an old save's value into all three below.
