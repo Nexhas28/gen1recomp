@@ -1240,19 +1240,40 @@ local function consumePick(self, name, safName, ok)
   self.pickSkip[name] = true
 end
 
+-- Extensions a ROM pick may offer here.  Archives only when this
+-- platform's PhysFS actually mounts them (probe result); drop the raw
+-- answer if the probe layer is missing.
+local function romPickerExts()
+  local exts = { "gb", "gbc", "gba" }
+  local ok, RomArchive = pcall(require, "src.import.RomArchive")
+  if ok then
+    local caps = RomArchive.capabilities()
+    if caps.zip then exts[#exts + 1] = "zip" end
+    if caps.z7 then exts[#exts + 1] = "7z" end
+  end
+  return exts
+end
+
 local function chooseRom(promptName)
   promptName = promptName or "Pokemon"
   local prompt = shellSafe("Choose your " .. promptName .. " ROM")
   local platform = love.system.getOS()
+  local quoted, globs, semis = {}, {}, {}
+  for _, ext in ipairs(romPickerExts()) do
+    quoted[#quoted + 1] = ('"%s"'):format(ext)
+    globs[#globs + 1] = "*." .. ext
+    semis[#semis + 1] = "*." .. ext
+  end
   if platform == "OS X" then
     return commandOutput(
-      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {"gb", "gbc", "gba"})' 2>/dev/null]])
-        :format(prompt))
+      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {%s})' 2>/dev/null]])
+        :format(prompt, table.concat(quoted, ", ")))
   elseif platform == "Windows" then
     local script = table.concat({
       HostPicker.WIN_OPEN_DIALOG,
       "$d.Title='" .. prompt .. "';",
-      "$d.Filter='Game Boy / GBA ROM (*.gb;*.gbc;*.gba)|*.gb;*.gbc;*.gba|All files (*.*)|*.*';",
+      "$d.Filter='Game Boy / GBA ROM (" .. table.concat(semis, ";") .. ")|"
+        .. table.concat(semis, ";") .. "|All files (*.*)|*.*';",
       -- copy the pick to a plain-ASCII temp name and answer with that:
       -- the console's OEM codepage would mangle a non-ASCII path
       -- (Pokémon -> Pok\x82mon) and io.open on Windows needs ANSI bytes,
@@ -1268,11 +1289,12 @@ local function chooseRom(promptName)
       'powershell -NoProfile -STA -Command "' .. script .. '"')
   elseif platform == "Linux" then
     local path = commandOutput(
-      ([[zenity --file-selection --title="%s" --file-filter="Game Boy / GBA ROM | *.gb *.gbc *.gba" 2>/dev/null]])
-        :format(prompt))
+      ([[zenity --file-selection --title="%s" --file-filter="Game Boy / GBA ROM | %s" 2>/dev/null]])
+        :format(prompt, table.concat(globs, " ")))
     if path then return path end
     return commandOutput(
-      [[kdialog --getopenfilename "$HOME" "*.gb *.gbc *.gba|Game Boy / GBA ROM" 2>/dev/null]])
+      ([[kdialog --getopenfilename "$HOME" "%s|Game Boy / GBA ROM" 2>/dev/null]])
+        :format(table.concat(globs, " ")))
   end
   return nil
 end
@@ -1400,7 +1422,7 @@ local function chooseSav()
   local platform = love.system.getOS()
   if platform == "OS X" then
     return commandOutput(
-      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {"sav", "lua"})' 2>/dev/null]])
+      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {"sav", "srm", "lua"})' 2>/dev/null]])
         :format(prompt))
   elseif platform == "Windows" then
     local script = table.concat({
@@ -1420,11 +1442,11 @@ local function chooseSav()
       'powershell -NoProfile -STA -Command "' .. script .. '"')
   elseif platform == "Linux" then
     local path = commandOutput(
-      ([[zenity --file-selection --title="%s" --file-filter="Save file | *.sav *.lua" 2>/dev/null]])
+      ([[zenity --file-selection --title="%s" --file-filter="Save file | *.sav *.srm *.lua" 2>/dev/null]])
         :format(prompt))
     if path then return path end
     return commandOutput(
-      [[kdialog --getopenfilename "$HOME" "*.sav *.lua|Save file" 2>/dev/null]])
+      [[kdialog --getopenfilename "$HOME" "*.sav *.srm *.lua|Save file" 2>/dev/null]])
   end
   return nil
 end
@@ -2080,6 +2102,33 @@ function RomImporter:startData(data, displayName, sourcePath)
     self:setError("The selected file could not be read.")
     return
   end
+  -- A .zip / .7z holding one cart gets unwrapped first (content sniff, not
+  -- the filename); raw bytes fall straight through.  Caps gates it: on a
+  -- platform PhysFS can't open the kind, unwrap fails with a plain message.
+  local RomArchive = require("src.import.RomArchive")
+  local kind = RomArchive.kind(data)
+  if kind then
+    if #data > RomArchive.MAX_ARCHIVE_BYTES then
+      self:setError(("That .%s is %.1f MiB; a ROM archive only has to hold "
+        .. "one small cart. Drop the raw .gb/.gbc/.gba instead.")
+        :format(kind, #data / 1024 / 1024))
+      return
+    end
+    -- (bytes, entryName) | (nil, errorMessage)
+    local bytes, entry = RomArchive.unwrap(data, displayName, {
+      isRomName = isRomFilename,
+      acceptedSize = isAcceptedRomSize,
+      prefer = function(candidate)
+        return self:_versionForSha1(sha1(candidate)) ~= nil
+      end,
+    })
+    if not bytes then
+      self:setError(entry)
+      return
+    end
+    data = bytes
+    displayName = displayName and (displayName .. " / " .. entry) or entry
+  end
   if not isAcceptedRomSize(#data) then
     self:setError(("Expected a 1 MiB Game Boy ROM (%s), a "
       .. "2 MiB Game Boy Color ROM (%s), or a 16 MiB Game Boy Advance ROM (%s); "
@@ -2521,12 +2570,31 @@ function RomImporter:startPath(path)
     require("src.import.RomSources").absolute(path))
 end
 
+-- Does this .zip payload hold a ROM this platform can open?  Drives the
+-- drop route only; the actual unwrap runs again in startData.
+function RomImporter:_zipHoldsRom(data)
+  local ok, RomArchive = pcall(require, "src.import.RomArchive")
+  if not ok then return false end
+  if RomArchive.kind(data) ~= "zip" then return false end
+  if not RomArchive.capabilities().zip then return false end
+  local bytes = RomArchive.unwrap(data, nil, {
+    isRomName = isRomFilename,
+    acceptedSize = isAcceptedRomSize,
+    prefer = function(candidate)
+      return self:_versionForSha1(sha1(candidate)) ~= nil
+    end,
+  })
+  return bytes ~= nil
+end
+
 function RomImporter:filedropped(file)
   if self.workState == "working" then return end
   -- A dropped .zip is a mod archive: hand it straight to the mods installer
   -- (which mounts + validates it).  A .deltaskin is only ever a skin, and
   -- everything else is treated as a ROM.  The dropped file itself is passed
   -- through -- installZip opens it the same way readDroppedFile does here.
+  -- Exception: on a game tab a .zip holding a cart is the ROM itself (.7z
+  -- needs no branch; startData sniffs it by content below).
   local name = file:getFilename() or ""
   if name:lower():match("%.gci$")
       or (self.tab == "box" and name:lower():match("%.sav$")
@@ -2540,9 +2608,21 @@ function RomImporter:filedropped(file)
     return
   end
   if name:lower():match("%.zip$") then
-    -- On the SKINS tab a zip is a skin; everywhere else it is a mod archive.
+    -- On the SKINS tab a zip is a skin; elsewhere a cart inside wins, else
+    -- it stays a mod archive.
     if self.tab == "skins" then
       self:_installSkinZip(file)
+    elseif GameVersion.VERSIONS[self.tab] then
+      local data, readError = readDroppedFile(file)
+      if not data then
+        self:setError("Could not read the dropped file: " .. tostring(readError))
+        return
+      end
+      if self:_zipHoldsRom(data) then
+        self:startData(data, name, name)
+        return
+      end
+      self:_installMod(file)
     else
       self:_installMod(file)
     end
@@ -3272,7 +3352,7 @@ function RomImporter:chooseSaveImport(version)
     if okKit and Kit.FileBrowser then
       self._padCursorActive = false
       Kit.FileBrowser.open({
-        title = "Select Save (.sav / .lua)",
+        title = "Select Save (.sav / .srm / .lua)",
         mode = "save",
         onSelect = function(pickedPath)
           self:_importSave(version, pickedPath)
@@ -3291,7 +3371,7 @@ function RomImporter:chooseSaveImport(version)
   if okKit and Kit.FileBrowser then
     self._padCursorActive = false
     Kit.FileBrowser.open({
-      title = "Select Save (.sav / .lua)",
+      title = "Select Save (.sav / .srm / .lua)",
       mode = "save",
       onSelect = function(pickedPath)
         self:_importSave(version, pickedPath)
