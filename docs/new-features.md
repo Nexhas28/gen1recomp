@@ -21,6 +21,7 @@ Features intentionally added to the games themselves, beyond what the original c
 * **Idle Union Room trainers wander**, a few steps around their spot and back
 * **Translation mods stay online** on Gen 3: mods that only change text, fonts, names or visuals can still link, trade and battle
 * **Button remapping** on every game: OPTION -> CONTROLS (keys, pads, L/R on FireRed/LeafGreen/Emerald, fast-forward buttons)
+* **Full controller support**: both thumbsticks move and navigate menus, and stick directions, triggers, stick clicks and extra SDL buttons can be bound in CONTROLS
 * **Duplicate a save slot** from the launcher, a one-tap independent copy for backups or trimming a save before export
 
 ## Gen 2 Specifics

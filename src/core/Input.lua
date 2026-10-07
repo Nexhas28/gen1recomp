@@ -634,8 +634,6 @@ function Input:stickAxisEvents(axis, value)
   return events
 end
 
--- left/right stick treated as continuous held directions, 4-way rule:
--- whichever axis has the larger magnitude wins.
 function Input:gamepadaxis(joystick, axis, value)
   local trigger, phase = self:triggerAxis(axis, value)
   if trigger then
@@ -667,14 +665,6 @@ function Input:joystickaxis(joystick, axis, value)
     self:gamepadaxis(joystick, "leftx", value)
   elseif axis == 2 then
     self:gamepadaxis(joystick, "lefty", value)
-  elseif axis == 3 then
-    self:gamepadaxis(joystick, "rightx", value)
-  elseif axis == 4 then
-    self:gamepadaxis(joystick, "righty", value)
-  elseif axis == 5 then
-    self:gamepadaxis(joystick, "triggerleft", value)
-  elseif axis == 6 then
-    self:gamepadaxis(joystick, "triggerright", value)
   end
 end
 
@@ -751,12 +741,7 @@ function Input:reconcile()
         end
       end
       if j.getAxis then
-        local axisCount = 6
-        if j.getAxisCount then
-          local okC, cnt = pcall(j.getAxisCount, j)
-          if okC and type(cnt) == "number" then axisCount = math.max(6, cnt) end
-        end
-        for axis = 1, axisCount do
+        for _, axis in ipairs({ 1, 2 }) do
           local ok2, v = pcall(j.getAxis, j, axis)
           if ok2 and type(v) == "number" then self:joystickaxis(j, axis, v) end
         end
