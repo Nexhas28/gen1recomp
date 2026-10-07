@@ -206,11 +206,12 @@ function LauncherView.update(imp, dt)
     imp._themeVideoOptions = ok and type(options) == "table" and options or {}
   end
   local videoEnabled = imp._themeVideoOptions.themeVideoBg ~= false
-  if videoEnabled and not imp._themeVideo then
+  if videoEnabled and not imp._themeVideo and not imp._themeVideoFailed then
     local ok, player = pcall(function()
       return require("src.import.LauncherThemeVideo").new()
     end)
     if ok then imp._themeVideo = player end
+    imp._themeVideoFailed = not imp._themeVideo
   elseif not videoEnabled and imp._themeVideo then
     imp._themeVideo:release()
     imp._themeVideo = nil

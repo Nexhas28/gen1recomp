@@ -1813,6 +1813,8 @@ function love.run()
       cap = 10
     elseif Importer and (not focused or idleFor > 30) then
       cap = 15
+    elseif Importer then
+      cap = 30
     else
       local idleCap = idlePresentationCap(idleFor)
       if idleCap then cap = idleCap end
