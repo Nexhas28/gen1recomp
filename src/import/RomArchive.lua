@@ -1,21 +1,5 @@
--- Unwrap a .zip / .7z that carries a ROM into raw cart bytes for import.
---
--- Two rules hold it together:
---
---   * Detection is content (magic bytes), never the filename -- the mobile
---     bridges stage every pick as picked_rom.gb, so the bytes decide.
---   * A format is offered only where PhysFS really mounts it here:
---     capabilities() probes a tiny built-in sample of each archive kind
---     once per filesystem and caches the answer, so a build without the
---     7z archiver never shows a .7z in a picker and never claims to open
---     one.  On such a platform the archive options simply do not exist.
---
--- Mount/scan follows the same shape LauncherMods.installZip uses: prefer an
--- in-memory FileData mount, fall back to staging a save-dir temp.
 local RomArchive = {}
 
--- A ROM archive only ever holds one 1-16 MiB cart, so anything bigger is
--- not what this path is for and never gets inflated into a Lua string.
 RomArchive.MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 
 local capsCache = {}
@@ -24,7 +8,6 @@ function RomArchive._resetForTests()
   capsCache = {}
 end
 
--- "zip" | "7z" | nil, by content signature.
 function RomArchive.kind(data)
   if type(data) ~= "string" or #data < 8 then return nil end
   local head = data:sub(1, 4)
@@ -42,9 +25,6 @@ local function u32(n)
     math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256)
 end
 
--- Minimal stored-entry .zip holding one "probe" file, built at need so no
--- binary blob ships in the source.  CRC is real CRC32("ok") so any reader
--- that validates it passes; the capability probe only lists, never reads.
 function RomArchive._zipProbeBytes()
   local name, body = "probe", "ok"
   local localHeader = "PK\3\4" .. u16(20) .. u16(0) .. u16(0) .. u16(0)
@@ -59,9 +39,6 @@ function RomArchive._zipProbeBytes()
   return localHeader .. central .. eocd
 end
 
--- 130-byte .7z from `7z a -t7z -mx=0` over a 16-byte file ("p.romprobe"
--- holding "gen1recomp-probe").  PhysFS picks its archiver from these magic
--- bytes, so mounting this is the honest question "can this build open7z".
 local SEVENZ_PROBE_HEX =
   "377abcaf271c00044e999ef910000000000000005200000000000000f427ec00"
   .. "67656e317265636f6d702d70726f62650104060001091000070b0100010100"
@@ -75,8 +52,6 @@ local function sevenZProbeBytes()
   end))
 end
 
--- Mount the probe, require a non-empty listing (a refused archiver fails
--- the mount itself), always unmount.
 local function probeFormat(fs, ext, bytes)
   local okFd, fd = pcall(fs.newFileData, bytes, "rom_probe." .. ext)
   if not okFd or not fd then return false end
@@ -91,8 +66,6 @@ local function probeFormat(fs, ext, bytes)
   return found and true or false
 end
 
--- { zip = bool, z7 = bool } for this filesystem (default love.filesystem).
--- Cached per filesystem object; _resetForTests clears the cache.
 function RomArchive.capabilities(fs)
   fs = fs or (love and love.filesystem)
   if type(fs) ~= "table" or not (fs.newFileData and fs.mount
@@ -109,14 +82,6 @@ function RomArchive.capabilities(fs)
   return caps
 end
 
--- opts:
---   fs           filesystem to mount on (default love.filesystem)
---   isRomName    fn(name) -> bool; defaults to .gb / .gbc / .gba
---   acceptedSize fn(byteLength) -> bool; defaults to 1/2/16 MiB
---   prefer       fn(bytes) -> truthy; first candidate that answers wins
---                (the importer passes its SHA-1 -> version lookup)
--- Returns (bytes, entryName) on success, (nil, errorMessage) on failure --
--- check the first slot; the second carries the name or the message.
 function RomArchive.unwrap(data, displayName, opts)
   opts = opts or {}
   local fs = opts.fs or (love and love.filesystem)
@@ -154,8 +119,6 @@ function RomArchive.unwrap(data, displayName, opts)
     if staged and fs.remove then pcall(fs.remove, staged) end
   end
 
-  -- Walk the mounted tree.  AppleDouble / macOS junk and hidden names are
-  -- never carts even when they end in .gb (MTP copies are full of them).
   local candidates = {}
   local function scan(dir)
     local okItems, items = pcall(fs.getDirectoryItems, dir)
@@ -185,9 +148,6 @@ function RomArchive.unwrap(data, displayName, opts)
   end
   table.sort(candidates, function(a, b) return a.path < b.path end)
 
-  -- Only carts of a size the importer accepts are ever read (also the zip
-  -- bomb guard: a hostile entry of any other length is skipped by its
-  -- declared size, before a single byte is inflated).
   local fallback, chosen
   for _, cand in ipairs(candidates) do
     if acceptedSize(cand.size) then

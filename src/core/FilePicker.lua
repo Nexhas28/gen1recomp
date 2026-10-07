@@ -118,10 +118,4 @@ function FilePicker.basename(path)
   return tostring(path or ""):match("([^/\\]+)$") or tostring(path or "")
 end
 
-FilePicker.SAVE = {
-  label = "Save",
-  exts = { "sav", "srm", "lua" },
-  tempName = "pokeport_save_pick",
-}
-
 return FilePicker

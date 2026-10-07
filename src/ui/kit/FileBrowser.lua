@@ -96,8 +96,6 @@ local function isMatchingFilter(name, isDir, mode)
   ext = ext:lower()
   if mode == "rom" then
     if ext == "gb" or ext == "gbc" or ext == "gba" then return true end
-    -- Archives only when this platform mounts them here; a build that
-    -- can't open the kind never offers it for pick.
     if ext == "zip" or ext == "7z" then
       local ok, RomArchive = pcall(require, "src.import.RomArchive")
       if not ok or type(RomArchive.capabilities) ~= "function" then return false end

@@ -1240,9 +1240,6 @@ local function consumePick(self, name, safName, ok)
   self.pickSkip[name] = true
 end
 
--- Extensions a ROM pick may offer here.  Archives only when this
--- platform's PhysFS actually mounts them (probe result); drop the raw
--- answer if the probe layer is missing.
 local function romPickerExts()
   local exts = { "gb", "gbc", "gba" }
   local ok, RomArchive = pcall(require, "src.import.RomArchive")
@@ -2102,9 +2099,6 @@ function RomImporter:startData(data, displayName, sourcePath)
     self:setError("The selected file could not be read.")
     return
   end
-  -- A .zip / .7z holding one cart gets unwrapped first (content sniff, not
-  -- the filename); raw bytes fall straight through.  Caps gates it: on a
-  -- platform PhysFS can't open the kind, unwrap fails with a plain message.
   local RomArchive = require("src.import.RomArchive")
   local kind = RomArchive.kind(data)
   if kind then
@@ -2114,7 +2108,6 @@ function RomImporter:startData(data, displayName, sourcePath)
         :format(kind, #data / 1024 / 1024))
       return
     end
-    -- (bytes, entryName) | (nil, errorMessage)
     local bytes, entry = RomArchive.unwrap(data, displayName, {
       isRomName = isRomFilename,
       acceptedSize = isAcceptedRomSize,
@@ -2570,8 +2563,6 @@ function RomImporter:startPath(path)
     require("src.import.RomSources").absolute(path))
 end
 
--- Does this .zip payload hold a ROM this platform can open?  Drives the
--- drop route only; the actual unwrap runs again in startData.
 function RomImporter:_zipHoldsRom(data)
   local ok, RomArchive = pcall(require, "src.import.RomArchive")
   if not ok then return false end
@@ -2593,8 +2584,6 @@ function RomImporter:filedropped(file)
   -- (which mounts + validates it).  A .deltaskin is only ever a skin, and
   -- everything else is treated as a ROM.  The dropped file itself is passed
   -- through -- installZip opens it the same way readDroppedFile does here.
-  -- Exception: on a game tab a .zip holding a cart is the ROM itself (.7z
-  -- needs no branch; startData sniffs it by content below).
   local name = file:getFilename() or ""
   if name:lower():match("%.gci$")
       or (self.tab == "box" and name:lower():match("%.sav$")

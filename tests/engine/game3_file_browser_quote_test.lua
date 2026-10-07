@@ -16,8 +16,6 @@ love = love or require("tests.love_stub")
 local FileBrowser = require("src.ui.kit.FileBrowser")
 local HostShell = require("src.core.HostShell")
 
--- ROM archive caps for this fixture: this platform opens .zip but not .7z.
--- Faking it keeps the one-time probe (mount sample) out of this test.
 local realRomArchive = package.loaded["src.import.RomArchive"]
 package.loaded["src.import.RomArchive"] = {
   capabilities = function() return { zip = true, z7 = false } end,

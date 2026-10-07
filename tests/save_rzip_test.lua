@@ -1,10 +1,3 @@
--- RetroArch RZIP-compressed .srm header/chunk walk (SrmDecompress).
---
---   luajit tests/save_rzip_test.lua
--- also dofile'd by tests/run_tests.lua.
---
--- love_stub has no love.data.decompress; the format walk is what this
--- tests, so inflate is faked: every chunk round-trips as "D(<chunk>)".
 package.path = "./?.lua;./?/init.lua;" .. package.path
 if not _G.love then _G.love = require("tests.love_stub") end
 
@@ -26,7 +19,6 @@ local function le32(n)
   return string.char(b1, b2, b3, n % 256)
 end
 
--- #RZIPv + minor(1) + '#' + chunk_size u32 + total_size u64 + [len u32 + data]*
 local function rzip(chunkSize, totalSize, chunks)
   local out = { "#RZIPv", string.char(1), "#",
                 le32(chunkSize), le32(totalSize), le32(0) }
@@ -37,30 +29,24 @@ local function rzip(chunkSize, totalSize, chunks)
   return table.concat(out)
 end
 
--- ---- isCompressed gates --------------------------------------------------
 local blob = rzip(131072, 131072, { "hello" })
 check(SrmDecompress.isCompressed(blob), "rzip header detected")
 check(not SrmDecompress.isCompressed("PK\3\4body"), "zip magic is not rzip")
 check(not SrmDecompress.isCompressed("RIP"), "too short to sniff")
 check(not SrmDecompress.isCompressed(nil), "nil is not rzip")
 
--- ---- chunk ending exactly at EOF (off-by-one regression) -----------------
 local got, err = SrmDecompress.decompress(blob)
 eq(got, "D(hello)", "chunk ending exactly at EOF decompresses")
 eq(err, nil, "no error for exact-EOF chunk")
 
--- ---- genuinely truncated file -------------------------------------------
 local g2, e2 = SrmDecompress.decompress(blob:sub(1, #blob - 2))
 eq(g2, nil, "chunk claiming bytes past EOF rejected")
 eq(e2, "truncated chunk", "truncated error message")
 
--- ---- multi-chunk walk until total_size satisfied ------------------------
 local two = rzip(4, 99, { "ab", "cd" })
 eq(SrmDecompress.decompress(two), "D(ab)D(cd)", "all chunks concatenated")
 
--- ---- passthrough: raw save untouched ------------------------------------
 local raw = string.rep("\255", 32768)
-eq(SrmDecompress.ensureDecompressed(raw), raw, "raw save passes through")
 local g3, e3 = SrmDecompress.decompress(raw)
 eq(g3, nil, "raw save not decompressible")
 eq(e3, "not compressed SRM", "raw save error message")

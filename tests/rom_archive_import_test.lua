@@ -1,12 +1,3 @@
--- ROM import from .zip / .7z: unwrap one cart, gate on platform caps.
---
---   luajit tests/rom_archive_import_test.lua
--- also dofile'd by tests/run_tests.lua.
---
--- The capability probe mounts a tiny built-in sample of each format, so
--- these tests feed RomArchive a fake filesystem where mount success is
--- decided per content -- that IS the platform question (a build without
--- the 7z archiver just cannot mount the probe).
 package.path = "./?.lua;./?/init.lua;" .. package.path
 if not _G.love then _G.love = require("tests.love_stub") end
 
@@ -21,17 +12,15 @@ local zipProbe = RomArchive._zipProbeBytes()
 local userArchive = "PK\3\4" .. "user-archive-body"
 local sevenZFile = KIND_7Z .. "user-7z-body"
 
-local goodBody = string.rep("R", 1048576) -- accepted 1 MiB cart
+local goodBody = string.rep("R", 1048576)
 local SUPPORT_Z7 = false
 local userEntries = { ["Red.gb"] = goodBody }
 
--- ---- fake filesystem -----------------------------------------------------
-
 local function makeVfs()
   local vfs = {}
-  local arch = {}      -- fullpath -> { body=string } | { dir=true }
-  local mounted = {}   -- archive key -> mount point
-  local staged = {}    -- temp path -> data
+  local arch = {}
+  local mounted = {}
+  local staged = {}
 
   local function keyOf(archive)
     if type(archive) == "table" then return archive end
@@ -68,7 +57,6 @@ local function makeVfs()
     elseif data == zipProbe then
       entries = { probe = "ok" }
     elseif RomArchive.kind(data) == "7z" then
-      -- the built-in 7z probe: only a platform that supports 7z mounts it
       if not SUPPORT_Z7 then return false end
       entries = { ["p.romprobe"] = "gen1recomp-probe" }
     else
@@ -147,16 +135,12 @@ local vfs = makeVfs()
 love.filesystem = vfs
 RomArchive._resetForTests()
 
--- ---- 1. content sniff ----------------------------------------------------
-
 eq(RomArchive.kind("GBROM" .. string.rep("x", 20)), nil, "raw ROM is not an archive")
 eq(RomArchive.kind("PK\3\4rest"), "zip", "PK\\3\\4 is a zip")
 eq(RomArchive.kind("PK\5\6rest"), "zip", "empty zip is a zip")
 eq(RomArchive.kind(KIND_7Z .. "rest"), "7z", "7z magic recognised")
 eq(RomArchive.kind("PK"), nil, "truncated input is not an archive")
 eq(RomArchive.kind(nil), nil, "non-string input is not an archive")
-
--- ---- 2. platform caps drive what exists ----------------------------------
 
 local caps = RomArchive.capabilities(vfs)
 check(caps.zip == true, "zip probe mounts here")
@@ -169,8 +153,6 @@ check(caps.z7 == true, "7z probe mounts once the platform supports it")
 SUPPORT_Z7 = false
 RomArchive._resetForTests()
 check(RomArchive.capabilities(vfs).z7 == false, "caps are re-probed after reset")
-
--- ---- 3. unwrap -----------------------------------------------------------
 
 userEntries = { ["._Red.gb"] = "APPLEDOUBLE", ["Red.gb"] = goodBody }
 local bytes, entry = RomArchive.unwrap(userArchive, "pack.zip", { fs = vfs })
@@ -212,8 +194,6 @@ eq(z7entry, "Red.gb", "and yields its cart")
 SUPPORT_Z7 = false
 RomArchive._resetForTests()
 
--- ---- 4. startData end-to-end (importer view) -----------------------------
-
 love.data = love.data or {}
 local savedData = { hash = love.data.hash, encode = love.data.encode }
 love.data.hash = function(_, data)
@@ -246,7 +226,6 @@ eq(ri.workState, "error", "unknown-sha cart in a zip errors too")
 check(tostring(ri.detail):find("Unsupported ROM (SHA-1", 1, true) ~= nil,
   "the SHA-1 gate runs on the unwrapped bytes: " .. tostring(ri.detail))
 
--- oversized archive: lower the ceiling instead of building 64 MiB
 local realMax = RomArchive.MAX_ARCHIVE_BYTES
 RomArchive.MAX_ARCHIVE_BYTES = 10
 ri = freshImporter()
@@ -261,8 +240,6 @@ ri:startData(sevenZFile, "cart.7z")
 eq(ri.workState, "error", "a 7z drop takes the same startData path")
 check(tostring(ri.detail):find("cannot open .7z", 1, true) ~= nil,
   "and is refused by caps: " .. tostring(ri.detail))
-
--- ---- 5. drop routing -----------------------------------------------------
 
 userEntries = { ["Red.gb"] = goodBody }
 
@@ -288,15 +265,11 @@ if started then
   eq(started.name, "/tmp/packs/cart-pack.zip", "and the dropped path for display")
 end
 
--- .7z has no filedropped branch: generic path -> startData sniffs content.
--- Use a real startData here so the caps refusal comes from unwrap.
 ri = freshImporter({ tab = "red" })
 ri:filedropped(fakeFile("/tmp/cart.7z", sevenZFile))
 eq(ri.workState, "error", "a dropped .7z reaches startData via the generic path")
 check(tostring(ri.detail):find("cannot open .7z", 1, true) ~= nil,
   "and is refused when the platform lacks 7z: " .. tostring(ri.detail))
-
--- ---- teardown ------------------------------------------------------------
 
 love.filesystem = savedFs
 love.data.hash = savedData.hash

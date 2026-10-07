@@ -1,5 +1,3 @@
--- Decompress RetroArch compressed SRM files (RZIP format) to raw save bytes.
--- RZIP: #RZIPvX# header, chunk_size (4 LE), total_size (8 LE), then chunks: comp_size (4 LE) + zlib data
 
 local SrmDecompress = {}
 
@@ -50,15 +48,6 @@ function SrmDecompress.decompress(bytes)
   end
   local res = table.concat(parts)
   return res
-end
-
-function SrmDecompress.ensureDecompressed(bytes)
-  if has_rzip_header(bytes) then
-    local res, err = SrmDecompress.decompress(bytes)
-    if not res then return nil, err end
-    return res
-  end
-  return bytes
 end
 
 return SrmDecompress
