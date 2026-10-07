@@ -12,8 +12,32 @@ local RsPolicy = require("src.ui.game3.rs.pokedex_policy")
 local function nativeRs() return Gfx.manifest().assetLayout == "rs" end
 local rsTextNames = {gText_CryOf = "CryOf", gText_SizeComparedTo = "SizeComparedTo", gText_SelectorArrow = "RightPointingTriangle",
   gText_SearchingPleaseWait = "Searching", gText_SearchCompleted = "SearchComplete", gText_NoMatchingPkmnWereFound = "NoMatching"}
+local function cached(label, copy)
+  if label and RomText.has(label) then return RomText.plain(label) end
+  return copy
+end
+local RS_LABELS = {RightPointingTriangle = "DexText_RightPointingTriangle"}
+local function rsString(key)
+  local copy = assert(Gfx.manifest().strings[key], "native RS dex text " .. tostring(key))
+  local text = cached(RS_LABELS[key] or ("gDexText_" .. key), nil)
+  if text == nil then return copy end
+  return (copy:match("^\252\019.") or "") .. text
+end
+-- pokeruby/src/pokedex.c:4228
+local function categorySuffix(unknown)
+  local i, marks = 1, 0
+  while i <= #unknown do
+    local c = unknown:sub(i, i)
+    if c == "?" then marks, i = marks + 1, i + 1
+    elseif c == " " then i = i + 1
+    elseif unknown:sub(i, i + 2) == "？" then marks, i = marks + 1, i + 3
+    else break end
+  end
+  if marks == 0 or i > #unknown then return "" end
+  return (unknown:sub(i - 1, i - 1) == " " and " " or "") .. unknown:sub(i)
+end
 local function dexText(key)
-  return nativeRs() and assert(Gfx.manifest().strings[assert(rsTextNames[key], "native RS dex text alias")]) or RomText.plain(key)
+  return nativeRs() and rsString(assert(rsTextNames[key], "native RS dex text alias")) or RomText.plain(key)
 end
 
 local Pokedex = {}
@@ -910,20 +934,26 @@ end
 local function monInfo(s, nat, nationalNumber, owned, newEntry)
   local e = entryFor(nat)
   if nativeRs() then
-    local strings, out = Gfx.manifest().strings, {}
+    local out = {}
     if newEntry then
-      local t = strings.RegisterComplete
+      local t = rsString("RegisterComplete")
       out[#out + 1] = {text = t, x = 16 + math.floor((208 - FrlgFont.measure(t)) / 2), y = 0}
     end
     local num = nationalNumber and nat or (Pokedex.hoennNumber(nat) or nat)
     out[#out + 1] = {text = string.format("%03d", num), x = 104, y = 24}
     out[#out + 1] = {text = pokemon().name(Pokedex.speciesOf(nat)) or Gfx.manifest().tenDashes, x = 128, y = 24}
-    local category = owned and ((e.category or "") .. " " .. strings.UnknownPoke:match("[^? ]+.*$")) or strings.UnknownPoke
-    local cx = 88 + (owned and (FrlgFont.measure(strings.UnknownPoke) - FrlgFont.measure(category)) or 0)
+    local unknown = rsString("UnknownPoke")
+    local category = owned and (Strings(e.category or "") .. categorySuffix(unknown)) or unknown
+    local cx = 88 + (owned and (FrlgFont.measure(unknown) - FrlgFont.measure(category)) or 0)
     out[#out + 1] = {text = category, x = cx, y = 40}
-    out[#out + 1] = {text = owned and Pokedex.heightText(e.height or 0) or strings.UnknownHeight, x = 128, y = 56}
-    out[#out + 1] = {text = owned and RsPolicy.weightText(e.weight or 0) or strings.UnknownWeight, x = 128, y = 72}
-    local desc = s.descriptionPage == 1 and e.description2 or e.description
+    out[#out + 1] = {text = owned and Pokedex.heightText(e.height or 0) or rsString("UnknownHeight"), x = 128, y = 56}
+    out[#out + 1] = {text = owned and RsPolicy.weightText(e.weight or 0) or rsString("UnknownWeight"), x = 128, y = 72}
+    local desc
+    if s.descriptionPage == 1 then
+      desc = cached(e.descriptionLabel2, e.description2)
+    else
+      desc = cached(e.descriptionLabel, e.description)
+    end
     out[#out + 1] = {text = owned and (desc or "") or "", x = 16, y = 104}
     return out
   end
@@ -1535,7 +1565,8 @@ function tasks.loadSize(s)
     s.state = 3
   elseif st == 3 then
     local name = s.session and (s.session.name or s.session.playerName) or ""
-    local t = dexText("gText_SizeComparedTo") .. tostring(name)
+    local label = dexText("gText_SizeComparedTo")
+    local t = label:find("^の") and tostring(name) .. label or label .. tostring(name)
     local w = FrlgFont.measure(t) or 0
     s.sizeText = { text = t, x = nativeRs() and (24 + 96 - math.floor(w / 2)) or (w < 240 and math.floor((240 - w) / 2) or 0), y = nativeRs() and 120 or 121 }
     s.state = 4
@@ -1593,10 +1624,7 @@ function tasks.switchFromSize(s)
   end
 end
 
-local function cartText(key, fallback)
-  if key and RomText.has(key) then return RomText.plain(key) end
-  return fallback
-end
+local cartText = cached
 
 -- pokeemerald/src/pokedex.c:1330
 local TYPE_OPTION = { "gText_DexSearchTypeNone" }
@@ -1632,11 +1660,13 @@ local ITEM_DESCRIPTIONS = { "gText_ListByFirstLetter", "gText_ListByBodyColor", 
   "gText_ListByType", "gText_SelectPokedexListingMode", "gText_SelectPokedexMode", "gText_ExecuteSearchSwitch" }
 
 local function topBarDescription(i)
-  return cartText(TOPBAR_DESCRIPTIONS[i + 1], Gfx.manifest().search.topBar[i + 1].description)
+  local row = Gfx.manifest().search.topBar[i + 1]
+  return cartText(row.descriptionKey or TOPBAR_DESCRIPTIONS[i + 1], row.description)
 end
 
 local function itemDescription(i)
-  return cartText(ITEM_DESCRIPTIONS[i + 1], Gfx.manifest().search.items[i + 1].description)
+  local row = Gfx.manifest().search.items[i + 1]
+  return cartText(row.descriptionKey or ITEM_DESCRIPTIONS[i + 1], row.description)
 end
 
 -- pokeemerald/src/pokedex.c:1437
@@ -1657,8 +1687,8 @@ local function searchOptionTexts(which)
   local out = {}
   for i, t in ipairs(list) do
     out[i] = {
-      title = cartText(keys.titles[i], t.title),
-      description = cartText(keys.descriptions and keys.descriptions[i], t.description),
+      title = cartText(t.titleKey or keys.titles[i], t.title),
+      description = cartText(t.descriptionKey or (keys.descriptions and keys.descriptions[i]), t.description),
     }
   end
   return out

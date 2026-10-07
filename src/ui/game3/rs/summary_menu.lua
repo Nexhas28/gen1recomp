@@ -50,6 +50,7 @@ local function detailRows(open) S._detailRowsOpen = open end
 function S.openMenu(party, index, opts)
   opts = opts or {}
   S._man, S._party, S._opts = S.manifest(), party or {}, opts
+  S._contestDescriptions = {}
   S._cursor = index or 1
   S._playerState = opts.playerState or opts.session
     or require("src.core.game3.runtime").getSession()
@@ -500,7 +501,10 @@ local function moves()
         local amount = value == 255 and 0 or math.floor(value / 10)
         for i = 0, 7 do frame(S._man.hearts, row == 1 and (i < amount and 1 or 0) or (i < amount and 3 or 4), 48 + i % 4 * 8, 120 + (row - 1) * 16 + math.floor(i / 4) * 8) end
       end
-      print(effect.description, 88, 120, 255)
+      local descriptions = S._contestDescriptions or {}
+      S._contestDescriptions = descriptions
+      descriptions[effect] = descriptions[effect] or SummaryData.contestEffectDescription(effect)
+      print(descriptions[effect], 88, 120, 255)
     else
       local def = Pokemon.battleMove(id)
       text("gOtherText_Power2", 8, 120); text("gOtherText_Accuracy2", 8, 136)
