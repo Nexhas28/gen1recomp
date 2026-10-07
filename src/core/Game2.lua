@@ -342,7 +342,9 @@ function Game2:continueGame(save)
   self:applyOptions()
   self.stack:clear()
   self.world = nil
+  require("src.world.gen2.UnionSafety").settle(save, self.data)
   self:startWorld()
+  require("src.online.union.TradeTxn").resumePending(self)
   -- After the adopt and after the world is standing, which is where Gen 1
   -- emits it (src/core/Game.lua:1127, once the stack has been rebuilt).
   if modsDiff then
@@ -1002,6 +1004,7 @@ function Game2:snapshotSave()
     -- WRAM on the cart, so a save made on POKECENTER_2F must still know which
     -- centre's stairs lead back down -- World:loadPlayerData reads it back.
     self.save.backupWarp = world.backupWarp or self.save.backupWarp
+    require("src.world.gen2.UnionSafety").seal(self.save, self.data)
   end
   self.save.options = self.options
   return self.save
@@ -1137,6 +1140,7 @@ function Game2:load(opts)
   self.data.gen2Scripts = loadGenerated("data/generated/scripts.lua")
   self.data.gen2StdScripts = loadGenerated("data/generated/std_scripts.lua")
   self.data.gen2Text = loadGenerated("data/generated/text.lua")
+  require("src.world.gen2.UnionCenter2F").apply(self.data)
   -- The engine's own strings, keyed by the disassembly's label.  gen2Text
   -- above is the script text and is keyed by bank:address for the overworld
   -- VM, so the two are different tables and both are loaded.  This one is
@@ -1302,6 +1306,7 @@ function Game2:load(opts)
     -- open the same frame), rather than once per render frame in World:draw.
     local world = self.world
     if world and world.tickFrameClocks then world:tickFrameClocks() end
+    if world then require("src.world.gen2.UnionRoomPresence").tick(self) end
     -- Not the audio tick: _UpdateSound runs once per frame off VBlank
     -- (audio/engine.asm:84, home/vblank.asm:141-143), never off the logic clock.
     local top = self.stack:top()

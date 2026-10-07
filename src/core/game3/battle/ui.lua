@@ -1758,6 +1758,12 @@ local PP_STATE_TO_COLOR_INDEX = {
   [3] = 0,
 }
 
+function Ui.moveTypeOf(mon, slot, def)
+  local t = mon and mon.moveTypes and mon.moveTypes[slot]
+  if t ~= nil then return t end
+  return def.type
+end
+
 function Ui.ppColorState(currentPp, maxPp)
   currentPp = tonumber(currentPp) or 0
   maxPp = tonumber(maxPp) or 0
@@ -2335,7 +2341,7 @@ local function draw_move_menu_rs(st)
     F.draw(RomText.plain("gText_MoveInterfacePP"), 184, 120, { colors = colors })
     F.draw(string.char(0xfc, 0x11, 2, 0xfc, 0x14, 6) .. string.format("%2d/%2d", pp, maxPp),
       200, 120, { colors = colors })
-    F.draw(Types.name(def.type), 184, 136, { colors = colors })
+    F.draw(Types.name(Ui.moveTypeOf(mon, slot, def)), 184, 136, { colors = colors })
   end
 end
 
@@ -2373,7 +2379,7 @@ local function draw_move_menu_rse(st)
     rse_text(W.MOVE_TYPE, typeLabel)
     local F = battle_font()
     local tw = F.measure(typeLabel, { font = "narrow" })
-    rse_text(W.MOVE_TYPE, Types.name(def.type), tw, { narrow = false })
+    rse_text(W.MOVE_TYPE, Types.name(Ui.moveTypeOf(mon, slot, def)), tw, { narrow = false })
   end
 end
 
@@ -2446,7 +2452,7 @@ local function draw_move_menu(st)
     -- pokefirered/src/battle_controller_player.c:1402
     draw_menu_text(string.format("%2d/%2d", pp, maxPp), 202, 122, { small = false, colors = ppColors })
     -- pokefirered/src/battle_controller_player.c:1413
-    draw_menu_text(RomText.plain("gText_MoveInterfaceType") .. Types.name(def.type), 168, 138,
+    draw_menu_text(RomText.plain("gText_MoveInterfaceType") .. Types.name(Ui.moveTypeOf(mon, slot, def)), 168, 138,
       { small = true, colors = FrlgFont.COLOR.NORMAL })
   end
 end

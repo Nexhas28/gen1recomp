@@ -1385,6 +1385,18 @@ local function tryMigrateLegacy(key, fs)
   -- refuse to delete the originals unless the new slot is loadable (from
   -- the main copy or, failing that, the backup)
   if not decodeSlot(fs, key, id) then return nil end
+  local lbase, dbase = lmain:gsub("%.lua$", ""), dmain:gsub("%.lua$", "")
+  for _, suffix in ipairs({ "_trade.lua", "_xtrade.lua", "_xtrade.lua.tmp" }) do
+    local from = lbase .. suffix
+    local body = fs.getInfo(from) and fs.read(from)
+    if body then
+      fs.write(dbase .. suffix, body)
+      if not fs.getInfo(dbase .. suffix) then return nil end
+    end
+  end
+  for _, suffix in ipairs({ "_trade.lua", "_xtrade.lua", "_xtrade.lua.tmp" }) do
+    if fs.getInfo(lbase .. suffix) then remove(fs, lbase .. suffix) end
+  end
   remove(fs, lmain)
   remove(fs, lbak)
   remove(fs, ltmp)
@@ -1905,12 +1917,18 @@ local function copyTree(fs, from, to)
 end
 
 local function pendingTradeSent(fs, main)
-  local journal = main:gsub("%.lua$", "") .. "_trade.lua"
-  if not fs.getInfo(journal) then return false end
-  local data = SaveSerializer.decode(fs.read(journal) or "")
-  if type(data) ~= "table" or type(data.entries) ~= "table" then return false end
-  for _, e in ipairs(data.entries) do
-    if type(e) == "table" and type(e.sent) == "table" then return true end
+  local base = main:gsub("%.lua$", "")
+  for _, journal in ipairs({ base .. "_trade.lua", base .. "_xtrade.lua" }) do
+    if fs.getInfo(journal) then
+      local data = SaveSerializer.decode(fs.read(journal) or "")
+      if type(data) == "table" and type(data.entries) == "table" then
+        for _, e in ipairs(data.entries) do
+          if type(e) == "table" and (type(e.sent) == "table" or type(e.out) == "table") then
+            return true
+          end
+        end
+      end
+    end
   end
   return false
 end

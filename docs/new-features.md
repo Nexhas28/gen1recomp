@@ -19,6 +19,11 @@ Features intentionally added to the games themselves, beyond what the original c
 * **Name badges over trainers** in Gen 3 link rooms (Union Room, Trade Center, Colosseum, Record Corner, Berry Blender), your own included
 * **Chat, trade and battle icons** on those badges, so a busy trainer is visible at a glance
 * **Idle Union Room trainers wander**, a few steps around their spot and back
+* **Cross-generation Union Room** online for every game: Gen 1, 2 and 3 players share one 40-player room, each shown with their own game's sprite and a circled 1/2/3 badge
+* **Union Room in Red, Blue, Yellow, Gold, Silver and Crystal** upstairs in every Pokémon Center, on by default; Launcher Options -> Union Room OFF restores the original Centers
+* **Union Room in Ruby and Sapphire**, a door added to every Pokémon Center 2F
+* **Cross-generation battles** under one Gen 3 ruleset limited to the older game's Pokémon and moves, with substitutes, move fixes and type-covering rentals that never touch the save
+* **Cross-generation trades** with both players shown every permanent change before confirming, journaled so an interrupted trade finishes exactly once
 * **Translation mods stay online** on Gen 3: mods that only change text, fonts, names or visuals can still link, trade and battle
 * **Button remapping** on every game: OPTION -> CONTROLS (keys, pads, L/R on FireRed/LeafGreen/Emerald, fast-forward buttons)
 * **Full controller support**: both thumbsticks move and navigate menus, and stick directions, triggers, stick clicks and extra SDL buttons can be bound in CONTROLS

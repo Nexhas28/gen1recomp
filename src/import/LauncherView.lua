@@ -5765,7 +5765,8 @@ local function buildSettingsModal(imp, m)
       item.stacked = item.row.choices ~= nil or Kit.textWidth("small", item.label)
         + math.floor(210 * m.s) > inner
       item.labelH = item.stacked and Kit.wrapHeight("small", item.label, inner) or Kit.textHeight("small")
-      item.h = 2 * inset + m.btnH + (item.stacked and item.labelH + gap or 0)
+      item.noteH = item.row.note and Kit.wrapHeight("micro", item.row.note, inner) + gap or 0
+      item.h = 2 * inset + m.btnH + (item.stacked and item.labelH + gap or 0) + item.noteH
     end
     total = total + item.h + gap
   end
@@ -5809,6 +5810,9 @@ local function buildSettingsModal(imp, m)
       if visible then
         Kit.card(x, ry, rowW, item.h, "row")
         Kit.textWrapped("small", item.label, ix, labelY, inner, PAL.text)
+        if row.note then
+          Kit.textWrapped("micro", row.note, ix, ctlY + m.btnH + gap, inner, PAL.muted)
+        end
       end
       if row.choices then
         local cw = (inner - gap) / 2

@@ -897,6 +897,18 @@ function LauncherSettings.open(hooks, version)
       action = function() hooks.openExtras(); return false end,
     })
   end
+  local UnionSetting = require("src.online.union.Setting")
+  launcher.rows[#launcher.rows + 1] = {
+    label = Strings("Union Room"),
+    note = Strings("Adds a Union Room upstairs in Gen 1 and Gen 2 Pokemon Centers. OFF restores the original Centers. Gen 3 Union Rooms always work."),
+    value = function()
+      return UnionSetting.enabledIn(opts) and Strings("ON") or Strings("OFF")
+    end,
+    step = function()
+      opts[UnionSetting.KEY] = not UnionSetting.enabledIn(opts)
+      return true
+    end,
+  }
   local RomSources = require("src.import.RomSources")
   launcher.rows[#launcher.rows + 1] = {
     label = Strings("Auto Re-import"),
