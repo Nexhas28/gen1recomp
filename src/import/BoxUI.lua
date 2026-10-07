@@ -2,11 +2,12 @@ local Kit = require("src.ui.kit.Kit")
 local Theme = require("src.ui.kit.Theme")
 local Transition = require("src.ui.kit.Transition")
 local Strings = require("src.core.Strings")
+local Icons = require("src.ui.kit.Icons")
 local UI = {}
 local PAL = Theme.PAL
 UI.ICONS = { List = "book-open", Filters = "list-filter", Arrange = "arrow-left-right",
   Themes = "paintbrush", Dashboard = "chart-no-axes-column", Teams = "users", Gifts = "package",
-  Showcase = "grid-2x2", Files = "folder", Events = "mail", Migration = "arrow-left-right" }
+  Showcase = "grid-2x2", Files = "folder", Events = "mail", Migration = "arrow-left-right", Items = "backpack" }
 UI.HELP = {
   Box = "these pokémon stay here until you send them to a game. Box saves separately, and sync keeps both sides of a move together.",
   List = "all your stored pokémon in one list. select up to six to compare them.",
@@ -20,7 +21,8 @@ UI.HELP = {
   Backup = "restores Box and its linked saves together. your current collection gets backed up first. older incomplete backups won’t restore.",
   Events = "tickets for event trips in the linked game. collect the ticket, then use the normal ship route. story requirements still apply.",
   Migration = "same pokémon, new generation. check the changes first. the original stays archived so you can switch back.",
-  MigrationPolicy = "Gen 2 and Gen 3 never had an official transfer route. G1R converts what fits and blocks what doesn’t.",
+  MigrationPolicy = "Gen 2 and Gen 3 never had an official transfer route. G1R converts what fits and blocks what doesn’t. Gen 1 and 2 to Gen 3 follows Pokémon Bank: nature from EXP, three perfect IVs, EVs reset, Poké Ball.",
+  Items = "store bag items here, then send them to another game's bag. gen 1 and 2 share a stash. changing a ball uses one up.",
 }
 local HELP_TITLES = { Box = "Box storage",
   Backup = "Restore backup", MigrationPolicy = "Conversion rules" }
@@ -28,6 +30,48 @@ local function view() return require("src.import.LauncherView") end
 function UI.button(imp, x, y, w, h, id, label, action, opts)
   opts = opts or {}; opts.action, opts.font = action, opts.font or "small"
   view().btn(imp, x, y, w, h, "box-" .. id, Strings(label), opts)
+end
+local TOAST = { ok = { color = "green", icon = "check", hold = 3.5 },
+  error = { color = "red", icon = "triangle-alert", hold = 7 },
+  info = { color = "blue", icon = "circle-help", hold = 5 } }
+function UI.toast(imp, text, kind, sticky)
+  if text == nil or text == "" then imp._boxToast = nil; return end
+  imp._boxToast = { text = Strings(tostring(text)), kind = TOAST[kind] and kind or "info",
+    at = love.timer.getTime(), sticky = sticky }
+end
+function UI.occludeToast(imp)
+  local t = imp.tab == "box" and imp._boxToast
+  if t and t.rect then Kit.occlude(t.rect[1], t.rect[2], t.rect[3], t.rect[4]) end
+end
+function UI.drawToast(imp, m, bottom)
+  local t = imp._boxToast
+  if not t or imp.tab ~= "box" then return end
+  local style = TOAST[t.kind]
+  local elapsed = love.timer.getTime() - t.at
+  local hold = t.sticky and math.huge or style.hold
+  if elapsed > hold + .25 then imp._boxToast = nil; return end
+  local slide = math.min(1, elapsed / .18, (hold + .25 - elapsed) / .25)
+  slide = 1 - (1 - math.max(0, slide)) ^ 3
+  local s, color = m.s, PAL[style.color]
+  local pad, gap, icon = 12 * s, 10 * s, 20 * s
+  local w = math.min(420 * s, m.W - 32 * s)
+  local textW = w - 2 * pad - icon - gap
+  local h = 2 * pad + math.max(icon, Kit.wrapHeight("small", t.text, textW, 4))
+  local x = (m.W - w) / 2
+  local y = bottom - h - 12 * s + (1 - slide) * (h + 24 * s)
+  t.rect = { x, y, w, h }
+  local r = Theme.cardRadius()
+  Theme.fillRounded(x + 2 * s, y + 4 * s, w, h, PAL.inverse, .35, r)
+  Theme.fillRounded(x, y, w, h, PAL.surface, .98, r)
+  Theme.fillRounded(x, y, w, h, color, .16, r)
+  Theme.strokeRounded(x, y, w, h, color, .75, 1.5, r)
+  Icons.draw(style.icon, x + pad, y + (h - icon) / 2, icon, color, 1)
+  Kit.textWrapped("small", t.text, x + pad + icon + gap, y + pad, textW, PAL.heading, 4)
+  local overlay = Kit._overlay
+  Kit._overlay = true
+  view().btn(imp, x, y, w, h, "box-toast", "", { face = "bare", ring = false,
+    action = function() imp._boxToast = nil end })
+  Kit._overlay = overlay
 end
 function UI.close(imp)
   imp._boxPopup = nil; Kit.blur(); Kit._drag = nil

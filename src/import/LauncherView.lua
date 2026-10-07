@@ -363,7 +363,9 @@ function LauncherView.touchpressed(imp, id, x, y)
     region = not shielded and tabScrollMax(imp) > 0 and inRect(imp._tabRegionRect, x, y),
     page = not shielded,
     picker = picker and inRect(picker.rect, x, y) and picker or nil,
+    inner = not noDragAt(imp, x, y),
   }
+  if imp._touchAt[tostring(id)].inner then Kit.dragBegin(x, y) end
 end
 
 function LauncherView.touchmoved(imp, id, x, y)
@@ -388,8 +390,12 @@ function LauncherView.touchmoved(imp, id, x, y)
         move = leftover
       end
       if move ~= 0 and start.page and (imp._pageScrollMax or 0) > 0 then
-        imp._pageScroll = (imp._pageScroll or 0) + move
+        local at, leftover = Kit.scrollHandoff(imp._pageScroll or 0,
+          imp._pageScrollMax, move)
+        imp._pageScroll = at
+        move = leftover
       end
+      if move ~= 0 and start.inner then Kit.dragAdd(move) end
     end
     start.lastY = y
   end
@@ -407,6 +413,7 @@ function LauncherView.touchreleased(imp, id, x, y)
   end
   local start = imp._touchAt and imp._touchAt[tid]
   if imp._touchAt then imp._touchAt[tid] = nil end
+  if start and start.inner then Kit.dragEnd() end
   -- A release with no matching press is leftover from the previous host
   -- (game / save editor), not a launcher tap (#2079).
   if not start then
@@ -6965,6 +6972,7 @@ function LauncherView.draw(imp)
   imp._noDragN = 0
   local Toast = require("src.import.online.Toast")
   Toast.occlude(imp)
+  require("src.import.BoxUI").occludeToast(imp)
 
   Theme.field()
   if imp._themeVideo then imp._themeVideo:draw() end
@@ -7071,6 +7079,7 @@ function LauncherView.draw(imp)
   local held = imp._modalHeld
   if held then imp[held.key] = held.value end
   Toast.occlude(imp)
+  require("src.import.BoxUI").occludeToast(imp)
   buildModals(imp, m)
   endModalDraw(m)
   if held then imp[held.key] = nil end
@@ -7079,6 +7088,7 @@ function LauncherView.draw(imp)
   Toast.draw(imp, m, contentY + math.floor(8 * m.s), spec ~= nil
     or (Kit.VirtualKeyboard and Kit.VirtualKeyboard.active)
     or (Kit.FileBrowser and Kit.FileBrowser.active) or false)
+  require("src.import.BoxUI").drawToast(imp, m, math.min(contentY + viewH, m.top + m.h))
 
   -- The loader sits above everything, including modals: it is the one thing
   -- that must never be clicked around.

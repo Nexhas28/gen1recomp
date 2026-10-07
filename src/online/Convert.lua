@@ -117,6 +117,26 @@ local function levelOf(mon)
   return math.max(1, math.min(100, math.floor(tonumber(mon.level) or 1)))
 end
 
+-- engine/link/link.asm:1180 TimeCapsule_ReplaceTeruSama
+function Convert.heldItemFromCatchRate(byte, gen2Data)
+  byte = tonumber(byte)
+  if not byte or byte <= 0 or byte > 255 then return nil end
+  local items = gen2Data and gen2Data.items or {}
+  local replaced = type(items.timeCapsule) == "table" and items.timeCapsule[byte]
+  if replaced then return replaced end
+  for id, def in pairs(items) do
+    if type(def) == "table" and def.index == byte and def.id == id then return id end
+  end
+  return nil
+end
+
+-- engine/link/link.asm:823
+function Convert.catchRateFromHeldItem(item, gen2Data)
+  if item == nil or item == 0 then return 0 end
+  local def = gen2Data and gen2Data.items and gen2Data.items[item]
+  return type(def) == "table" and tonumber(def.index) or nil
+end
+
 -- engine/link/link.asm:930 Link_ConvertPartyStruct1to2
 
 function Convert.toGen2(mon, gen1Data, gen2Data)
@@ -195,7 +215,8 @@ function Convert.toGen2(mon, gen1Data, gen2Data)
     maxHp = stats.hp,
     types = def2.types,
     moves = moves,
-    item = nil,
+    -- engine/link/link.asm:1102
+    item = Convert.heldItemFromCatchRate(mon.catchRate or (def1 and def1.catchRate), gen2Data),
     status = status,
     -- engine/link/link.asm:1067
     happiness = Convert.DEFAULT_HAPPINESS,
@@ -216,6 +237,10 @@ function Convert.toGen2(mon, gen1Data, gen2Data)
     { to = Convert.DEFAULT_HAPPINESS })
   entry(report.changed, "caught_level",
     ("MET AT LEVEL %d"):format(level), { to = level })
+  if out.item then
+    entry(report.changed, "item",
+      ("HOLDS %s"):format(displayName(gen2Data and gen2Data.items, out.item)), { to = out.item })
+  end
 
   return out, report
 end
@@ -303,11 +328,11 @@ function Convert.toGen1(mon, gen2Data, gen1Data)
       { from = mon.status, to = status })
   end
 
+  local catchRate = Convert.catchRateFromHeldItem(mon.item, gen2Data) or 0
   if mon.item then
-    -- engine/link/link.asm:756, :1078 TimeCapsule_ReplaceTeruSama
-    entry(report.lost, "item",
-      ("HELD ITEM LOST: %s"):format(displayName(gen2Data and gen2Data.items,
-        mon.item)), { item = mon.item })
+    entry(report.changed, "item",
+      ("HELD ITEM KEPT AS CATCH RATE %d: %s"):format(catchRate, displayName(gen2Data and gen2Data.items,
+        mon.item)), { item = mon.item, to = catchRate })
   end
   if tonumber(mon.happiness) then
     entry(report.lost, "happiness", "FRIENDSHIP LOST",
@@ -329,7 +354,8 @@ function Convert.toGen1(mon, gen2Data, gen1Data)
     statExp = statExp,
     stats = stats,
     hp = hp,
-    catchRate = def1.catchRate,
+    -- engine/link/link.asm:823
+    catchRate = catchRate,
     status = status,
     moves = moves,
     nickname = mon.nickname,

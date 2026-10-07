@@ -5280,7 +5280,7 @@ function RomImporter:_pumpSync(dt)
     end
   end
   local notice = type(eng.takeNotice) == "function" and eng:takeNotice() or nil
-  if notice and self._boxState then self._boxState.notice = notice end
+  if notice and self._boxState then self._boxState.notice, self._boxState.noticeKind = notice, "info" end
   if eng.phase == "conflict" and eng.conflicts and #eng.conflicts > 0 then
     if not self._syncModal and not self._syncConflictShown then
       self._syncConflictShown = true
@@ -5295,7 +5295,8 @@ function RomImporter:_syncNoteDownload(row)
   if type(row) == "table" and row.box then
     if self.tab == "box" then
       require("src.import.BoxPrompt").close(self, false)
-      require("src.import.BoxPanel").refresh(self).notice = "Box sync complete."
+      local fresh = require("src.import.BoxPanel").refresh(self)
+      fresh.notice, fresh.noticeKind = "Box sync complete.", "ok"
     elseif self._boxState then
       require("src.import.BoxPrompt").close(self, false)
       require("src.import.BoxPanel").refresh(self)
