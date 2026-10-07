@@ -186,6 +186,7 @@ public class GameActivity extends SDLActivity {
     private static String initialGame = "";
     private static String initialLaunchURI = "";
 
+    private boolean audioMixWithSystem = true;
     private AudioManager.OnAudioFocusChangeListener audioFocusListener = null;
     private Object audioFocusRequest = null;
     private Object audioDeviceCallback = null;
@@ -2274,10 +2275,63 @@ public class GameActivity extends SDLActivity {
         return freq;
     }
 
+    @Keep
+    public boolean setAudioMixWithSystem(final boolean mix) {
+        audioMixWithSystem = mix;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (mix) {
+                    abandonAudioFocus();
+                    try {
+                        nativeAudioFocusGained();
+                    } catch (UnsatisfiedLinkError e) {
+                        Log.d("GameActivity", "nativeAudioFocusGained failed in setAudioMixWithSystem", e);
+                    }
+                } else {
+                    requestGameAudioFocus();
+                }
+            }
+        });
+        return true;
+    }
+
     private void requestGameAudioFocus() {
-        // Do not request exclusive AUDIOFOCUS_GAIN to allow background media
-        // (Spotify, YouTube, podcasts, etc.) to continue playing seamlessly.
-        // Android's native audio mixer will mix game audio with background apps.
+        if (audioMixWithSystem) {
+            // In mix-with-system mode, do not request exclusive AUDIOFOCUS_GAIN
+            // to allow background media (Spotify, YouTube, podcasts, etc.) to continue
+            // playing seamlessly. Android's native audio mixer mixes game audio with background apps.
+            if (audioFocusHeld) {
+                abandonAudioFocus();
+            }
+            return;
+        }
+
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audioManager == null) {
+            return;
+        }
+
+        if (audioFocusListener == null) {
+            audioFocusListener = new AudioManager.OnAudioFocusChangeListener() {
+                @Override
+                public void onAudioFocusChange(int focusChange) {
+                    handleAudioFocusChange(focusChange);
+                }
+            };
+        }
+
+        int result;
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            result = requestGameAudioFocusModern(audioManager);
+        } else {
+            result = audioManager.requestAudioFocus(audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        }
+
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocusHeld = true;
+            cancelAudioFocusRecovery();
+        }
     }
 
     private int requestGameAudioFocusModern(AudioManager audioManager) {
@@ -2326,6 +2380,11 @@ public class GameActivity extends SDLActivity {
             switch (focusChange) {
                 case AudioManager.AUDIOFOCUS_LOSS:
                 case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                    audioFocusHeld = false;
+                    if (!audioMixWithSystem) {
+                        nativeAudioFocusLost();
+                    }
+                    break;
                 case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                     // Allow mixing with other audio streams without pausing game audio
                     break;
