@@ -2193,13 +2193,8 @@ local function battle_font()
   return require(P.font.module)
 end
 
-local function is_rs_battle()
-  local P = require("src.core.game3.profile").forSession(Ui._session)
-  return P.font.nativeLayout == "rs"
-end
-
 function Ui.drawMenuFrames(panelMode)
-  BattleChrome.drawMenuFrames(panelMode, is_rs_battle() and "rs" or nil)
+  BattleChrome.drawMenuFrames(panelMode)
 end
 
 local function c5to8(x)
@@ -2383,8 +2378,9 @@ local function draw_move_menu_rse(st)
 end
 
 local function draw_action_menu(st)
-  if is_rs_battle() then return draw_action_menu_rs(st) end
-  if BattleChrome.isRse() then return draw_action_menu_rse(st) end
+  local L = BattleChrome.layout()
+  if L == "rs" then return draw_action_menu_rs(st) end
+  if L == "emerald" then return draw_action_menu_rse(st) end
   -- B_WIN_ACTION_PROMPT @ (1,15) after scroll → px (8,120); printer (2,2) → (10,122)
   -- B_WIN_ACTION_MENU @ (17,15) → (136,120); printer (0,2) → (136,122)
   -- ActionSelectionCreateCursorAt: tile (16+7*col, 35+row) → after scroll (128,120);
@@ -2409,8 +2405,9 @@ local function draw_action_menu(st)
 end
 
 local function draw_move_menu(st)
-  if is_rs_battle() then return draw_move_menu_rs(st) end
-  if BattleChrome.isRse() then return draw_move_menu_rse(st) end
+  local L = BattleChrome.layout()
+  if L == "rs" then return draw_move_menu_rs(st) end
+  if L == "emerald" then return draw_move_menu_rse(st) end
   local ab = st and (is_double(st) and active_battler(st) or st.player)
   local mon = ab and ab.mon
   local positions = {

@@ -3,7 +3,9 @@ return function(game)
   U.wait(20)
   package.path = package.path .. ";./tools/save-editor/?.lua;./tools/save-editor/panels/?.lua"
   local App, Paint, Kit, path, tmp, oldPaint
-  local dim, safe, osName
+  local dim, safe, osName, getTime = nil, nil, nil, love.timer.getTime
+  local clock = 1000
+  love.timer.getTime = function() return clock end
   local failures = 0
   local function pass(ok, label)
     print((ok and "PASS " or "FAIL ") .. label)
@@ -38,7 +40,9 @@ return function(game)
     end
     S.save.party = { mon }
     Ops.selectParty(S, 1)
-    assert(Ops.setUnownForm(S, mon, g == 3 and 5 or 6), "seed form F")
+    local seed = g == 3 and 5 or 6
+    if Ops.unownForm(S, mon) == seed then assert(Ops.setUnownForm(S, mon, seed + 1), "seed form G") end
+    assert(Ops.setUnownForm(S, mon, seed), "seed form F")
     S.dirty = false
     local W, H, platform = 390, 844, "Android"
     local function frame(name)
@@ -84,7 +88,9 @@ return function(game)
       frame()
     end
 
+    local Toast = require("src.ui.kit.Toast")
     S.tab, S.monSection, S.mobileInspector = "party", "main", false
+    Toast.clear(S)
     frame(); frame("2726_01_roster_unown_f_phone")
     pass(letterName() == "F", version .. " roster seeded with UNOWN F")
 
@@ -109,6 +115,7 @@ return function(game)
     pass(current() == target, version .. " chooser sets the form to " .. letterName())
     pass(S.dirty, version .. " form edit marks the save dirty")
     frame()
+    clock = clock + 1
     frame("2726_04_form_set_" .. letterName():gsub("%?", "qmark") .. "_phone")
     pass(History.undo(S) and letterName() == "F", version .. " undo restores F")
     pass(History.redo(S) and current() == target, version .. " redo reapplies")
@@ -116,6 +123,7 @@ return function(game)
 
     W, H, platform = 1100, 720, "Linux"
     S.inspectorScroll = 0
+    Toast.clear(S)
     frame(); frame()
     for _ = 1, 40 do
       r = controls["choice-form"]
@@ -136,6 +144,7 @@ return function(game)
   if App then App.unload() end
   if Paint and oldPaint then Paint.draw = oldPaint end
   if dim then love.graphics.getDimensions, love.window.getSafeArea, love.system.getOS = dim, safe, osName end
+  love.timer.getTime = getTime
   if path then
     os.remove(path)
     for _, backup in ipairs(require("tests.fs_io").globPrefix(path .. ".bak-")) do os.remove(backup) end

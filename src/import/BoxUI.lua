@@ -3,6 +3,7 @@ local Theme = require("src.ui.kit.Theme")
 local Transition = require("src.ui.kit.Transition")
 local Strings = require("src.core.Strings")
 local Icons = require("src.ui.kit.Icons")
+local Toast = require("src.ui.kit.Toast")
 local UI = {}
 local PAL = Theme.PAL
 UI.ICONS = { List = "book-open", Filters = "list-filter", Arrange = "arrow-left-right",
@@ -31,46 +32,37 @@ function UI.button(imp, x, y, w, h, id, label, action, opts)
   opts = opts or {}; opts.action, opts.font = action, opts.font or "small"
   view().btn(imp, x, y, w, h, "box-" .. id, Strings(label), opts)
 end
-local TOAST = { ok = { color = "green", icon = "check", hold = 3.5 },
-  error = { color = "red", icon = "triangle-alert", hold = 7 },
-  info = { color = "blue", icon = "circle-help", hold = 5 } }
-function UI.toast(imp, text, kind, sticky)
-  if text == nil or text == "" then imp._boxToast = nil; return end
-  imp._boxToast = { text = Strings(tostring(text)), kind = TOAST[kind] and kind or "info",
-    at = love.timer.getTime(), sticky = sticky }
+local function toastStore(imp, key)
+  imp._toasts = imp._toasts or {}
+  imp._toasts[key] = imp._toasts[key] or {}
+  return imp._toasts[key]
+end
+function UI.toast(imp, text, kind, sticky, key)
+  local store = toastStore(imp, key or "box")
+  if text == nil or text == "" then return Toast.clear(store) end
+  Toast.show(store, Strings(tostring(text)), kind, { sticky = sticky })
+end
+function UI.currentToast(imp)
+  local store = imp._toasts and imp.tab and imp._toasts[imp.tab]
+  return store and Toast.current(store) and store or nil
 end
 function UI.occludeToast(imp)
-  local t = imp.tab == "box" and imp._boxToast
-  if t and t.rect then Kit.occlude(t.rect[1], t.rect[2], t.rect[3], t.rect[4]) end
+  local store = UI.currentToast(imp)
+  local r = store and store.toast.rect
+  if r then Kit.occlude(r[1], r[2], r[3], r[4]) end
 end
+local function wrapHeight(text, w, maxLines) return Kit.wrapHeight("small", text, w, maxLines) end
+local function drawText(text, x, y, w, c, maxLines) Kit.textWrapped("small", text, x, y, w, c, maxLines) end
 function UI.drawToast(imp, m, bottom)
-  local t = imp._boxToast
-  if not t or imp.tab ~= "box" then return end
-  local style = TOAST[t.kind]
-  local elapsed = love.timer.getTime() - t.at
-  local hold = t.sticky and math.huge or style.hold
-  if elapsed > hold + .25 then imp._boxToast = nil; return end
-  local slide = math.min(1, elapsed / .18, (hold + .25 - elapsed) / .25)
-  slide = 1 - (1 - math.max(0, slide)) ^ 3
-  local s, color = m.s, PAL[style.color]
-  local pad, gap, icon = 12 * s, 10 * s, 20 * s
-  local w = math.min(420 * s, m.W - 32 * s)
-  local textW = w - 2 * pad - icon - gap
-  local h = 2 * pad + math.max(icon, Kit.wrapHeight("small", t.text, textW, 4))
-  local x = (m.W - w) / 2
-  local y = bottom - h - 12 * s + (1 - slide) * (h + 24 * s)
-  t.rect = { x, y, w, h }
-  local r = Theme.cardRadius()
-  Theme.fillRounded(x + 2 * s, y + 4 * s, w, h, PAL.inverse, .35, r)
-  Theme.fillRounded(x, y, w, h, PAL.surface, .98, r)
-  Theme.fillRounded(x, y, w, h, color, .16, r)
-  Theme.strokeRounded(x, y, w, h, color, .75, 1.5, r)
-  Icons.draw(style.icon, x + pad, y + (h - icon) / 2, icon, color, 1)
-  Kit.textWrapped("small", t.text, x + pad + icon + gap, y + pad, textW, PAL.heading, 4)
+  local store = UI.currentToast(imp)
+  if not store then return end
+  local rect = Toast.draw(store, { x = 0, w = m.W, bottom = bottom, s = m.s,
+    wrapHeight = wrapHeight, drawText = drawText })
+  if not rect then return end
   local overlay = Kit._overlay
   Kit._overlay = true
-  view().btn(imp, x, y, w, h, "box-toast", "", { face = "bare", ring = false,
-    action = function() imp._boxToast = nil end })
+  view().btn(imp, rect[1], rect[2], rect[3], rect[4], "box-toast", "", { face = "bare", ring = false,
+    action = function() Toast.clear(store) end })
   Kit._overlay = overlay
 end
 function UI.close(imp)

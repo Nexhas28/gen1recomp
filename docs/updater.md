@@ -45,7 +45,9 @@ untouched):
   reports itself up to date (it never chases a release, and it never counts
   as a valid payload to chainload).
 - `shell` - the native-shell contract this build's fused executable
-  implements.
+  implements. Any change to `main.lua`'s `love.run` bumps it and adds the new
+  loop as `tests/data/love_run/shell<N>.lua`; `tests/engine/love_run_shell_matrix.lua`
+  fails until both are done, and runs the payload under every shipped loop.
 - `payloadHost` - the native host family an in-place payload targets. Ordinary
   LÖVE packages use `"love"`. A specialized native package uses a distinct,
   stable identifier and accepts only payloads carrying that same identifier.

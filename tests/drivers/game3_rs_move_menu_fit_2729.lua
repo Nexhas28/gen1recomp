@@ -75,9 +75,10 @@ return function(game)
   local F = require(P.font.module)
   local drawn
   local orig = BattleChrome.drawMenuFrames
-  BattleChrome.drawMenuFrames = function(mode, layout)
-    drawn = BattleChrome.menuFrameRects(mode, layout)
-    return orig(mode, layout)
+  result(BattleChrome.layout() == "rs", "battle chrome layout is rs")
+  BattleChrome.drawMenuFrames = function(mode)
+    drawn = BattleChrome.menuFrameRects(mode, BattleChrome.layout())
+    return orig(mode)
   end
   for _ = 1, 2000 do
     if drawn then break end

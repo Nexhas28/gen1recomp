@@ -293,11 +293,12 @@ for _, size in ipairs({
     end
   end
   S.tab = "map"
-  for _, section in ipairs({ "maps", "view", "spawn" }) do
+  for _, section in ipairs({ "maps", "view" }) do
     S.mapSection = section
     frame("map " .. section, W, H)
-    S.mapSpawnScroll = 10000
-    frame("map scrolled " .. section, W, H)
+    S.mapClickCell = { cx = 1, cy = 1 }
+    frame("map selected " .. section, W, H)
+    S.mapClickCell = nil
   end
   S.mapSection, S.mapFocused = "view", true
   frame("focused landscape map", W, H)
@@ -357,7 +358,7 @@ for _, size in ipairs({
     { "items", "itemView", 4 },
     { "boxes", "boxView", 2 },
     { "events", "eventsTab", 4 },
-    { "map", "mapSection", 3 },
+    { "map", "mapSection", 2 },
   }) do
     S.tab, S.monSection, S.itemView, S.boxView, S.mapSection =
       case[1], "main", "bag", "storage", "view"
@@ -810,13 +811,10 @@ App.touchpressed("map-cell", x, y)
 App.touchreleased("map-cell", x, y)
 App.draw()
 check(S.mapClickCell and S.mapClickCell.cx == cx and S.mapClickCell.cy == cy, "tap selects the intended map cell")
-S.mapSection = "spawn"
-App.draw()
-tapMapControl("Set here")
+tapMapControl("Player")
 local playerMap, px, py = require("Gen").playerMap(S.save)
-check(playerMap == mapId and px == cx and py == cy, "mobile spawn control uses the selected cell")
-S.mapSection = "view"
-App.draw()
+check(playerMap == mapId and px == cx and py == cy, "mobile Player button on the map uses the selected cell")
+check(S.mapClickCell and S.mapClickCell.cx == cx and S.mapClickCell.cy == cy, "tapping the map button does not reselect the cell under it")
 tapMapControl("Back to editor")
 check(not S.mapFocused and S._mapViewH == ordinaryHeight, "return restores the regular editor layout")
 tapMapControl("Focus map")

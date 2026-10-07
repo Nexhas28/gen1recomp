@@ -346,7 +346,7 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
         Ops.maxMon(S, mon)
       end,
       "good",
-      "Level 100, max IVs or DVs, friendship and PP. Spare EVs go to the strongest stats. Fully heals."
+      "Level 100, max IVs or DVs, friendship and PP. Spare EVs go to the strongest stats. Fully heals. In Gen 2 a shiny stays shiny, an Unown keeps its letter, and gender can change."
     )
     button("Full heal", function()
       Ops.healMon(S, mon)
@@ -400,7 +400,7 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
     else
       button("Max all DVs", function()
         Ops.maxDvs(S, mon)
-      end, "good", "Sets DVs to 15. In Gen 2 this can change gender and shininess.")
+      end, "good", "Sets DVs to 15. In Gen 2 a shiny keeps its shiny DVs (Atk 15, others 10), an Unown keeps its letter, and gender can change.")
       button("Max stat training", function()
         Ops.maxStatExp(S, mon)
       end, "good", "Fills stat experience for every stat.")

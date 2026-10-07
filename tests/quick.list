@@ -858,3 +858,14 @@ tests/save_compat/gen3_cache_selection_test.lua
 tests/save_compat/regions_test.lua
 tests/save_editor_split_stack_bug2671_test.lua
 tests/save_editor_task6_tests.lua
+tests/engine/game3_field_poison_step_gate_test.lua
+tests/engine/game3_rs_layout_keys_test.lua
+tests/engine/game3_rs_save_window_test.lua
+tests/engine/game3_rs_coins_box_test.lua
+tests/engine/game3_battle_yesno_frame_s7.lua
+tests/engine/game3_rs_field_yesno_s2.lua
+tests/engine/save_editor_mail_maxdv_spinda.lua
+tests/engine/save_editor_toast_s6.lua
+tests/engine/launcher_save_toast_s6.lua
+tests/engine/save_editor_map_point_buttons_s8.lua
+tests/engine/love_run_shell_matrix.lua

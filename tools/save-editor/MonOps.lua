@@ -191,6 +191,58 @@ local function unownReq(mon)
   return require("src.core.game3.pokemon").unownLetter(mon.personality)
 end
 
+-- src/pokemon.c:5751 DRAW_SPINDA_SPOTS
+local function spindaPid(base, tsv, accept, shinyOnly)
+  local bit = require("bit")
+  base = (tonumber(base) or 0) % 4294967296
+  local ob = {}
+  for i = 0, 3 do ob[i] = bit.band(bit.rshift(base, 8 * i), 0xFF) end
+  local best, bestCost
+  local function try(p)
+    if not accept(p) then return end
+    local cost = 0
+    for i = 0, 3 do
+      local b = bit.band(bit.rshift(p, 8 * i), 0xFF)
+      if b ~= ob[i] then
+        cost = cost + 1000 + math.abs(b % 16 - ob[i] % 16)
+          + math.abs(bit.rshift(b, 4) - bit.rshift(ob[i], 4))
+      end
+    end
+    if not bestCost or cost < bestCost then best, bestCost = p, cost end
+  end
+  if shinyOnly then
+    for low = 0, 65535 do
+      local h0 = bit.bxor(low, tsv)
+      for s = 0, 7 do try(bit.bxor(h0, s) * 65536 + low) end
+    end
+    return best
+  end
+  try(base)
+  if best then return best end
+  local function with(p, i, v)
+    return p + (v - bit.band(bit.rshift(p, 8 * i), 0xFF)) * 256 ^ i
+  end
+  for i = 0, 3 do
+    for v = 0, 255 do
+      if v ~= ob[i] then try(with(base, i, v)) end
+    end
+  end
+  if best then return best end
+  for i = 0, 2 do
+    for j = i + 1, 3 do
+      for v = 0, 255 do
+        if v ~= ob[i] then
+          local pi = with(base, i, v)
+          for w = 0, 255 do
+            if w ~= ob[j] then try(with(pi, j, w)) end
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
 function MonOps.generatePid(species, otId, otSecretId, reqs)
   reqs = reqs or {}
   local PokemonG3 = require("src.core.game3.pokemon")
@@ -212,6 +264,30 @@ function MonOps.generatePid(species, otId, otSecretId, reqs)
   local targetAbility = reqs.ability and tonumber(reqs.ability)
   local targetGender = reqs.gender
   local targetShiny = reqs.shiny
+
+  if spId == PokemonG3.SPECIES_SPINDA and reqs.basePid ~= nil then
+    local p = spindaPid(reqs.basePid, trainerXor, function(p)
+      if p == 0 then return false end
+      if targetNature ~= nil and p % 25 ~= targetNature then return false end
+      local b0 = p % 256
+      if targetAbility ~= nil and b0 % 2 ~= targetAbility then return false end
+      if targetGender ~= nil and targetGender ~= "" and targetGender ~= "U" then
+        local g
+        if ratio == PokemonG3.GENDER_MALE then g = "M"
+        elseif ratio == PokemonG3.GENDER_FEMALE then g = "F"
+        elseif ratio == PokemonG3.GENDER_GENDERLESS then g = "U"
+        elseif ratio > b0 then g = "F"
+        else g = "M" end
+        if g ~= targetGender then return false end
+      end
+      if targetShiny ~= nil then
+        local isShiny = bit.bxor(trainerXor, bit.bxor(math.floor(p / 65536), p % 65536)) < 8
+        if isShiny ~= (targetShiny and true or false) then return false end
+      end
+      return true
+    end, targetShiny == true)
+    if p then return p end
+  end
 
   -- 1. Determine valid low-byte (b0) for gender & ability slot
   local validB0 = {}
@@ -670,6 +746,24 @@ function MonOps.unownDvs(dvs, letter, keepShiny)
     if not bestKey or key < bestKey then best, bestKey = out, key end
   end
   return best
+end
+
+-- pokecrystal/engine/gfx/color.asm:8 CheckShininess, pokecrystal/engine/battle/hidden_power.asm:13
+function MonOps.maxGen2Dvs(data, mon, gen)
+  if type(mon) ~= "table" then return end
+  local Mon = require("src.battle.gen2.Mon")
+  local Unown = require("src.core.gen2.Unown")
+  mon.dvs = mon.dvs or {}
+  local keepShiny = mon.shiny == true or Mon.vanillaShiny(mon.dvs)
+  local out = keepShiny and { attack = 15, defense = 10, speed = 10, special = 10 }
+    or { attack = 15, defense = 15, speed = 15, special = 15 }
+  if mon.species == Unown.SPECIES then
+    out = MonOps.unownDvs(out, Unown.monLetter(mon), keepShiny) or out
+  end
+  for k, v in pairs(out) do mon.dvs[k] = v end
+  deriveGen2(data, mon)
+  MonOps.recalc(data, mon, gen)
+  return keepShiny and mon.shiny == true
 end
 
 function MonOps.setUnownForm(data, mon, letter, gen)

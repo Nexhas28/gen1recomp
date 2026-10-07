@@ -11,10 +11,26 @@ local MonEditor = {}
 -- species, cached for the process: the old panel called newImage every frame,
 -- which re-decoded a PNG sixty times a second.
 local spriteCache = {}
+local SPINDA_CACHE_MAX = 16
+local spindaKeys = {}
+
+local function remember(key, value)
+  spriteCache[key] = value
+  if type(key) == "string" and key:find("^308:") then
+    spindaKeys[#spindaKeys + 1] = key
+    while #spindaKeys > SPINDA_CACHE_MAX do
+      spriteCache[table.remove(spindaKeys, 1)] = nil
+    end
+  end
+end
 
 function MonEditor.spriteKey(S, species, mon)
   if not species then return nil end
   local letter = mon and require("Ops").unownForm(S, mon)
+  if letter == nil and mon and Gen.ofState(S) == 3
+      and tonumber(species) == require("src.core.game3.pokemon").SPECIES_SPINDA then
+    return tostring(species) .. ":" .. tostring((tonumber(mon.personality) or 0) % 4294967296)
+  end
   if letter == nil then return species end
   return tostring(species) .. ":" .. letter
 end
@@ -30,9 +46,10 @@ function MonEditor.sprite(S, species, mon)
       local spId = tonumber(species) or (Pokemon.speciesFromName and Pokemon.speciesFromName(tostring(species)))
       if spId then
         local picId = letter ~= nil and Pokemon.picSpecies(spId, mon.personality) or spId
-        local pic = (Pokemon.frontPic and Pokemon.frontPic(picId)) or (Pokemon.icon and Pokemon.icon(picId))
+        local pic = (Pokemon.frontPic and Pokemon.frontPic(picId, nil, nil, mon and mon.personality))
+          or (Pokemon.icon and Pokemon.icon(picId))
         if pic and pic.image then
-          spriteCache[key] = pic.image
+          remember(key, pic.image)
           return pic.image
         end
       end
@@ -44,11 +61,11 @@ function MonEditor.sprite(S, species, mon)
     path = require("src.core.gen2.Unown").formSprite(S.data.pokemon, letter) or path
   end
   if not path or not love.graphics.newImage then
-    spriteCache[key] = false
+    remember(key, false)
     return nil
   end
   local ok, img = pcall(love.graphics.newImage, path)
-  spriteCache[key] = ok and img or false
+  remember(key, ok and img or false)
   return ok and img or nil
 end
 

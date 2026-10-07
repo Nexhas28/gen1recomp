@@ -120,16 +120,21 @@ T.check(imp._boxPrompt ~= nil and not imp._boxPopup, "rename opens the existing 
 keyboardChoice(imp, "escape")
 
 imp._boxState.notice, imp._boxState.noticeKind = "That bag pocket is full.", "error"; settle(imp)
-T.eq(imp._boxToast and imp._boxToast.kind, "error", "a failed operation shows a red toast")
+local function boxToast() return imp._toasts and imp._toasts.box and imp._toasts.box.toast end
+T.eq(boxToast() and boxToast().kind, "error", "a failed operation shows a red toast")
 T.eq(imp._boxState.notice, nil, "notices no longer print inline")
 T.check(controls["box-toast"] ~= nil, "the toast is drawn and tappable")
 local toastRect = controls["box-toast"]
 draw(imp, { x = toastRect.x + toastRect.w / 2, y = toastRect.y + toastRect.h / 2 }); settle(imp)
-T.eq(imp._boxToast, nil, "tapping the toast dismisses it")
+T.eq(boxToast(), nil, "tapping the toast dismisses it")
 imp._boxState.notice, imp._boxState.noticeKind = "Pokémon deposited.", "ok"; settle(imp)
-T.eq(imp._boxToast.kind, "ok", "a success shows a green toast")
+T.eq(boxToast().kind, "ok", "a success shows a green toast")
 clock = clock + 10; settle(imp)
-T.eq(imp._boxToast, nil, "a success toast times out")
+T.eq(boxToast(), nil, "a success toast times out")
+UI.toast(imp, "Export failed", "error", nil, "red"); settle(imp)
+T.eq(controls["box-toast"], nil, "another tab's toast is not drawn on the box tab")
+T.eq(UI.currentToast(imp), nil, "another tab's toast does not occlude the box tab")
+imp._toasts.red = nil
 
 local changes = 0
 UI.open(imp, "Pick", { { id = 1, label = "One" } }, nil, function() changes = changes + 1 end)

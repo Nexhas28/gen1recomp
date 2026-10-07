@@ -3,7 +3,7 @@
 -- 1. Lockstep Event Queue: Prevents simultaneous tick collisions; flushes on party white-out.
 -- 2. Happiness Step Counter (128 steps): +1 friendship to all party Pokémon.
 -- 3. VS Seeker Battery (100 steps): Increments while the VS SEEKER is in the bag.
--- 4. Overworld Poison (4 steps): 4-frame reddish screen flash, SE_FIELD_POISON, lethal faint at 0 HP.
+-- 4. Overworld Poison (4 steps RSE, 5 FRLG): 4-frame reddish screen flash, SE_FIELD_POISON, lethal faint at 0 HP.
 -- 5. Egg Cycles & Daycare (daycare stepCounter == 255): Decrements egg cycles -> EggHatch; +1 EXP per step in Daycare.
 -- 6. Repel Counter: Decrements steps -> Text_RepelWoreOff on expiration.
 
@@ -231,11 +231,18 @@ function StepEvents.onStepTaken(session, game)
     return
   end
 
-  -- 3. Overworld Poison Counter (every 4 steps, pret field_poison.c)
+  -- pokeemerald/src/field_control_avatar.c:641
+  local Map = package.loaded["src.core.game3.map"]
+  local curDef = Map and Map.currentDef and Map.currentDef()
+  -- pokeemerald/include/constants/map_types.h:13
+  local psnGate = not forced and not (curDef and tonumber(curDef.mapType) == 9)
   local psnVar = Sem.var(session, "poisonSteps")
-  local psnSteps = (tonumber(session.vars[psnVar] or session.poisonSteps) or 0) + 1
-  if psnSteps >= 4 then
-    psnSteps = 0
+  local psnSteps = tonumber(session.vars[psnVar] or session.poisonSteps) or 0
+  -- pokeemerald/src/field_control_avatar.c:645
+  -- pokefirered/src/field_control_avatar.c:718
+  local psnPeriod = isRse and 4 or 5
+  if psnGate then psnSteps = (psnSteps + 1) % psnPeriod end
+  if psnGate and psnSteps == 0 then
     local anyPoisonDamage = false
     local faintedMons = {}
     local profileField = require("src.core.game3.profile").forSession(session).field

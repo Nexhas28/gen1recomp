@@ -99,6 +99,7 @@ StepEvents.flush()
 started = {}
 profileField = nil
 local session = poisonedSession()
+session.vars.poisonSteps = 4
 StepEvents.onStepTaken(session, {})
 eq(types(), "poison_faint,poison_white_out", "firered keeps the Lua faint + white out events")
 eq(session.party[1].status, nil, "firered clears status at faint time")

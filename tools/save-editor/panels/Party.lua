@@ -49,6 +49,7 @@ local function drawRoster(S, Kit, x, y, listW, h)
   -- "+ Add mon" / "Remove" pinned to the card bottom; the roster fills above.
   local actH = Kit.controlH()
   local actY = y + h - pad - actH
+  S.toastBottom = math.min(S.toastBottom or actY, actY)
   local listTop = y + pad + Kit.textHeight("caption") + 12 * s
   local listH = actY - 12 * s - listTop
 

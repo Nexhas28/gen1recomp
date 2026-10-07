@@ -43,8 +43,10 @@ the scrim; choosing a destination closes the popup and slides to that section.
 Popups support finger/wheel scrolling, keyboard selection, Escape, a close icon
 and outside-tap dismissal. They shield the page underneath from clicks and scrolling.
 Short screens use compact storage
-actions and an item Tools menu. Map browsing splits into Maps, View and Spawn
-sections on phones; storage and inventory actions stay in their viewport.
+actions and an item Tools menu. Map browsing splits into Maps and View
+sections on phones; Player, Heal (Spawn in Gen 2) and Outdoor (Gen 1) buttons
+sit on top of the map in every layout and act on the selected cell; storage and
+inventory actions stay in their viewport.
 Safe-area margins protect controls around notches.
 Short landscape map views have an expand icon that gives the map the editor's
 full content area; the back icon restores the editor chrome.

@@ -413,11 +413,14 @@ end
 
 function BattleChrome.layout()
   local m = BattleChrome._manifest
-  return type(m) == "table" and m.layout or "frlg"
+  if type(m) ~= "table" then return "frlg" end
+  if m.assetLayout == "rs" or m.layout == "rs" then return "rs" end
+  return m.layout == "rse" and "emerald" or "frlg"
 end
 
-function BattleChrome.isRse()
-  return BattleChrome.layout() == "rse"
+function BattleChrome.isHoenn()
+  local l = BattleChrome.layout()
+  return l == "rs" or l == "emerald"
 end
 
 -- pokeemerald/include/constants/battle.h:347
@@ -463,7 +466,7 @@ function BattleChrome.textOrigin(id)
 end
 
 function BattleChrome.messageOrigin()
-  if not BattleChrome.isRse() then return 10, 122, 224 end
+  if BattleChrome.layout() ~= "emerald" then return 10, 122, 224 end
   local x, y, w = BattleChrome.textOrigin(BattleChrome.WIN.MSG)
   return x, y, w
 end
@@ -500,15 +503,16 @@ BattleChrome.RS_MENU_FRAMES = {
 }
 
 function BattleChrome.menuFrameRects(mode, layout)
-  local set = layout == "rs" and BattleChrome.RS_MENU_FRAMES or BattleChrome.RSE_MENU_FRAMES
-  return set[mode]
+  local set = (layout == "rs" and BattleChrome.RS_MENU_FRAMES)
+    or (layout == "emerald" and BattleChrome.RSE_MENU_FRAMES) or nil
+  return set and set[mode]
 end
 
 -- pokeemerald/src/battle_bg.c:744
 -- pokeruby/src/battle_bg.c:266
-function BattleChrome.drawMenuFrames(mode, layout)
-  if not BattleChrome.isRse() then return end
-  local rects = BattleChrome.menuFrameRects(mode, layout)
+function BattleChrome.drawMenuFrames(mode)
+  if not BattleChrome.isHoenn() then return end
+  local rects = BattleChrome.menuFrameRects(mode, BattleChrome.layout())
   if not rects then return end
   local Chrome = require("src.ui.game3.chrome")
   for _, r in ipairs(rects) do

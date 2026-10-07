@@ -29,11 +29,8 @@ package.loaded["src.ui.game3.chrome"] = {
 
 local BattleChrome = require("src.ui.game3.battle_chrome")
 local Ui = require("src.core.game3.battle.ui")
-local nativeLayout = "rs"
-package.loaded["src.core.game3.profile"] = {
-  forSession = function() return { font = { nativeLayout = nativeLayout } } end,
-}
-BattleChrome._manifest = { layout = "rse" }
+local RS = { layout = "rse", assetLayout = "rs" }
+local EMERALD = { layout = "rse" }
 
 local function frames(mode)
   drawn = {}
@@ -49,13 +46,13 @@ local function same(a, b)
   return true
 end
 
-nativeLayout = "rs"
+BattleChrome._manifest = RS
 local mv = frames("moves")
 eq(same(mv, { { 1, 15, 20, 4 }, { 23, 15, 6, 4 } }), true, "RS move menu frames follow menu_map.bin")
 eq((mv[1] and (mv[1][1] + mv[1][3]) * 8) or -1, 168, "RS left move box content ends at x=168")
 eq(same(frames("menu"), { { 18, 15, 11, 4 } }), true, "RS action menu frame follows menu_map.bin")
 
-nativeLayout = nil
+BattleChrome._manifest = EMERALD
 eq(same(frames("moves"), { { 1, 15, 18, 4 }, { 21, 15, 8, 4 } }), true, "Emerald move menu frames unchanged")
 eq(same(frames("menu"), { { 16, 15, 13, 4 } }), true, "Emerald action menu frame unchanged")
 

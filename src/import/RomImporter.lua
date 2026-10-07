@@ -647,6 +647,7 @@ function RomImporter:_setNxSavesInboxNotice(version)
   self.saveNotice = self.saveNotice or {}
   self.saveNotice[version] = {
     ok = true,
+    persistent = true,
     text = Strings("Copy your %s .sav into:\n%s/%s/\nDBI MTP → 1: SD Card/%s%s/",
       game, saveDir, inbox, rel, inbox),
   }
@@ -959,6 +960,7 @@ function RomImporter:rescanSavesAction(version)
   elseif skipCount > 0 then
     self.saveNotice[version] = {
       ok = true,
+      kind = "info",
       text = Strings("Already imported: %d file(s) skipped. Check SAVE SLOT.",
         skipCount),
     }
@@ -3409,6 +3411,7 @@ function RomImporter:exportSave(version, format, scope, slotId)
     local outDir = exportsDir(version)
     self.saveNotice[noticeScope] = {
       ok = true,
+      persistent = true,
       text = Strings("Exported to %s\nDBI MTP → 1: SD Card/%s%s/", res, rel, outDir),
     }
     return
@@ -3433,7 +3436,7 @@ function RomImporter:exportSave(version, format, scope, slotId)
     if love.system.createFile and love.system.createFile(suggested, love.filesystem.getSaveDirectory()) then
       self.pickPending = true
       self.pickTimer = 0
-      self.saveNotice[noticeScope] = { ok = true,
+      self.saveNotice[noticeScope] = { ok = true, kind = "info",
         text = "Pick where to save " .. suggested .. "..." }
     else
       self.androidPendingExportVersion = nil
@@ -4647,7 +4650,18 @@ end
 -- Pair with POKEPORT_LAUNCHER_TAB / POKEPORT_WIN to profile a specific panel.
 local profN, profSamples = tonumber(os.getenv("POKEPORT_LAUNCHER_PROF") or ""), {}
 
+function RomImporter:toastSaveNotices()
+  local BoxUI = require("src.import.BoxUI")
+  for scope, notice in pairs(self.saveNotice or {}) do
+    if not notice.persistent and notice.text and notice.text ~= "" then
+      BoxUI.toast(self, notice.text, notice.kind or (notice.ok and "ok" or "error"), nil, self.tab)
+      self.saveNotice[scope] = notice.dir and { ok = notice.ok, text = "", dir = notice.dir } or nil
+    end
+  end
+end
+
 function RomImporter:draw()
+  self:toastSaveNotices()
   local View = require("src.import.LauncherView")
   if not profN then return View.draw(self) end
   local t0 = love.timer.getTime()

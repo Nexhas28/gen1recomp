@@ -26,7 +26,32 @@ local Gen = require("Gen")
 local PadInput = require("PadInput")
 local Motion = require("Motion")
 local Chooser = require("Chooser")
+local Toast = require("src.ui.kit.Toast")
 local PAL = Theme.PAL
+local toastArea = {}
+local toastSlots = {}
+
+local function placeClearOfControls(x, w, h)
+  local rects, n = Kit.trackedControls()
+  local gap = 12 * toastSlots.s
+  local best, bestHits, bestAbove
+  local function try(y, fromAbove, limit)
+    if y < toastSlots.minY or y + h > (limit or toastSlots.maxY) then return end
+    local hits = 0
+    for i = 1, n do
+      local r = rects[i]
+      if r[1] < x + w and r[1] + r[3] > x and r[2] < y + h and r[2] + r[4] > y then hits = hits + 1 end
+    end
+    if not best or hits < bestHits then best, bestHits, bestAbove = y, hits, fromAbove end
+  end
+  local fr = toastSlots.field
+  try(fr.y + fr.h + gap, true)
+  try(fr.y - h - gap, false)
+  try(toastSlots.contentY + gap, true)
+  try(toastSlots.maxY - h - gap, false)
+  try(toastSlots.screenBottom - h - 4 * toastSlots.s, false, toastSlots.screenBottom)
+  return best, bestAbove
+end
 
 local Party = require("Party")
 local Boxes = require("Boxes")
@@ -100,6 +125,7 @@ local function applyLoaded(path, statusVerb)
   S.path = path
   local existed = fileExists(path)
   local save, err = SaveIO.load(path)
+  local kind = "ok"
   if save then
     S.save = save
     S.status = statusVerb .. " " .. path
@@ -112,11 +138,13 @@ local function applyLoaded(path, statusVerb)
       .. " ("
       .. tostring(err)
       .. "),  Save disabled, use Reload after fixing the file"
+    kind = "error"
     S.loadError = true
     S.allowSave = false
   else
     S.save = Gen.newGame(S.version)
     S.status = "No save at " .. path .. " (" .. tostring(err) .. "),  editing new game stub"
+    kind = "info"
     S.loadError = false
     S.allowSave = true
   end
@@ -150,6 +178,7 @@ local function applyLoaded(path, statusVerb)
   if not prepared then
     S.loadError, S.allowSave = true, false
     S.status = "Save disabled: " .. tostring(prepareError)
+    Toast.show(S, S.status, "error", { sticky = true })
     return
   end
   local probe = require("src.mods.Merge").deepCopy(S.save)
@@ -172,7 +201,9 @@ local function applyLoaded(path, statusVerb)
           #S.validation.remappedMaps
         )
     end
+    if kind == "ok" and S.status:find("game would quarantine", 1, true) then kind = "warn" end
   end
+  Toast.show(S, S.status, kind, { sticky = kind == "error" })
 end
 
 -- pathOverride lets tests point App.load at a scratch file instead of the
@@ -262,7 +293,7 @@ function App.openPath(path, force)
   end
   if S.dirty and not force and not S._openArmed then
     S._openArmed = true
-    S.status = "Unsaved changes,  open again to discard and load " .. path
+    Ops.say(S, "Unsaved changes,  open again to discard and load " .. path, "warn")
     return false
   end
   applyLoaded(path, "Opened")
@@ -276,7 +307,7 @@ function App.chooseAndOpen()
   else
     local osName = love and love.system and love.system.getOS and love.system.getOS()
     if osName ~= "OS X" and osName ~= "Windows" and osName ~= "Linux" then
-      S.status = "File picker unavailable,  drop a save.lua onto the window"
+      Ops.say(S, "File picker unavailable,  drop a save.lua onto the window")
     end
   end
 end
@@ -287,7 +318,7 @@ function App.filedropped(file)
   end
   local path = file.getFilename and file:getFilename() or nil
   if not path or path == "" then
-    S.status = "Could not read dropped file path"
+    Ops.say(S, "Could not read dropped file path")
     return
   end
   App.openPath(path)
@@ -336,7 +367,7 @@ local function cycleTab(delta)
   end
   idx = ((idx - 1 + delta) % #TABS) + 1
   Motion.change(S, "tab", TABS[idx].id, delta)
-  Ops.say(S, "Tab: " .. TABS[idx].label)
+  Ops.note(S, "Tab: " .. TABS[idx].label)
 end
 
 -- Pad / Joy-Con actions from PadInput.gamepadpressed (A/B via GamepadMap so
@@ -386,7 +417,7 @@ function App.save()
   if Gen.ofState(S) == 3 then
     local prepared, result = pcall(require("Game3Adapter").export, S.save)
     if not prepared then
-      S.status = "Save failed: " .. tostring(result)
+      Ops.say(S, "Save failed: " .. tostring(result))
       return false
     end
     output = result
@@ -397,10 +428,10 @@ function App.save()
     S.historySavedToken = S.historyToken or 0
     S._quitArmed = false
     Ops.disarm(S)
-    S.status = "Saved " .. S.path
+    Ops.say(S, "Saved " .. S.path, "ok")
     return true
   end
-  S.status = "Save failed: " .. tostring(err)
+  Ops.say(S, "Save failed: " .. tostring(err))
   return false
 end
 
@@ -413,7 +444,7 @@ function App.reload()
     applyLoaded(S.path, "Reloaded")
     return not S.loadError
   end
-  S.status = "Reload failed: " .. tostring(err)
+  Ops.say(S, "Reload failed: " .. tostring(err))
   return false
 end
 
@@ -430,7 +461,7 @@ function App.close()
   end
   if S.dirty and not S._quitArmed then
     S._quitArmed = true
-    S.status = "Unsaved changes,  Save first or click Close again to discard"
+    Ops.say(S, "Unsaved changes,  Save first or click Close again to discard", "warn")
     return false
   end
   S._closeRequested = true
@@ -800,11 +831,6 @@ local function drawStatusBar(x, y, w, h)
       .. ctrl
       .. "+R reload . Esc clear selection . arrows pan map . wheel scrolls lists"
     )
-  -- The status message is the load-bearing half of this bar (every Ops verb
-  -- narrates through it); the keyboard map is decoration.  On a phone the
-  -- two used to overlap because the hint was drawn unconditionally and the
-  -- status ellipsized against a negative budget (#715), so now the hint only
-  -- draws when the status still keeps a readable share of the bar.
   local hintW = Kit.textWidth("tiny", hint)
   local avail = w - 2 * pad - hintW - 14 * s
   if avail >= 120 * s then
@@ -814,7 +840,7 @@ local function drawStatusBar(x, y, w, h)
   end
   Kit.text(
     "mono",
-    Kit.ellipsize("mono", S.status or "", avail),
+    Kit.ellipsize("mono", S.note or "", avail),
     x + pad,
     y + (h - Kit.textHeight("mono")) / 2,
     PAL.detail
@@ -860,8 +886,13 @@ function App.draw()
   elseif padOn then
     mx, my = padX, padY
   end
+  if mouseClicked and clickX ~= nil and Toast.hit(S, clickX, clickY) then
+    Toast.clear(S)
+    mouseClicked = false
+  end
   Motion.update()
   Kit.beginFrame(mx, my, mouseClicked, wheelY)
+  Kit.trackControls = S.toast ~= nil and Kit.focus ~= nil and not Kit.desktop
   mouseClicked = false
   clickX, clickY = nil, nil
   wheelY = 0
@@ -931,6 +962,7 @@ function App.draw()
 
   local contentY = oy + railH + titleH + tabH
   local contentH = sh - railH - titleH - tabH - statusH
+  S.toastBottom, S.toastHeader = nil, nil
   local px, py = ox + 10 * s, contentY + 8 * s
   local pw, ph = sw - 20 * s, math.max(1, contentH - 16 * s)
   local ok, err = xpcall(function()
@@ -977,6 +1009,28 @@ function App.draw()
     SpeciesPicker.draw(S, Kit, width, height)
     MovePicker.draw(S, Kit, width, height)
     ItemPicker.draw(S, Kit, width, height)
+  end
+  if S.toast then
+    local a = toastArea
+    a.x, a.w, a.s, a.font = ox, sw, s, Kit.fonts.small
+    a.top, a.bottom, a.maxY, a.centerY, a.width, a.maxLines, a.place = nil, nil, nil, nil, nil, nil, nil
+    local hdr, fr = S.toastHeader, Kit.focusRect
+    if hdr then
+      a.x, a.w, a.width, a.maxLines = hdr.x, hdr.w, hdr.w, 2
+      a.centerY = hdr.y + hdr.h / 2
+    elseif Kit.focus and not Kit.desktop then
+      if fr then
+        a.top, a.bottom, a.maxY = fr.y + fr.h, fr.y, oy + sh - statusH
+        toastSlots.s, toastSlots.field, toastSlots.contentY = s, fr, contentY
+        toastSlots.minY, toastSlots.maxY, toastSlots.screenBottom = oy, oy + sh - statusH, oy + sh
+        a.place = placeClearOfControls
+      else
+        a.top = contentY
+      end
+    else
+      a.bottom = math.min(S.toastBottom or math.huge, oy + sh - statusH)
+    end
+    Toast.draw(S, a)
   end
   Kit.endFrame()
   PadInput.draw()
@@ -1075,7 +1129,7 @@ function App.keypressed(key)
     and (love.keyboard.isDown("lgui", "rgui") or love.keyboard.isDown("lctrl", "rctrl"))
   if key == "escape" and (S.itemMenu or S.chromeMenu) then
     S.itemMenu, S.chromeMenu = nil, false
-    Ops.say(S, "Menu closed")
+    Ops.note(S, "Menu closed")
     return
   end
   if key == "escape" and S.tab == "map" and S.mapFocused then
@@ -1087,7 +1141,7 @@ function App.keypressed(key)
   if key == "escape" then
     S.editingMon = nil
     Ops.disarm(S)
-    Ops.say(S, "Selection cleared")
+    Ops.note(S, "Selection cleared")
   elseif key == "z" and mod then
     if love.keyboard.isDown("lshift", "rshift") then
       require("History").redo(S)
@@ -1114,8 +1168,8 @@ function App.wheelmoved(x, y)
     wheelY = wheelY + (y or 0)
     return
   end
-  -- Only the map viewport spends the wheel on zoom. Search results and
-  -- spawn cards keep the launcher's normal scrolling under the pointer.
+  -- Only the map viewport spends the wheel on zoom. Search results keep the
+  -- launcher's normal scrolling under the pointer.
   local mx, my = love.mouse.getPosition()
   if
     S.tab == "map"
@@ -1138,7 +1192,7 @@ function App.quit()
     -- simple: block quit once and set status; user saves or force-quits again
     if not S._quitArmed then
       S._quitArmed = true
-      S.status = "Unsaved changes,  save or press quit again"
+      Ops.say(S, "Unsaved changes,  save or press quit again", "warn")
       return true
     end
   end
