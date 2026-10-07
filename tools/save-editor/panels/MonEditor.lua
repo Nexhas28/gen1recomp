@@ -1,5 +1,3 @@
--- Species art and the inspector shell. InspectorBody owns the six forms;
--- phones open them as pages and wide windows dock them next to the roster.
 
 local Theme = require("Theme")
 local PAL = Theme.PAL
@@ -91,10 +89,30 @@ function MonEditor.drawSprite(S, Kit, species, x, y, size, mon)
     y + size / 2 - Kit.textHeight("micro") / 2, size, PAL.muted)
 end
 
--- The inspector uses sections so a phone gives each editing task its full height.
-function MonEditor.draw(S, Kit, x, y, w, h)
-  Kit.card(x, y, w, h)
-  require("InspectorBody").draw(S, Kit, x, y, w, h)
+function MonEditor.isShiny(S, mon)
+  if not mon then return false end
+  local g = Gen.ofState(S)
+  if g == 3 then
+    if mon.isShiny ~= nil then return mon.isShiny == true end
+    local ok, shiny = pcall(require("src.core.game3.pokemon").isShiny, mon)
+    return ok and shiny == true
+  elseif g == 2 then
+    return require("src.pokemon.Stats").isShiny(mon.dvs)
+  end
+  return false
+end
+
+function MonEditor.displayName(S, mon)
+  if mon.nickname and mon.nickname ~= "" then return mon.nickname end
+  local def = S.data and S.data.pokemon and S.data.pokemon[mon.species or mon.speciesId]
+  if def and def.name then return def.name end
+  if type(mon.species) == "string" then return mon.species end
+  if type(mon.name) == "string" and mon.name ~= "" then return mon.name end
+  return tostring(mon.species or "POKEMON")
+end
+
+function MonEditor.draw(S, Kit, x, y, w, h, prelude)
+  require("InspectorBody").draw(S, Kit, x, y, w, h, prelude)
 end
 
 return MonEditor

@@ -35,8 +35,11 @@ If the file isn't there (or you want another copy), use **Open...**, drop a
 
 Party, Boxes, Items, Events, Map, Pokédex, Trainer and Checks are separate pages.
 The Pokemon inspector has Main, Stats, Moves, Origin, Extras and Checks sections.
-Phones open the roster and inspector as separate sliding pages; wide windows
-show them side by side. Buttons share the launcher's painter and font scale,
+Wide windows show the roster beside the inspector; phones stack a party grid
+above it on one scrolling page. The inspector opens with the Pokemon's sprite,
+types, level and HP, then section tabs (a dropdown when the tabs do not fit),
+the section form and a row of tools for that section. Numbers have a typed
+value box and a slider that commits when released. Buttons share the launcher's painter and font scale,
 with a minimum 44px target. Pages and screen sections use dropdown popup
 choosers on both phones and desktop. The current page stays in place behind
 the scrim; choosing a destination closes the popup and slides to that section.

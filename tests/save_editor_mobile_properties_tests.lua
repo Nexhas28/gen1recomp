@@ -36,7 +36,7 @@ Paint.draw = function(owner, x, y, w, h, label, opts, hot, focused)
     if opts.icon == "save" then
       saveRect = { x = x, y = y, w = w, h = h }
     end
-    if label == "Change species" then
+    if opts.id == "change-species" then
       speciesY = y
     end
     local theme = require("Theme")
@@ -364,8 +364,18 @@ for _, size in ipairs({
       case[1], "main", "bag", "storage", "view"
     S.mobileInspector, S.inspectorScroll, S.pageScroll = true, 0, {}
     navigationRects = {}
-    frame("dropdown page " .. case[2], W, H)
+    local pageControls = frame("dropdown page " .. case[2], W, H)
     local rect = navigationRects[case[2]]
+    if case[2] == "monSection" and S._navOffset and (not rect or rect.y + rect.h > H) then
+      S.inspectorScroll = S._navOffset
+      navigationRects = {}
+      pageControls = frame("dropdown page scrolled " .. case[2], W, H)
+      rect = navigationRects[case[2]]
+    end
+    local sectionTabs = 0
+    for _, c in ipairs(pageControls) do
+      if c.id and c.id:match("^tab%-monSection%-") then sectionTabs = sectionTabs + 1 end
+    end
     if rect then
       local previous, selected, anchor = S[case[2]], S.editingMon, speciesY
       Kit.focus = "property-level"
@@ -382,7 +392,8 @@ for _, size in ipairs({
       check(not S.navPopup and S[case[2]] == previous, "Escape cancels " .. case[2])
       check(S.editingMon == selected, "Escape preserves the Pokemon selection")
     else
-      check(case[2] == "mapSection" and W > H, "only the simultaneous map columns omit a chooser")
+      check(case[2] == "mapSection" and W > H or case[2] == "monSection" and sectionTabs == case[3],
+        "only the simultaneous map columns and full section tabs omit a chooser")
     end
   end
 end
@@ -485,7 +496,13 @@ local realSave, saved = App.save, 0
 App.save = function()
   saved = saved + 1
 end
-App.mousepressed(saveRect.x + saveRect.w / 2, saveRect.y + saveRect.h / 2, 1)
+local tapX = saveRect.x + saveRect.w / 2
+local popupRect = S.navPopup and S.navPopup.rect
+if popupRect and tapX <= popupRect.x + popupRect.w then
+  tapX = popupRect.x + popupRect.w + 2
+end
+check(tapX < saveRect.x + saveRect.w, "Save has a target outside the popup")
+App.mousepressed(tapX, saveRect.y + saveRect.h / 2, 1)
 App.draw()
 check(saved == 0 and S.navPopup == nil, "outside tap dismisses without activating Save underneath")
 App.save = realSave
@@ -536,6 +553,8 @@ check(
 
 -- Option taps change the intended nested screen. A drag inside a short
 -- popup scrolls the options without selecting the row under its release.
+App.draw()
+S.inspectorScroll = S._navOffset or 0
 App.draw()
 rect = navigationRects.monSection
 App.mousepressed(rect.x + rect.w / 2, rect.y + rect.h / 2, 1)

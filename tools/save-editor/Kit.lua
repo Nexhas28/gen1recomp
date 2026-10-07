@@ -272,7 +272,7 @@ function Kit.trackedControls()
   return tracked, trackedN
 end
 
-local function audit(class, x, y, w, h, label)
+local function audit(class, x, y, w, h, label, id)
   if Kit.blockClicks then
     return
   end
@@ -284,6 +284,9 @@ local function audit(class, x, y, w, h, label)
     return
   end
   local c = Kit._clipRect
+  if c and (x >= c.x + c.w or y >= c.y + c.h or x + w <= c.x or y + h <= c.y) then
+    return
+  end
   a[#a + 1] = {
     class = class,
     x = x,
@@ -291,6 +294,7 @@ local function audit(class, x, y, w, h, label)
     w = w,
     h = h,
     label = tostring(label or ""),
+    id = id,
     clip = c and { x = c.x, y = c.y, w = c.w, h = c.h } or nil,
   }
 end
@@ -562,7 +566,7 @@ function Kit.button(x, y, w, h, label, opts)
     opts.face = "selection"
   end
   opts.icon = opts.icon or ACTION_ICONS[label]
-  audit("control", x, y, w, h, label)
+  audit("control", x, y, w, h, label, opts.id)
   local hot = opts.enabled ~= false and Kit.hover(x, y, w, h)
   local shown = label
   if opts.iconOnly then
@@ -738,6 +742,9 @@ function Kit.textfield(id, x, y, w, h, value, placeholder, opts)
           Kit.blur() -- commit/cancel also lowers the soft keyboard (#529)
           focused = false
         elseif e == "\27" then
+          if opts and opts.onCancel then
+            opts.onCancel()
+          end
           Kit.blur()
           focused = false
         else

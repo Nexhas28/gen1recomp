@@ -633,164 +633,142 @@ function App.joystickhat(joystick, hat, direction)
 end
 
 -- ------------------------------------------------------------------ chrome
--- Compact action row, with file identity above it when height allows.
-local function drawTitleBar(x, y, w, h)
-  local pad, gap, row = 12 * Kit.scale, 8 * Kit.scale, Kit.controlH()
-  local inner = w - 2 * pad
-  if not S.compactChrome and not Kit.desktop then
-    Kit.text(
-      "tab",
-      "SAVE EDITOR" .. (S.version and (" / " .. S.version:upper()) or ""),
-      x + pad,
-      y + 8 * Kit.scale,
-      PAL.heading
-    )
-    Kit.text(
-      "tiny",
-      Kit.ellipsize("tiny", (S.dirty and "UNSAVED  " or "SAVED  ") .. (S.path or "New save"), inner),
-      x + pad,
-      y + Kit.textHeight("tab") + 12 * Kit.scale,
-      S.dirty and PAL.yellow or PAL.caption
-    )
+local function versionLabel()
+  local ok, info = pcall(require("src.core.GameVersion").info, S.version)
+  if ok and type(info) == "table" and info.label then return info.label end
+  return S.version and (S.version:sub(1, 1):upper() .. S.version:sub(2)) or nil
+end
+
+local function shortPath(path)
+  if not path then return "New save" end
+  local parts = {}
+  for part in tostring(path):gmatch("[^/\\]+") do parts[#parts + 1] = part end
+  if #parts <= 3 then return tostring(path) end
+  return ".../" .. table.concat(parts, "/", #parts - 2)
+end
+
+local function drawIdentity(x, y, w, h)
+  local s = Kit.scale
+  local titleH, pathH = Kit.textHeight("button"), Kit.textHeight("tiny")
+  local ty = y + (h - titleH - pathH - 4 * s) / 2
+  local lead, version, sep = "Save editor", versionLabel(), " / "
+  local leadW, sepW = Kit.textWidth("button", lead), Kit.textWidth("button", sep)
+  Kit.textBold("button", Kit.ellipsize("button", lead, w), x, ty, PAL.heading)
+  if version and leadW + sepW + 40 * s < w then
+    Kit.text("button", sep, x + leadW + 1, ty, PAL.muted)
+    Kit.textBold("button", Kit.ellipsize("button", version, w - leadW - sepW - 1), x + leadW + sepW + 1, ty, PAL.heading)
   end
-  local narrow = w < 600 * Kit.scale and not S.compactChrome
-  local cols = narrow and 4 or 6
-  local bw = (inner - (cols - 1) * gap) / cols
-  local by = S.compactChrome and (y + 8 * Kit.scale)
-    or (y + Kit.textHeight("tab") + Kit.textHeight("tiny") + 20 * Kit.scale)
-  local saveInk = S.allowSave and S.dirty and PAL.green or PAL.muted
-  local actions = {
-    {
-      S.allowSave and (S.dirty and "Save" or "Saved") or "Save locked",
-      "ghost",
-      function()
-        App.save()
-      end,
-      S.dirty or not S.allowSave,
-      {
-        face = "invert",
-        ink = saveInk,
-        stroke = saveInk,
-        icon = S.allowSave and "save" or "lock",
-      },
-    },
-    {
-      "Undo",
-      "ghost",
-      function()
-        require("History").undo(S)
-      end,
-      S.undoStack and #S.undoStack > 0,
-    },
-    {
-      "Redo",
-      "ghost",
-      function()
-        require("History").redo(S)
-      end,
-      S.redoStack and #S.redoStack > 0,
-    },
-    {
-      "Reload",
-      "ghost",
-      function()
-        App.reload()
-      end,
-      true,
-    },
-    {
-      "Open",
-      "accent",
-      function()
-        App.chooseAndOpen()
-      end,
-      true,
-    },
-    {
-      S._quitArmed and "Discard?" or "Close",
-      S._quitArmed and "danger" or "ghost",
-      function()
-        App.close()
-      end,
-      true,
-    },
+  Kit.text("tiny", Kit.ellipsize("tiny", shortPath(S.path), w), x, ty + titleH + 4 * s, PAL.muted)
+end
+
+local function saveStatus()
+  if S.dirty then return "Unsaved changes", PAL.yellow end
+  return "Saved", PAL.muted
+end
+
+local function saveButton(x, y, h, measure)
+  local label = S.allowSave and "Save" or "Save locked"
+  local ink = S.allowSave and S.dirty and PAL.green or PAL.muted
+  local opts = {
+    font = "button",
+    face = "invert",
+    ink = ink,
+    stroke = ink,
+    icon = S.allowSave and "save" or "lock",
+    enabled = S.dirty or not S.allowSave,
   }
-  local function actionOptions(action)
-    local opts = action[5] or {}
-    opts.kind, opts.enabled, opts.font = action[2], action[4], "small"
-    return opts
+  local w = Kit.buttonWidth(label, opts, h)
+  if not measure and Kit.button(x - w, y, w, h, label, opts) then
+    App.save()
   end
-  if Kit.desktop then
-    local widths, total = {}, 5 * gap
-    for i, action in ipairs(actions) do
-      widths[i] = Kit.buttonWidth(action[1], actionOptions(action), row)
-      if i == 1 then
-        widths[i] = math.max(widths[i], Kit.buttonWidth("Save locked", { font = "small", icon = "lock" }, row))
-      elseif i == 6 then
-        widths[i] = math.max(widths[i], Kit.buttonWidth("Discard?", { font = "small" }, row))
-      end
-      total = total + widths[i]
-    end
-    local bx, by = x + w - pad - total, y + 8 * Kit.scale
-    local identityW = bx - gap - (x + pad)
-    local labelH, pathH = Kit.textHeight("tab"), Kit.textHeight("tiny")
-    local ty = by + (row - labelH - pathH - 4 * Kit.scale) / 2
-    Kit.text("tab", Kit.ellipsize("tab", "SAVE EDITOR" .. (S.version and (" / " .. S.version:upper()) or ""), identityW), x + pad, ty, PAL.heading)
-    Kit.text("tiny", Kit.ellipsize("tiny", (S.dirty and "UNSAVED  " or "SAVED  ") .. (S.path or "New save"), identityW), x + pad, ty + labelH + 4 * Kit.scale, S.dirty and PAL.yellow or PAL.caption)
-    for i, action in ipairs(actions) do
-      if Kit.button(bx, by, widths[i], row, action[1], actionOptions(action)) then action[3]() end
-      bx = bx + widths[i] + gap
-    end
-    return
+  return w
+end
+
+local function drawActionRow(x, y, w, h, withIdentity)
+  local s, row = Kit.scale, Kit.controlH()
+  local gap, pad = 8 * s, (Kit.desktop and 20 or 12) * s
+  local by = y + (h - row) / 2
+  local rx = x + w - pad
+  if S._quitArmed then
+    local cw = Kit.buttonWidth("Discard?", { font = "button" }, row)
+    rx = rx - cw
+    if Kit.button(rx, by, cw, row, "Discard?", { kind = "danger", font = "button" }) then App.close() end
+  else
+    rx = rx - row
+    if Kit.iconButton(rx, by, row, row, "x", "Close", { kind = "ghost" }) then App.close() end
   end
-  if narrow then
-    local more = {
-      S.chromeMenu and "Less" or "More",
-      "ghost",
-      function()
-        S.chromeMenu = not S.chromeMenu
-        Kit.blur()
-      end,
-      true,
+  rx = rx - 2 * gap
+  rx = rx - saveButton(rx, by, row)
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "folder-open", "Open", { kind = "ghost" }) then App.chooseAndOpen() end
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "rotate-ccw", "Reload", { kind = "ghost" }) then App.reload() end
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "redo-2", "Redo", { kind = "ghost", enabled = S.redoStack and #S.redoStack > 0 }) then
+    require("History").redo(S)
+  end
+  rx = rx - 4 * s - row
+  if Kit.iconButton(rx, by, row, row, "undo-2", "Undo", { kind = "ghost", enabled = S.undoStack and #S.undoStack > 0 }) then
+    require("History").undo(S)
+  end
+  rx = rx - 18 * s
+  local status, color = saveStatus()
+  local statusW = Kit.textWidth("small", status)
+  local left = x + pad + (withIdentity and 150 * s or 0)
+  if rx - statusW >= left then
+    Kit.textRight("small", status, rx, by + (row - Kit.textHeight("small")) / 2, color)
+    rx = rx - statusW - 24 * s
+  end
+  if withIdentity then
+    drawIdentity(x + pad, y, rx - x - pad, h)
+  end
+end
+
+local function chromeMenuCols(w)
+  local s, gap = Kit.scale, 8 * Kit.scale
+  local widest = 0
+  for _, label in ipairs({ "Redo", "Reload", "Open", "Close", "Discard?" }) do
+    widest = math.max(widest, Kit.buttonWidth(label, { font = "small" }, Kit.controlH()))
+  end
+  return (w - 24 * s) >= 4 * widest + 3 * gap and 4 or 2
+end
+
+local function drawTitleBar(x, y, w, h)
+  if Kit.desktop or S.compactChrome or w >= 760 * Kit.scale then
+    return drawActionRow(x, y, w, h, not S.compactChrome)
+  end
+  local s = Kit.scale
+  local pad, gap, row = 12 * s, 8 * s, Kit.controlH()
+  local inner = w - 2 * pad
+  local idH = Kit.textHeight("button") + Kit.textHeight("tiny") + 4 * s
+  drawIdentity(x + pad, y + 8 * s, inner, idH)
+  local by = y + idH + 20 * s
+  local rx = x + w - pad - row
+  if Kit.iconButton(rx, by, row, row, S.chromeMenu and "x" or "ellipsis", S.chromeMenu and "Less" or "More", { kind = "ghost" }) then
+    S.chromeMenu = not S.chromeMenu
+    Kit.blur()
+  end
+  rx = rx - gap
+  rx = rx - saveButton(rx, by, row) - gap - row
+  if Kit.iconButton(rx, by, row, row, "undo-2", "Undo", { kind = "ghost", enabled = S.undoStack and #S.undoStack > 0 }) then
+    require("History").undo(S)
+  end
+  local status, color = saveStatus()
+  Kit.text("small", Kit.ellipsize("small", status, rx - gap - x - pad), x + pad, by + (row - Kit.textHeight("small")) / 2, color)
+  if S.chromeMenu then
+    local menu = {
+      { "Redo", "redo-2", function() require("History").redo(S) end, S.redoStack and #S.redoStack > 0 },
+      { "Reload", "rotate-ccw", function() App.reload() end, true },
+      { "Open", "folder-open", function() App.chooseAndOpen() end, true },
+      { S._quitArmed and "Discard?" or "Close", S._quitArmed and "trash" or "x", function() App.close() end, true },
     }
-    local primary = { actions[1], actions[2], actions[3], more }
-    for i, a in ipairs(primary) do
-      if Kit.button(x + pad + (i - 1) * (bw + gap), by, bw, row, a[1], actionOptions(a)) then
-        a[3]()
-      end
-    end
-    if S.chromeMenu then
-      local menuW = (inner - 2 * gap) / 3
-      for i = 4, 6 do
-        local a = actions[i]
-        if
-          Kit.button(
-            x + pad + (i - 4) * (menuW + gap),
-            by + row + gap,
-            menuW,
-            row,
-            a[1],
-            actionOptions(a)
-          )
-        then
-          a[3]()
-        end
-      end
-    end
-    return
-  end
-  for i, a in ipairs(actions) do
-    if
-      Kit.button(
-        x + pad + (i - 1) % cols * (bw + gap),
-        by + math.floor((i - 1) / cols) * (row + gap),
-        bw,
-        row,
-        a[1],
-        actionOptions(a)
-      )
-    then
-      a[3]()
+    local cols = chromeMenuCols(w)
+    local bw = (inner - (cols - 1) * gap) / cols
+    for i, m in ipairs(menu) do
+      local mx = x + pad + (i - 1) % cols * (bw + gap)
+      local my = by + row + gap + math.floor((i - 1) / cols) * (row + gap)
+      local opts = { font = "small", icon = m[2], enabled = m[4], kind = m[1] == "Discard?" and "danger" or "ghost" }
+      if Kit.button(mx, my, bw, row, m[1], opts) then m[3]() end
     end
   end
 end
@@ -938,13 +916,13 @@ function App.draw()
   -- identity painting through each other (#715).  The taller bar simply
   -- costs the content column height, which scrolls.
   S.compactChrome = sh < 500 * s and sw > sh
-  local titleTwoRow = sw < 600 * s and not S.compactChrome and S.chromeMenu
-  local titleH = Kit.textHeight("tab")
-    + Kit.textHeight("tiny")
-    + 28 * s
-    + (titleTwoRow and 2 or 1) * (Kit.controlH() + 8 * s)
-  if S.compactChrome or Kit.desktop then
+  local titleH
+  if S.compactChrome or Kit.desktop or sw >= 760 * s then
     titleH = Kit.controlH() + 16 * s
+  else
+    local menuRows = S.chromeMenu and (chromeMenuCols(sw) == 4 and 1 or 2) or 0
+    titleH = Kit.textHeight("button") + Kit.textHeight("tiny") + 4 * s + 28 * s
+      + (1 + menuRows) * (Kit.controlH() + 8 * s)
   end
   local tabH = Kit.controlH() + 6 * s
   local statusH = (Kit.desktop and 28 or 38) * s

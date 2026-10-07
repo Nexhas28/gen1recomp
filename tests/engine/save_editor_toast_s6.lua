@@ -108,7 +108,7 @@ frame(390, 844, "Android")
 local low = S.toast.rect[2]
 Kit.focus = "mon-nickname"
 frame(390, 844, "Android")
-T.check(S.toast.rect[2] < 844 / 3 and S.toast.rect[2] < low, "a focused field on a phone moves the toast under the tab rail")
+T.check(S.toast.rect[2] < 844 / 2 and S.toast.rect[2] < low, "a focused field on a phone moves the toast above the keyboard")
 Kit.blur()
 
 local MapBrowser, ItemPicker = require("MapBrowser"), require("ItemPicker")
