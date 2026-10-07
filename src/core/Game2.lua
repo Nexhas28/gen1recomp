@@ -1234,6 +1234,7 @@ function Game2:load(opts)
     pcall(Font.load, self.data)
   end
   Strings.load(self.data)
+  self:prewarmSessionSfx()
 
   -- The boot skeleton (Game2.new built it, before any bus existed) announced
   -- here rather than at its construction, which is the same spot in the boot
@@ -1341,6 +1342,25 @@ function Game2:load(opts)
   end
 end
 
+Game2.SESSION_SFX = {
+  -- engine/overworld/scripting.asm:467
+  "Sfx_Item", "Sfx_KeyItem", "Sfx_GetTm",
+  "Sfx_ReadText2", "Sfx_Menu", "Sfx_Bump", "Sfx_EnterDoor",
+  "Sfx_ExitBuilding", "Sfx_JumpOverLedge", "Sfx_WarpTo", "Sfx_WarpFrom",
+  "Sfx_Save", "Sfx_Transaction", "Sfx_Wrong", "Sfx_SwitchPokemon",
+  "Sfx_GetBadge", "Sfx_Strength",
+}
+
+function Game2:prewarmSessionSfx()
+  local Sound = require("src.core.Sound")
+  local ChipAudio = require("src.core.ChipAudio")
+  ChipAudio.prewarmPinned(function()
+    for _, name in ipairs(Game2.SESSION_SFX) do
+      pcall(Sound.prewarmSfx, self.data, name)
+    end
+  end)
+end
+
 function Game2:inFillBoot()
   -- Entire pre-world cinema (copyright / title / Oak / name / nested NamingScreen)
   -- draws in GB letterbox space.
@@ -1376,6 +1396,8 @@ end
 
 function Game2:update(dt)
   require("src.core.DeferredWrite").tick()
+  local ChipAudio = package.loaded["src.core.ChipAudio"]
+  if ChipAudio then ChipAudio.pumpEffects() end
   -- _UpdateSound is a VBlank job, so it runs at 60Hz off real time whatever the
   -- logic multiplier is (audio/engine.asm:84, home/vblank.asm:141-143).
   local step = FixedStep.STEP

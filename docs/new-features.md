@@ -26,6 +26,7 @@ Features intentionally added to the games themselves, beyond what the original c
 * **Bank-style Box migration** from Gen 1 and 2 to Gen 3: nature from EXP, three perfect IVs (five for Mew and Celebi), EVs reset, second ability when there is one
 * **EXP-to-nature helper** in Box migration, showing how much EXP each nature needs before a Gen 1 or 2 Pokémon moves to Gen 3
 * **Box item stash**: store bag items in Box, send them to another game's bag, give or take held items and change a Gen 3 Pokémon's ball
+* **Unown form picker** in the save editor on Gen 2 and Gen 3, keeping HP DV, nature and shininess where the cart allows
 
 ## Gen 2 Specifics
 

@@ -493,10 +493,22 @@ BattleChrome.RSE_MENU_FRAMES = {
   moves = { { 1, 15, 18, 4 }, { 21, 15, 8, 4 } },
 }
 
+-- pokeruby/graphics/interface/menu_map.bin
+BattleChrome.RS_MENU_FRAMES = {
+  menu = { { 18, 15, 11, 4 } },
+  moves = { { 1, 15, 20, 4 }, { 23, 15, 6, 4 } },
+}
+
+function BattleChrome.menuFrameRects(mode, layout)
+  local set = layout == "rs" and BattleChrome.RS_MENU_FRAMES or BattleChrome.RSE_MENU_FRAMES
+  return set[mode]
+end
+
 -- pokeemerald/src/battle_bg.c:744
-function BattleChrome.drawMenuFrames(mode)
+-- pokeruby/src/battle_bg.c:266
+function BattleChrome.drawMenuFrames(mode, layout)
   if not BattleChrome.isRse() then return end
-  local rects = BattleChrome.RSE_MENU_FRAMES[mode]
+  local rects = BattleChrome.menuFrameRects(mode, layout)
   if not rects then return end
   local Chrome = require("src.ui.game3.chrome")
   for _, r in ipairs(rects) do

@@ -179,8 +179,13 @@ bundled game, in that case.
   in-app. If neither transport exists, the worker reports `needs_full` and
   the launcher chip opens `Check.releaseUrl()`. Native package-only changes
   still need a full reinstall (`minShell` / `payloadHost` gate →
-  `needs_full`). Applying a downloaded payload on Android relaunches via
-  `love.system.restartApp`; iOS still uses in-process `quit("restart")`.
+  `needs_full`). Applying a downloaded payload on Android restarts
+  in-process with `quit("restart")` only when the running `love.run` sets
+  `POKEPORT_LOOP_RESTART`; an older APK shell's stepper would hand that
+  string to `os.exit`, so there `HostShell.restart` falls back to
+  `love.system.restartApp` (or a plain quit) and EXIT GAME rebuilds the
+  launcher in the same Lua state instead. iOS uses a bare `quit()`, which
+  its `love.cpp` turns into a restart.
 - **Android full updates are user-confirmed and certificate-bound.** The app
   uses a private `FileProvider` cache path plus
   `Intent.ACTION_INSTALL_PACKAGE`, checks Android 8+'s per-app

@@ -2198,6 +2198,10 @@ local function is_rs_battle()
   return P.font.nativeLayout == "rs"
 end
 
+function Ui.drawMenuFrames(panelMode)
+  BattleChrome.drawMenuFrames(panelMode, is_rs_battle() and "rs" or nil)
+end
+
 local function c5to8(x)
   return (x * 8 + math.floor(x / 4)) / 255
 end
@@ -2804,7 +2808,7 @@ function Ui.draw(w, h)
     panelMode = "moves"
   end
   BattleChrome.drawPanel(panelMode)
-  BattleChrome.drawMenuFrames(panelMode)
+  Ui.drawMenuFrames(panelMode)
 
   if Ui._mode == "menu" then
     draw_action_menu(st)

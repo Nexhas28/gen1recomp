@@ -525,10 +525,56 @@ local function makeLauncher(launcherOpts)
   })
 end
 
+local deferredLaunchRequest
+
+local function rebuildLauncherInProcess(opts)
+  if require("src.core.RequireGuard").repair() then
+    print("boot: restored love.filesystem searcher (see #2001)")
+  end
+
+  local currentVersion = require("src.core.GameVersion").get()
+  SessionLifecycle.endGameSession(Game)
+  Game = nil
+  pcall(function() require("src.online.Trade").hostIsLive = nil end)
+  local syncEngine = package.loaded["src.sync.SyncEngine"]
+  if type(syncEngine) == "table" and type(syncEngine._shared) == "table" then
+    pcall(syncEngine._shared.protectPlaythrough, syncEngine._shared, nil, nil)
+  end
+  autopilot = nil
+  driverCo = nil
+  local SaveData = require("src.core.SaveData")
+  local cartId = SaveData.getCart()
+  SaveData.setCart(nil)
+  require("src.core.GameSpeed").setAllowed(nil)
+
+  SessionLifecycle.endMountedSession(currentVersion)
+  SaveData.refreshSlotResolution(currentVersion)
+  if cartId then SaveData.refreshSlotResolution("cart_" .. cartId) end
+
+  applySavedOrientation()
+
+  local preload = require("src.mods.LauncherMods").translationStrings()
+  if preload then require("src.core.Strings").load({ strings = preload }) end
+
+  if love.window and love.window.setTitle then
+    local Version = require("src.core.Version")
+    love.window.setTitle(Version.title("Gen 1 Recompilation Project"))
+  end
+
+  Importer = makeLauncher({ initialTab = opts.tab, invite = opts.invite })
+  if Importer.ignoreReturningPointer then
+    Importer:ignoreReturningPointer()
+  end
+  if type(opts.request) == "table" then deferredLaunchRequest = opts.request end
+end
+
 local function returnToLauncher(opts)
   if not Game or quitToLauncher then return end
-  quitToLauncher = true
   opts = opts or {}
+  if not require("src.core.HostShell").canRestart() then
+    return rebuildLauncherInProcess(opts)
+  end
+  quitToLauncher = true
   local handoff = { tab = opts.tab, invite = opts.invite, request = opts.request }
   local okEncode, body = pcall(require("src.core.SaveSerializer").encode, handoff)
   pcall(love.filesystem.write, RELAUNCH_MARKER, okEncode and body or "return {}\n")
@@ -538,6 +584,7 @@ local function returnToLauncher(opts)
   autopilot = nil
   driverCo = nil
   endProcessOnce()
+  if opts.restarting then return end
   require("src.core.HostShell").restart()
 end
 
@@ -672,8 +719,6 @@ local function autoUpdateMods(request, tab)
     Importer:autoUpdateAll(function() end, { tab = tab })
   end
 end
-
-local deferredLaunchRequest
 
 local function launcherBusy()
   return launcherSplash ~= nil or Importer ~= nil and (Importer._updateAll ~= nil
@@ -1617,8 +1662,13 @@ function love.quit()
       and (mobile or not launchedIntoGame)
   end)
   if wouldReturnToLauncher then
-    returnToLauncher()
-    return true
+    local HostShell = require("src.core.HostShell")
+    if HostShell.restarting and HostShell.canRestart() then
+      returnToLauncher({ restarting = true })
+    else
+      returnToLauncher()
+      return true
+    end
   end
   endProcessOnce()
 end
@@ -1658,6 +1708,7 @@ local function idlePresentationCap(idleFor)
 end
 
 function love.run()
+  _G.POKEPORT_LOOP_RESTART = true
   if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
 
   -- don't let love.load's cost land in the first frame's dt

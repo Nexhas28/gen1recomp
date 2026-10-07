@@ -84,7 +84,7 @@ local function drawRoster(S, Kit, x, y, listW, h)
 
       local rpad = 12 * s
       local icon = 44 * s
-      MonEditor.drawSprite(S, Kit, mon.species, cx + rpad, ry + (rowH - icon) / 2, icon)
+      MonEditor.drawSprite(S, Kit, mon.species, cx + rpad, ry + (rowH - icon) / 2, icon, mon)
 
       -- right cluster first, so the name knows how much room it has left
       local rightW = 52 * s

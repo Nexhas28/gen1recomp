@@ -2241,6 +2241,54 @@ function Ops.setShiny(S, mon, shiny)
   return Ops.mark(S, ("%s %s"):format(mon.species, shiny and "is now shiny!" or "is no longer shiny"))
 end
 
+Ops.UNOWN_FORM_NAMES_G3 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ!?"
+
+function Ops.unownForm(S, mon)
+  if not mon or mon.isEgg or mon.egg then return nil end
+  local g = Gen.ofState(S)
+  if g == 3 and tonumber(mon.speciesId or mon.species) == MonOps.SPECIES_UNOWN_G3 then
+    return require("src.core.game3.pokemon").unownLetter(mon.personality)
+  elseif g == 2 then
+    return require("src.core.gen2.Unown").monLetter(mon)
+  end
+  return nil
+end
+
+function Ops.unownFormName(S, letter)
+  if letter == nil then return nil end
+  if Gen.ofState(S) == 3 then
+    local i = letter + 1
+    return Ops.UNOWN_FORM_NAMES_G3:sub(i, i)
+  end
+  return require("src.core.gen2.Unown").name(letter)
+end
+
+function Ops.unownFormOptions(S)
+  local out = {}
+  if Gen.ofState(S) == 3 then
+    for i = 0, MonOps.UNOWN_FORMS_G3 - 1 do out[#out + 1] = { i, Ops.unownFormName(S, i) } end
+  else
+    for i = 1, 26 do out[#out + 1] = { i, Ops.unownFormName(S, i) } end
+  end
+  return out
+end
+
+function Ops.setUnownForm(S, mon, letter)
+  local current = Ops.unownForm(S, mon)
+  if current == nil then return Ops.say(S, "Only an Unown has a form") end
+  letter = math.floor(tonumber(letter) or -1)
+  local name = Ops.unownFormName(S, letter)
+  if not name or name == "" then return Ops.say(S, "Unknown Unown form") end
+  if letter == current then return Ops.say(S, ("UNOWN is already %s"):format(name)) end
+  local g = Gen.ofState(S)
+  local ok, lostShiny = MonOps.setUnownForm(S.data, mon, letter, g)
+  if not ok then return Ops.say(S, ("UNOWN %s cannot keep this nature and shininess"):format(name)) end
+  if lostShiny then
+    return Ops.mark(S, ("UNOWN is now %s (no longer shiny: only I and V can be shiny)"):format(name))
+  end
+  return Ops.mark(S, ("UNOWN is now %s"):format(name))
+end
+
 function Ops.setPokerus(S, mon, value)
   if not mon then return false end
   local want = clamp(math.floor(value), 0, 255)

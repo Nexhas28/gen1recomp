@@ -152,8 +152,16 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
     cy = cy + row + 2 * gap
     hint(id)
   end
-  local function choice(id, label, value, options, apply)
-    cy = cy + Touch.choice(S, Kit, id, label, value, options, cx, cy, inner, apply, nil, issues.fields[id]) + 2 * gap
+  local function choice(id, label, value, options, apply, help)
+    cy = cy + Touch.choice(S, Kit, id, label, value, options, cx, cy, inner, apply, help, issues.fields[id]) + 2 * gap
+  end
+  local function unownForm(help)
+    local letter = Ops.unownForm(S, mon)
+    if letter == nil then return false end
+    choice("form", "Unown form", letter, Ops.unownFormOptions(S), function(v)
+      return Ops.setUnownForm(S, mon, v)
+    end, help)
+    return true
   end
   local function props(list)
     for _, d in ipairs(list) do
@@ -308,13 +316,18 @@ local function drawSection(S, Kit, x, y, w, h, report, issues)
       button("Shiny: " .. (shiny and "ON" or "OFF"), function()
         Ops.setShiny(S, mon, not shiny)
       end, "warn", "Changes shininess and personality. Review Checks after editing.", "shiny")
+      unownForm("Keeps nature and shininess. Changes the personality value.")
     elseif g == 2 then
       local d = P.find(S, "pokerus")
       choice("pokerus", "Pokérus", mon.pokerus or 0, Named.property(S, d), function(v)
         return Ops.setPokerus(S, mon, v)
       end)
-      text("Gender, shininess and Unown form follow DVs.")
-      for _, id in ipairs({ "gender", "shiny", "form" }) do hint(id) end
+      local isUnown = unownForm("Rewrites the middle bits of the DVs. Only I and V can be shiny.")
+      text(isUnown and "Gender and shininess follow DVs. Picking a form rewrites the middle DV bits."
+        or "Gender and shininess follow DVs.")
+      hint("gender")
+      hint("shiny")
+      if not isUnown then hint("form") end
     end
     button("Fix all errors", function()
       Ops.fixMonErrors(S, mon)

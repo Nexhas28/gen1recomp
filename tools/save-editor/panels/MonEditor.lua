@@ -11,17 +11,28 @@ local MonEditor = {}
 -- species, cached for the process: the old panel called newImage every frame,
 -- which re-decoded a PNG sixty times a second.
 local spriteCache = {}
-function MonEditor.sprite(S, species)
+
+function MonEditor.spriteKey(S, species, mon)
   if not species then return nil end
-  if spriteCache[species] ~= nil then return spriteCache[species] or nil end
+  local letter = mon and require("Ops").unownForm(S, mon)
+  if letter == nil then return species end
+  return tostring(species) .. ":" .. letter
+end
+
+function MonEditor.sprite(S, species, mon)
+  if not species then return nil end
+  local key = MonEditor.spriteKey(S, species, mon)
+  local letter = key ~= species and require("Ops").unownForm(S, mon) or nil
+  if spriteCache[key] ~= nil then return spriteCache[key] or nil end
   if Gen.ofState(S) == 3 then
     local okP, Pokemon = pcall(require, "src.core.game3.pokemon")
     if okP and Pokemon then
       local spId = tonumber(species) or (Pokemon.speciesFromName and Pokemon.speciesFromName(tostring(species)))
       if spId then
-        local pic = (Pokemon.frontPic and Pokemon.frontPic(spId)) or (Pokemon.icon and Pokemon.icon(spId))
+        local picId = letter ~= nil and Pokemon.picSpecies(spId, mon.personality) or spId
+        local pic = (Pokemon.frontPic and Pokemon.frontPic(picId)) or (Pokemon.icon and Pokemon.icon(picId))
         if pic and pic.image then
-          spriteCache[species] = pic.image
+          spriteCache[key] = pic.image
           return pic.image
         end
       end
@@ -29,19 +40,22 @@ function MonEditor.sprite(S, species)
   end
   local def = S.data and S.data.pokemon and (S.data.pokemon[species] or (type(species) == "number" and S.data.pokemon[species]))
   local path = def and def.spriteFront
+  if letter ~= nil and Gen.ofState(S) == 2 then
+    path = require("src.core.gen2.Unown").formSprite(S.data.pokemon, letter) or path
+  end
   if not path or not love.graphics.newImage then
-    spriteCache[species] = false
+    spriteCache[key] = false
     return nil
   end
   local ok, img = pcall(love.graphics.newImage, path)
-  spriteCache[species] = ok and img or false
+  spriteCache[key] = ok and img or false
   return ok and img or nil
 end
 
 -- Draw a species sprite fitted into a box, or a dashed placeholder when the
 -- cache has no art for it (a modded species, or a headless run).
-function MonEditor.drawSprite(S, Kit, species, x, y, size)
-  local img = MonEditor.sprite(S, species)
+function MonEditor.drawSprite(S, Kit, species, x, y, size, mon)
+  local img = MonEditor.sprite(S, species, mon)
   if img and love.graphics.draw and img.getDimensions then
     local iw, ih = img:getDimensions()
     if iw > 0 and ih > 0 then

@@ -126,12 +126,81 @@ function MonOps.recalc(data, mon, gen)
   mon.hp = math.max(0, math.min(mon.hp or mon.stats.hp, mon.stats.hp))
 end
 
+MonOps.SPECIES_UNOWN_G3 = 201
+MonOps.UNOWN_FORMS_G3 = 28
+
+local function spliceLetterBits(half, lo2, hi2)
+  local bit = require("bit")
+  return bit.bor(bit.band(half, 0xFCFC), lo2, hi2 * 256)
+end
+
+-- include/pokemon.h:364 GET_UNOWN_LETTER, src/pokemon.c:2318 CreateMonWithGenderNatureLetter
+function MonOps.unownPid(pid, letter, nature, shiny, tid, sid)
+  local bit = require("bit")
+  local PokemonG3 = require("src.core.game3.pokemon")
+  pid = (tonumber(pid) or 0) % 4294967296
+  letter = math.floor(tonumber(letter) or 0) % MonOps.UNOWN_FORMS_G3
+  nature = nature ~= nil and tonumber(nature) or nil
+  local tsv = bit.bxor((tonumber(tid) or 0) % 65536, (tonumber(sid) or 0) % 65536)
+  local oldLow, oldHigh = pid % 65536, math.floor(pid / 65536)
+  local function accept(high, low)
+    local p = high * 65536 + low
+    if p == 0 then return nil end
+    if nature ~= nil and p % 25 ~= nature then return nil end
+    local isShiny = bit.bxor(tsv, bit.bxor(high, low)) < 8
+    if shiny ~= nil and isShiny ~= (shiny and true or false) then return nil end
+    if PokemonG3.unownLetter(p) ~= letter then return nil end
+    return p
+  end
+  local same = accept(oldHigh, oldLow)
+  if same then return same end
+  local tsv89 = math.floor(tsv / 256) % 4
+  for d = 0, 4095 do
+    local low0 = bit.bxor(oldLow, (d % 64) * 4 + math.floor(d / 64) * 1024)
+    if shiny then
+      for b1 = 0, 3 do
+        local b3 = bit.bxor(b1, tsv89)
+        for b0 = 0, 3 do
+          for b2 = 0, 3 do
+            if (b3 * 64 + b2 * 16 + b1 * 4 + b0) % MonOps.UNOWN_FORMS_G3 == letter then
+              local low = spliceLetterBits(low0, b0, b1)
+              local base = bit.bxor(low, tsv)
+              for k2 = 0, 1 do
+                local high = bit.bor(bit.band(bit.bxor(base, k2 * 4), 0xFFFC), b2)
+                local p = accept(high, low)
+                if p then return p end
+              end
+            end
+          end
+        end
+      end
+    else
+      for v = letter, 255, MonOps.UNOWN_FORMS_G3 do
+        local b0, b1 = v % 4, math.floor(v / 4) % 4
+        local b2, b3 = math.floor(v / 16) % 4, math.floor(v / 64)
+        local p = accept(spliceLetterBits(oldHigh, b2, b3), spliceLetterBits(low0, b0, b1))
+        if p then return p end
+      end
+    end
+  end
+  return nil
+end
+
+local function unownReq(mon)
+  if tonumber(mon.speciesId or mon.species) ~= MonOps.SPECIES_UNOWN_G3 then return nil end
+  return require("src.core.game3.pokemon").unownLetter(mon.personality)
+end
+
 function MonOps.generatePid(species, otId, otSecretId, reqs)
   reqs = reqs or {}
   local PokemonG3 = require("src.core.game3.pokemon")
   local bit = require("bit")
 
   local spId = tonumber(species) or (PokemonG3.speciesFromName and PokemonG3.speciesFromName(tostring(species))) or 1
+  if spId == MonOps.SPECIES_UNOWN_G3 and reqs.unownLetter ~= nil then
+    local p = MonOps.unownPid(reqs.basePid, reqs.unownLetter, reqs.nature, reqs.shiny, otId, otSecretId)
+    if p then return p end
+  end
   otId = bit.band(tonumber(otId) or 0, 0xFFFF)
   otSecretId = bit.band(tonumber(otSecretId) or 0, 0xFFFF)
   local trainerXor = bit.bxor(otId, otSecretId)
@@ -224,6 +293,8 @@ function MonOps.setNature(data, mon, natureId, gen)
       ability = currentAbility,
       gender = mon.gender,
       shiny = isShiny,
+      unownLetter = unownReq(mon),
+      basePid = mon.personality,
     })
     MonOps.recalc(data, mon, gen)
   end
@@ -241,6 +312,8 @@ function MonOps.setAbility(data, mon, abilitySlot, gen)
       ability = abilitySlot,
       gender = mon.gender,
       shiny = isShiny,
+      unownLetter = unownReq(mon),
+      basePid = mon.personality,
     })
     mon.abilityNum = abilitySlot
     local PokemonG3 = require("src.core.game3.pokemon")
@@ -261,6 +334,8 @@ function MonOps.setGender(data, mon, gender, gen)
       ability = currentAbility,
       gender = gender,
       shiny = isShiny,
+      unownLetter = unownReq(mon),
+      basePid = mon.personality,
     })
     local PokemonG3 = require("src.core.game3.pokemon")
     mon.gender = PokemonG3.gender(mon.speciesId or mon.species, mon.personality)
@@ -281,6 +356,8 @@ function MonOps.setShiny(data, mon, shiny, gen)
       ability = currentAbility,
       gender = mon.gender,
       shiny = shiny,
+      unownLetter = unownReq(mon),
+      basePid = mon.personality,
     })
     mon.isShiny = shiny
     MonOps.recalc(data, mon, gen)
@@ -534,6 +611,20 @@ function MonOps.syncHpDv(dvs)
   return dvs
 end
 
+local function deriveGen2(data, mon)
+  local Mon = require("src.battle.gen2.Mon")
+  local Unown = require("src.core.gen2.Unown")
+  mon.dvs.hp = Mon.hpDV(mon.dvs)
+  local def = data and data.pokemon and data.pokemon[mon.species]
+  if def then
+    mon.gender = Mon.gender(def, mon.dvs, { species = mon.species, level = mon.level })
+  end
+  mon.shiny = Mon.isShiny(mon.dvs, { species = mon.species, def = def, level = mon.level })
+  if mon.species == Unown.SPECIES then
+    mon.unownLetter = Unown.letterFromDVs(mon.dvs)
+  end
+end
+
 function MonOps.setDv(data, mon, key, value, gen)
   if type(mon) ~= "table" then return end
   mon.dvs = mon.dvs or { attack = 15, defense = 15, speed = 15, special = 15, hp = 15 }
@@ -552,19 +643,56 @@ function MonOps.setDv(data, mon, key, value, gen)
     mon.ivs.spa = math.min(31, (mon.dvs.special or 0) * 2 + 1)
     mon.ivs.spd = math.min(31, (mon.dvs.special or 0) * 2 + 1)
   elseif gen == 2 or (mon.stats and mon.stats.specialAttack) then
-    local Mon = require("src.battle.gen2.Mon")
-    mon.dvs.hp = Mon.hpDV(mon.dvs)
-    local def = data and data.pokemon and data.pokemon[mon.species]
-    if def then
-      mon.gender = Mon.gender(def, mon.dvs, { species = mon.species, level = mon.level })
-      mon.shiny = Mon.isShiny(mon.dvs, { species = mon.species, def = def, level = mon.level })
-      local Unown = require("src.core.gen2.Unown")
-      if mon.species == Unown.SPECIES then
-        mon.unownLetter = Unown.letterFromDVs(mon.dvs)
-      end
-    end
+    deriveGen2(data, mon)
   end
   MonOps.recalc(data, mon, gen)
+end
+
+local DV_KEYS = { "attack", "defense", "speed", "special" }
+
+-- engine/gfx/load_pics.asm:1 GetUnownLetter, engine/gfx/color.asm:8 CheckShininess
+function MonOps.unownDvs(dvs, letter, keepShiny)
+  local Mon = require("src.battle.gen2.Mon")
+  letter = math.floor(tonumber(letter) or 1)
+  if letter < 1 or letter > 26 then return nil end
+  local lo, hi = (letter - 1) * 10, math.min(255, letter * 10 - 1)
+  local best, bestKey
+  for p = lo, hi do
+    local out = {}
+    for i, k in ipairs(DV_KEYS) do
+      local d = tonumber(dvs[k]) or 0
+      local mid = math.floor(p / 4 ^ (4 - i)) % 4
+      out[k] = d - (math.floor(d / 2) % 4) * 2 + mid * 2
+    end
+    local cost = 0
+    for _, k in ipairs(DV_KEYS) do cost = cost + math.abs(out[k] - (tonumber(dvs[k]) or 0)) end
+    local key = (Mon.vanillaShiny(out) == (keepShiny and true or false) and 0 or 1000) + cost
+    if not bestKey or key < bestKey then best, bestKey = out, key end
+  end
+  return best
+end
+
+function MonOps.setUnownForm(data, mon, letter, gen)
+  if type(mon) ~= "table" then return nil end
+  if gen == 3 then
+    local Summary = require("src.core.game3.summary_data")
+    local p = MonOps.unownPid(mon.personality, letter, (tonumber(mon.personality) or 0) % 25,
+      Summary.isShiny(mon), mon.otId, mon.otSecretId)
+    if not p then return nil end
+    mon.personality = p
+    mon.isShiny = nil
+    MonOps.recalc(data, mon, gen)
+    return true
+  end
+  local Mon = require("src.battle.gen2.Mon")
+  mon.dvs = mon.dvs or { attack = 0, defense = 0, speed = 0, special = 0 }
+  local wasShiny = mon.shiny == true or Mon.vanillaShiny(mon.dvs)
+  local out = MonOps.unownDvs(mon.dvs, letter, wasShiny)
+  if not out then return nil end
+  for k, v in pairs(out) do mon.dvs[k] = v end
+  deriveGen2(data, mon)
+  MonOps.recalc(data, mon, gen)
+  return true, wasShiny and not mon.shiny
 end
 
 local EV_KEYS = { "hp", "atk", "def", "spe", "spa", "spd" }

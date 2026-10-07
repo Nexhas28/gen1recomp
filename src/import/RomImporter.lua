@@ -257,7 +257,7 @@ local function sha1(data)
 end
 
 local function readExternalPath(path)
-  local file, openError = io.open(path, "rb")
+  local file, openError = require("src.core.SaveData").openNative(path, "rb")
   if not file then return nil, openError end
   local data = file:read("*a")
   file:close()
@@ -2458,7 +2458,18 @@ function RomImporter:_offerReimport(version, cand)
   end
   local name = GameVersion.info(version).displayName
   local lines
-  if cand.pick then
+  if cand.missing then
+    local why = cand.missing ~= "changed"
+      and Strings("The saved ROM at %s could not be found or opened.",
+        RomSources.shortPath(cand.path))
+      or Strings("The saved ROM at %s no longer matches this game.",
+        RomSources.shortPath(cand.path))
+    lines = {
+      Strings("%s needs its ROM imported again.", name),
+      why,
+      Strings("Choose the ROM file to re-import it?"),
+    }
+  elseif cand.pick then
     lines = {
       Strings("%s needs its ROM imported again.", name),
       Strings("Choose the ROM file to re-import it?"),

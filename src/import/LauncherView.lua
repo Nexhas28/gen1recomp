@@ -5716,7 +5716,10 @@ local function buildSettingsModal(imp, m)
   local x, cy, width = px + pad, py + pad, pw - 2 * pad
   Kit.textBold("title", Strings("Settings"), x, cy, PAL.heading)
   local subtitleW = width - m.btnH - gap
-  if model.flash then
+  if model.saveError then
+    Kit.text("small", Kit.ellipsize("small", model.saveError, subtitleW), x,
+      cy + Kit.textHeight("title") + math.floor(3 * m.s), PAL.red)
+  elseif model.flash then
     Kit.text("small", Kit.ellipsize("small", model.flash, subtitleW), x,
       cy + Kit.textHeight("title") + math.floor(3 * m.s), PAL.green)
   else
@@ -5832,8 +5835,7 @@ local function buildSettingsModal(imp, m)
         local aw = math.min(inner, chipWidth(label, m))
         local function run()
           if row.action() ~= false then
-            model.save()
-            if row.doneText then model.flash = row.doneText end
+            if model.save() ~= false and row.doneText then model.flash = row.doneText end
           end
         end
         control(rx - aw, aw, key .. "-act", label, {

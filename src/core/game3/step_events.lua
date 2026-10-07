@@ -84,26 +84,6 @@ local function field_white_out_event(session, game)
     end
     local Field = package.loaded["src.core.game3.field"] or require("src.core.game3.field")
     Field.lock()
-    local Rse = require("src.core.game3.rse.init")
-    if Rse.isRse(session) then
-      local Pike = require("src.core.game3.rse.frontier.pike")
-      local Pyramid = require("src.core.game3.rse.frontier.pyramid")
-      local Hill = require("src.core.game3.rse.trainer_hill")
-      if Pike.inBattlePike(session) or Pyramid.inPyramid(session) or Hill.inChallenge(session) then
-        -- pokeemerald/data/scripts/field_poison.inc:23
-        local Space = package.loaded["src.core.game3.scripting.space"]
-          or require("src.core.game3.scripting.space")
-        local key = Space.scriptKey("EventScript_FrontierFieldWhiteOut")
-        if key and Space.startScript(key) then
-          ev.phase = "frontier_script"
-          ev.tick = function()
-            local vm = Space.vm
-            if not vm or not vm.active then onDone() end
-          end
-          return
-        end
-      end
-    end
     local BattleBridge = require("src.core.game3.battle_bridge")
     local save = game and game.save
     local name = session.name or session.playerName or ""
@@ -143,6 +123,23 @@ local function field_white_out_event(session, game)
       local Field = package.loaded["src.core.game3.field"] or require("src.core.game3.field")
       Field.respawnAtHeal()
     end)
+  end
+  return ev
+end
+
+local function field_poison_script_event(scriptName)
+  local ev = { type = "field_poison_script", script = scriptName }
+  ev.run = function(onDone)
+    local Space = package.loaded["src.core.game3.scripting.space"]
+      or require("src.core.game3.scripting.space")
+    local key = Space.scriptKey(scriptName)
+    if not (key and Space.startScript(key)) then
+      error("field poison script did not start: " .. tostring(scriptName))
+    end
+    ev.tick = function()
+      local vm = Space.vm
+      if not vm or not vm.active then onDone() end
+    end
   end
   return ev
 end
@@ -241,6 +238,8 @@ function StepEvents.onStepTaken(session, game)
     psnSteps = 0
     local anyPoisonDamage = false
     local faintedMons = {}
+    local profileField = require("src.core.game3.profile").forSession(session).field
+    local poisonScript = profileField and profileField.fieldPoisonScript
 
     for slotIdx, mon in ipairs(party) do
       local isEgg = mon.isEgg or (type(mon.egg) == "boolean" and mon.egg)
@@ -251,7 +250,9 @@ function StepEvents.onStepTaken(session, game)
       if not isEgg and isPsn and hp > 0 then
         anyPoisonDamage = true
         mon.hp = math.max(0, hp - 1)
-        if mon.hp == 0 then
+        if mon.hp == 0 and poisonScript then
+          faintedMons[#faintedMons + 1] = { slot = slotIdx, mon = mon }
+        elseif mon.hp == 0 then
           -- pokefirered/src/field_poison.c:36
           Pokemon.adjustFriendship(mon, Pokemon.FRIENDSHIP_EVENT_FAINT_OUTSIDE_BATTLE,
             { mapSec = Pokemon.currentMapSec(session) })
@@ -273,6 +274,11 @@ function StepEvents.onStepTaken(session, game)
 
       -- pokefirered/src/field_control_avatar.c:727 FLDPSN_FNT
       poisonFainted = #faintedMons > 0
+      if poisonFainted and poisonScript then
+        -- pokeemerald/src/field_control_avatar.c:551
+        push_event(field_poison_script_event(poisonScript))
+        faintedMons = {}
+      end
       for _, fainted in ipairs(faintedMons) do
         push_event({
           type = "poison_faint",
@@ -289,7 +295,7 @@ function StepEvents.onStepTaken(session, game)
         })
       end
       -- pokefirered/src/field_poison.c:76
-      if poisonFainted then push_event(field_white_out_event(session, game)) end
+      if poisonFainted and not poisonScript then push_event(field_white_out_event(session, game)) end
     end
   end
   session.vars[psnVar] = psnSteps

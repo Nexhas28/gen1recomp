@@ -871,7 +871,36 @@ end
 -- Both take an optional fs (write/getInfo/read) defaulting to
 -- love.filesystem, so the mod loader's injected filesystem can carry the
 -- options round-trip headless (no love global).
+SaveData.LAUNCHER_KEYS = {
+  "autoReimport", "splashVideo", "splashMute", "themeVideoBg", "reduceMotion",
+  "boxMusicVol", "boxCryVol", "romSources", "lastVersion", "activeCart", "modSort",
+}
+
+function SaveData.launcherKeys()
+  local out = {}
+  for _, key in ipairs(SaveData.LAUNCHER_KEYS) do out[#out + 1] = key end
+  local ok, SecretGames = pcall(require, "src.import.SecretGames")
+  if ok and type(SecretGames) == "table" and type(SecretGames.GAMES) == "table" then
+    for _, key in pairs(SecretGames.GAMES) do out[#out + 1] = key end
+  end
+  return out
+end
+
+function SaveData.invalidateOptionsCache()
+  for _, slot in pairs(optionsCache) do slot.rev = slot.rev + 1 end
+end
+
+local writeOptions
+
 function SaveData.saveOptions(opts, fs)
+  return writeOptions(opts, fs, false)
+end
+
+function SaveData.saveSessionOptions(opts, fs)
+  return writeOptions(opts, fs, true)
+end
+
+writeOptions = function(opts, fs, launcherFromDisk)
   fs = persistFs(fs)
   -- #932: options.lua is a WHOLE-FILE rewrite, so a caller that hands over a
   -- PARTIAL table (just the keys it changed) would silently drop every key it
@@ -893,6 +922,11 @@ function SaveData.saveOptions(opts, fs)
   -- a partial write would push the global value into the cart's bucket.
   local cartGlobalValues = cartGlobals(onDisk)
   applyCartOverlay(onDisk)
+  if launcherFromDisk and type(opts) == "table" and type(onDisk) == "table" then
+    for _, key in ipairs(SaveData.launcherKeys()) do
+      opts[key] = deepCopy(onDisk[key])
+    end
+  end
   local isFull = type(opts) == "table"
   if isFull then
     for k in pairs(SaveData.defaultOptions()) do
@@ -2720,7 +2754,7 @@ end)
 function SaveData.saveLiveOptions(data)
   if type(data) ~= "table" or type(data.options) ~= "table" then return nil end
   data.options = rememberPlaythroughId(data, data.options)
-  return SaveData.saveOptions(data.options)
+  return SaveData.saveSessionOptions(data.options)
 end
 
 -- Game progress only; options are written separately via saveOptions.
@@ -2740,7 +2774,7 @@ function SaveData.save(data, mods)
     SaveData.saveLiveOptions(data)
   else
     local opts, changed = rememberPlaythroughId(data)
-    if changed then SaveData.saveOptions(opts) end
+    if changed then SaveData.saveSessionOptions(opts) end
   end
   if activeCart and type(data.meta) == "table" then
     data.meta.cartId = activeCart

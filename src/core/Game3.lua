@@ -368,7 +368,8 @@ end
 
 function Game3:writeOptions()
   if type(self.options) ~= "table" then return end
-  if SaveData.saveOptions then pcall(SaveData.saveOptions, self.options) end
+  local write = SaveData.saveSessionOptions or SaveData.saveOptions
+  if write then pcall(write, self.options) end
 end
 Game3.persistOptions = Game3.writeOptions
 
