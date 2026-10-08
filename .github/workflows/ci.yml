@@ -248,12 +248,6 @@ jobs:
         with:
           name: gen1recomp-xbox-uwp-payload
           path: .bazinga/work
-
-
-
-      - name: Rebuild Xbox UWP picker dependencies
-        shell: pwsh
-        run: ./scripts/xbox-uwp/rebuild_dependencies.ps1 -SkipAngle -SkipPackage
       - name: Build Xbox UWP package
         shell: bash
         run: |
