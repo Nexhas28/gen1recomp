@@ -624,6 +624,7 @@ tests/engine/saffron_cries_bug2248_2249.lua
 tests/engine/save_confirm_layout_bug1522.lua
 tests/engine/save_convert_extra_flags.lua
 tests/engine/save_convert_toggle_objects.lua
+tests/engine/save_editor_volcanic_ash_2752.lua
 tests/engine/save_editor_berry_powder_2698.lua
 tests/engine/save_editor_buena_points_2640.lua
 tests/engine/save_editor_custom_maps.lua
