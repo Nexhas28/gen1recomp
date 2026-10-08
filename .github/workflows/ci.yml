@@ -440,6 +440,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+      - name: install ccache
+        run: sudo apt-get install -y --no-install-recommends ccache
+      - name: restore native build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ccache
+          key: android-ccache-${{ github.run_id }}
+          restore-keys: android-ccache-
       - name: set up Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -459,7 +468,16 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;25.2.9519653"
       - name: build Android APK
-        run: scripts/build_android.sh --version 0.0.0
+        env:
+          NDK_CCACHE: ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_COMPILERCHECK: content
+          CCACHE_SLOPPINESS: include_file_mtime,include_file_ctime,time_macros
+          CCACHE_MAXSIZE: 1G
+        run: |
+          ccache -z
+          scripts/build_android.sh --version 0.0.0
+          ccache -s
       - name: upload Android artifact
         uses: actions/upload-artifact@v7
         with:
