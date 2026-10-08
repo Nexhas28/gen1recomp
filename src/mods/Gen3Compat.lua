@@ -2084,17 +2084,16 @@ Gen3Compat.centredSprite = centredEntry
 
 local function samePath(path) return path end
 
-local function hookedEntry(side, species, form, vanilla, shiny) -- shiny added by stahl
+local function hookedEntry(side, species, form, vanilla, kind, shiny)
   if not Runtime.wantsHook("pokemon.sprite") then return vanilla end
   local P = g3("pokemon")
   local path = spriteOverrides[side][species]
     or ("data/generated/gba/pokemon/" .. side .. "/" .. species .. ".rgba")
   local g = live()
   local ctx = { data = g and dataProxy(g.data), species = Gen3Compat.speciesName(species),
-                gen3Species = species, form = form, side = side, kind = "battle",
+                gen3Species = species, form = form, side = side, kind = kind or "battle",
                 trueColor = true, path = path,
-                shiny = shiny -- added by Stahl
-              }
+                shiny = shiny }
   local hooked = Runtime.call("pokemon.sprite", samePath, path, ctx)
   if type(hooked) ~= "string" or hooked == path or isVanillaPic(hooked) then
     return vanilla
@@ -2200,23 +2199,23 @@ local function wrapPics(P)
   wrappedModules[P] = true
   local frontOrig, backOrig = P.frontPic, P.backPic
   if frontOrig then
-    P.frontPic = function(species, form, shiny, personality)
+    P.frontPic = function(species, form, shiny, personality, kind)
       local sp = tonumber(species)
       local path = sp and (tonumber(form) or 0) == 0 and spriteOverrides.front[sp]
       local entry = path and centredEntry(path)
       if not entry then entry = frontOrig(species, form, shiny, personality) end
-      if sp then return hookedEntry("front", sp, form, entry, shiny) end -- shiny added by stahl
+      if sp then return hookedEntry("front", sp, form, entry, kind, shiny) end
       return entry
     end
     P.frontSprite = P.frontPic
   end
   if backOrig then
-    P.backPic = function(species, form, shiny)
+    P.backPic = function(species, form, shiny, kind)
       local sp = tonumber(species)
       local path = sp and (tonumber(form) or 0) == 0 and spriteOverrides.back[sp]
       local entry = path and centredEntry(path)
       if not entry then entry = backOrig(species, form, shiny) end
-      if sp then return hookedEntry("back", sp, form, entry, shiny) end -- shiny added by stahl
+      if sp then return hookedEntry("back", sp, form, entry, kind, shiny) end
       return entry
     end
   end
