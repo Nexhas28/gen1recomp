@@ -2176,7 +2176,7 @@ local function hookedIcon(species, mon, vanilla, shiny) -- shiny added by stahl
   return iconEntry(hooked) or vanilla
 end
 
-local function wrapIcons(P, shiny) -- shiny added by stahl
+local function wrapIcons(P)
   local iconOrig, monIconOrig = P.icon, P.monIcon
   if iconOrig then
     P.icon = function(species)
@@ -2221,7 +2221,7 @@ local function wrapPics(P)
       return entry
     end
   end
-  wrapIcons(P, shiny) -- shiny added by stahl
+  wrapIcons(P)
 end
 
 local function seed(P)
