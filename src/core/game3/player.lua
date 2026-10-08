@@ -777,6 +777,11 @@ function Player.forceStep(dir, onDone)
   Player.facing = dir or Player.facing
   Player._onStepDone = onDone
   beginStep(Player.cellX + d[1], Player.cellY + d[2], false, false)
+  -- pokeemerald/src/field_screen_effect.c:699
+  if Player.biking then
+    Player.stepFrames = WALK_FRAMES
+    Player.running = false
+  end
   return true
 end
 
