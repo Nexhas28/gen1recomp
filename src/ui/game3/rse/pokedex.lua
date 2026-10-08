@@ -10,6 +10,7 @@ local Area = require("src.ui.game3.rse.pokedex_area")
 local Cry = require("src.ui.game3.rse.pokedex_cry")
 local Mapsec = require("src.ui.game3.rse.mapsec")
 local RsPolicy = require("src.ui.game3.rs.pokedex_policy")
+local PixelCanvas = require("src.render.PixelCanvas")
 local function nativeRs() return Gfx.manifest().assetLayout == "rs" end
 local rsTextNames = {gText_CryOf = "CryOf", gText_SizeComparedTo = "SizeComparedTo", gText_SelectorArrow = "RightPointingTriangle",
   gText_SearchingPleaseWait = "Searching", gText_SearchCompleted = "SearchComplete", gText_NoMatchingPkmnWereFound = "NoMatching"}
@@ -2352,7 +2353,7 @@ local function tintMask(img, color, x, y)
 end
 
 local function stencilled(maskFn, test, value, drawFn)
-  maskCanvas = maskCanvas or love.graphics.newCanvas(240, 160)
+  maskCanvas = maskCanvas or PixelCanvas.new(240, 160)
   maskCanvas:setFilter("nearest", "nearest")
   love.graphics.push("all")
   love.graphics.origin()

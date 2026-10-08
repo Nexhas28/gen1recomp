@@ -4790,7 +4790,7 @@ function BattleState:drawLiftedRows()
   if not (enemyLift or playerLift) then return end
   local G = love.graphics
   if not self.liftCanvas then
-    self.liftCanvas = G.newCanvas(160, 144)
+    self.liftCanvas = require("src.render.PixelCanvas").new(160, 144)
     self.liftCanvas:setFilter("nearest", "nearest")
   end
   local previous = G.getCanvas()

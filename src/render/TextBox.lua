@@ -144,7 +144,7 @@ function TextBox.new(game, text, onDone, opts)
   self.stay = opts and opts.stay
   -- engine/events/hidden_events/cinnabar_gym_quiz.asm:119
   self.preSound = opts and opts.preSound
-  -- pokegold engine/overworld/scripting.asm:485 WaitSFX
+  -- ../pokecrystal/engine/overworld/scripting.asm:537
   self.sfxWait = opts and opts.sfxWait
   -- ../pokecrystal/home/joypad.asm:302 WaitButton
   self.waitButton = opts and opts.waitButton
@@ -409,7 +409,7 @@ function TextBox:visibleText()
   return #out > 0 and out or nil
 end
 
--- pokegold engine/overworld/scripting.asm:484-485 PlaySFX / WaitSFX
+-- ../pokecrystal/engine/overworld/scripting.asm:536
 function TextBox:sfxHeld()
   if not self.sfxWait then return false end
   if require("src.core.Sound").sfxBusy() then return true end
@@ -537,9 +537,10 @@ function step(self, dt)
     -- exactly once (#591)
     if self.stay then
       if not self.stayShown then
+        if self:sfxHeld() then return end
         -- stay.prompt: arrowed A/B wait, then the box stays up
         -- (TextCommand_PROMPT_BUTTON, home/text.asm:434-444)
-        if self.stay.prompt
+        if (self.stay.prompt or self.stay.press)
            and not (input:wasPressed("a") or input:wasPressed("b")) then
           return
         end

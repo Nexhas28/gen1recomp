@@ -464,6 +464,9 @@ function Map.load(mod, game, mapId, opts)
   if not opts.seamless then
     local StayMessage = package.loaded["src.ui.game3.message"]
     if StayMessage and StayMessage.closeStay then StayMessage.closeStay() end
+    -- pokeemerald/src/overworld.c:2170
+    local CamObj = package.loaded["src.core.game3.camera_object"]
+    if CamObj and CamObj.reset then CamObj.reset() end
   end
   -- pret RestartWildEncounterImmunitySteps on LoadMap / LoadMapFromWarp: every
   -- map entry restarts the wild encounter grace period. Unconditional, so the
