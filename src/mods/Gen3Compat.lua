@@ -2084,7 +2084,7 @@ Gen3Compat.centredSprite = centredEntry
 
 local function samePath(path) return path end
 
-local function hookedEntry(side, species, form, vanilla)
+local function hookedEntry(side, species, form, vanilla, shiny) -- shiny added by stahl
   if not Runtime.wantsHook("pokemon.sprite") then return vanilla end
   local P = g3("pokemon")
   local path = spriteOverrides[side][species]
@@ -2092,7 +2092,9 @@ local function hookedEntry(side, species, form, vanilla)
   local g = live()
   local ctx = { data = g and dataProxy(g.data), species = Gen3Compat.speciesName(species),
                 gen3Species = species, form = form, side = side, kind = "battle",
-                trueColor = true, path = path }
+                trueColor = true, path = path,
+                shiny = shiny -- added by Stahl
+              }
   local hooked = Runtime.call("pokemon.sprite", samePath, path, ctx)
   if type(hooked) ~= "string" or hooked == path or isVanillaPic(hooked) then
     return vanilla
@@ -2157,13 +2159,15 @@ local function blankIcon(vanilla)
   return hit
 end
 
-local function hookedIcon(species, mon, vanilla)
+local function hookedIcon(species, mon, vanilla, shiny) -- shiny added by stahl
   if not Runtime.wantsHook("pokemon.icon") then return vanilla end
   local path = "data/generated/gba/pokemon/icons/" .. species .. ".rgba"
   local g = live()
   local ctx = { data = g and dataProxy(g.data), species = Gen3Compat.speciesName(species),
                 gen3Species = species, mon = mon, kind = "icon", trueColor = true,
-                path = path }
+                path = path,
+                shiny = shiny -- shiny added by stahl
+               }
   local hooked = Runtime.call("pokemon.icon", samePath, path, ctx)
   if hooked == nil or hooked == false then return blankIcon(vanilla) end
   if type(hooked) ~= "string" or hooked == path or isVanillaPic(hooked) then
@@ -2172,13 +2176,13 @@ local function hookedIcon(species, mon, vanilla)
   return iconEntry(hooked) or vanilla
 end
 
-local function wrapIcons(P)
+local function wrapIcons(P, shiny) -- shiny added by stahl
   local iconOrig, monIconOrig = P.icon, P.monIcon
   if iconOrig then
     P.icon = function(species)
       local entry = iconOrig(species)
       local sp = tonumber(species)
-      if sp and sp >= 1 then return hookedIcon(sp, nil, entry) end
+      if sp and sp >= 1 then return hookedIcon(sp, nil, entry, shiny) end -- shiny added by stahl
       return entry
     end
   end
@@ -2186,7 +2190,7 @@ local function wrapIcons(P)
     P.monIcon = function(mon)
       local sp = tonumber(P.monPicSpecies(mon))
       local entry = iconOrig(sp)
-      if sp and sp >= 1 then return hookedIcon(sp, mon, entry) end
+      if sp and sp >= 1 then return hookedIcon(sp, mon, entry, shiny) end -- shiny added by stahl
       return entry
     end
   end
@@ -2202,7 +2206,7 @@ local function wrapPics(P)
       local path = sp and (tonumber(form) or 0) == 0 and spriteOverrides.front[sp]
       local entry = path and centredEntry(path)
       if not entry then entry = frontOrig(species, form, shiny, personality) end
-      if sp then return hookedEntry("front", sp, form, entry) end
+      if sp then return hookedEntry("front", sp, form, entry, shiny) end -- shiny added by stahl
       return entry
     end
     P.frontSprite = P.frontPic
@@ -2213,11 +2217,11 @@ local function wrapPics(P)
       local path = sp and (tonumber(form) or 0) == 0 and spriteOverrides.back[sp]
       local entry = path and centredEntry(path)
       if not entry then entry = backOrig(species, form, shiny) end
-      if sp then return hookedEntry("back", sp, form, entry) end
+      if sp then return hookedEntry("back", sp, form, entry, shiny) end -- shiny added by stahl
       return entry
     end
   end
-  wrapIcons(P)
+  wrapIcons(P, shiny) -- shiny added by stahl
 end
 
 local function seed(P)
