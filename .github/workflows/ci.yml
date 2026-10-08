@@ -135,7 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: install luajit
-        run: sudo apt-get update && sudo apt-get install -y luajit
+        uses: ./.github/actions/setup-luajit
       - name: Switch offline selftest
         run: bash scripts/switch/selftest_build_switch.sh
       - name: verify_payload self-test
@@ -569,7 +569,7 @@ jobs:
       # written to Lua 5.1 semantics, so CI must run the interpreter the
       # game actually ships with or it would green-light 5.4-only syntax.
       - name: install luajit
-        run: sudo apt-get update && sudo apt-get install -y luajit
+        uses: ./.github/actions/setup-luajit
 
       - name: install Pillow
         run: python3 -m pip install --upgrade pillow
@@ -673,7 +673,7 @@ jobs:
       # the MK305 dump check key-diffs shipped tables through luajit, and
       # modkit treats a missing interpreter as a fatal MK100 -- without
       # this install the gate would fail instead of failing open
-      - run: sudo apt-get update && sudo apt-get install -y luajit
+      - uses: ./.github/actions/setup-luajit
       - run: python3 -m pip install --upgrade pillow
 
       # constraint 1, enforced automatically: a committed mod that ships
@@ -702,16 +702,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: install luacheck
-        run: |
-          set -e
-          sudo apt-get update
-          sudo apt-get install -y lua5.4 liblua5.4-dev luarocks
-          sudo luarocks install luacheck || sudo apt-get install -y lua-check
-          luacheck --version
+        uses: ./.github/actions/setup-luajit
+        with:
+          luacheck: 'true'
 
-      - name: luacheck gate (undefined globals, unreachable code)
-        run: ./scripts/lint.sh --gate
-
-      - name: luacheck full report (advisory)
-        continue-on-error: true
-        run: ./scripts/lint.sh
+      - name: luacheck (fails on undefined globals, unreachable code)
+        run: ./scripts/lint.sh --ci
