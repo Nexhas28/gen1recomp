@@ -2159,14 +2159,13 @@ local function blankIcon(vanilla)
   return hit
 end
 
-local function hookedIcon(species, mon, vanilla) -- shiny added by stahl
+local function hookedIcon(species, mon, vanilla)
   if not Runtime.wantsHook("pokemon.icon") then return vanilla end
   local path = "data/generated/gba/pokemon/icons/" .. species .. ".rgba"
   local g = live()
   local ctx = { data = g and dataProxy(g.data), species = Gen3Compat.speciesName(species),
                 gen3Species = species, mon = mon, kind = "icon", trueColor = true,
-                path = path,
-                --shiny = shiny -- shiny added by stahl
+                path = path
                }
   local hooked = Runtime.call("pokemon.icon", samePath, path, ctx)
   if hooked == nil or hooked == false then return blankIcon(vanilla) end
@@ -2182,7 +2181,7 @@ local function wrapIcons(P)
     P.icon = function(species)
       local entry = iconOrig(species)
       local sp = tonumber(species)
-      if sp and sp >= 1 then return hookedIcon(sp, nil, entry) end -- shiny added by stahl
+      if sp and sp >= 1 then return hookedIcon(sp, nil, entry) end
       return entry
     end
   end
@@ -2190,7 +2189,7 @@ local function wrapIcons(P)
     P.monIcon = function(mon)
       local sp = tonumber(P.monPicSpecies(mon))
       local entry = iconOrig(sp)
-      if sp and sp >= 1 then return hookedIcon(sp, mon, entry) end -- shiny added by stahl
+      if sp and sp >= 1 then return hookedIcon(sp, mon, entry) end
       return entry
     end
   end
