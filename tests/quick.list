@@ -1,4 +1,5 @@
 tests/emerald_tent_save_reload_2638_test.lua
+tests/emerald_matt_2748_test.lua
 tests/engine/advanced_palette_map.lua
 tests/engine/amnesia_rest_share_anim_bug1881.lua
 tests/engine/android_asymmetric_display.lua
