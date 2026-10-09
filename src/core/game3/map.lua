@@ -726,14 +726,14 @@ function Map.load(mod, game, mapId, opts)
     -- pokeemerald/src/overworld.c:801
     require("src.core.game3.rse.rematch").tryUpdateRandomTrainerRematchesForMap(session, mapId)
   end
-  -- pokeemerald/src/overworld.c:802
-  if session and require("src.core.game3.rtc").enabled(session) then
-    require("src.core.game3.time_events").run(session)
-  end
   if opts.keepScript and Space and Space.retarget then
     Space.retarget(mod or Runtime._mod, mapId, game, world)
   elseif Space and Space.activate then
     Space.activate(mod or Runtime._mod, mapId, game, world)
+  end
+  -- pokeemerald/src/overworld.c:802
+  if session and require("src.core.game3.rtc").enabled(session) then
+    require("src.core.game3.time_events").run(session)
   end
 
   -- pokefirered/src/overworld.c:805
