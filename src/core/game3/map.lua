@@ -498,6 +498,9 @@ function Map.load(mod, game, mapId, opts)
     -- pokeemerald/src/overworld.c:2170
     local CamObj = package.loaded["src.core.game3.camera_object"]
     if CamObj and CamObj.reset then CamObj.reset() end
+    -- pokeemerald/src/field_player_avatar.c:883
+    local FieldFx = package.loaded["src.core.game3.field_effects"]
+    if FieldFx and FieldFx.resetSurfBob then FieldFx.resetSurfBob() end
   end
   -- pret RestartWildEncounterImmunitySteps on LoadMap / LoadMapFromWarp: every
   -- map entry restarts the wild encounter grace period. Unconditional, so the

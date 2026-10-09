@@ -1681,6 +1681,12 @@ function FieldEffects.stepSurfBob()
   SurfBob.tick(b, state)
 end
 
+-- pokeemerald/src/field_player_avatar.c:883
+function FieldEffects.resetSurfBob()
+  FieldEffects._surfBob = nil
+  FieldEffects._underwaterBob = nil
+end
+
 function FieldEffects.surfBlobY2()
   local b = FieldEffects._surfBob
   return b and b.y2 or 0
