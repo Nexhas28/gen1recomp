@@ -15,30 +15,6 @@ if os.getenv("POKEPORT_JIT") == "0" and jit and jit.off then
   print("[info] jit off")
 end
 
--- POKEPORT_JITP=<jit.p mode, e.g. Fl2 or v> samples the main Lua state
--- (dev profiling only; mods can't require jit.p).  Started when a game boots,
--- so launcher time is excluded; stopped first thing in love.quit.
--- Report goes to POKEPORT_JITP_OUT (default jitp.txt).
-local jitpActive = false
-local function jitpStart()
-  local m = os.getenv("POKEPORT_JITP")
-  if not m or m == "" or jitpActive then return end
-  -- LOVE does not bundle jit/p.lua or jit/vmdef.lua: point POKEPORT_JITP_LIB
-  -- at a LuaJIT share dir (the one that contains jit/)
-  local lib = os.getenv("POKEPORT_JITP_LIB")
-  if lib and lib ~= "" then package.path = lib .. "/?.lua;" .. package.path end
-  local ok, p = pcall(require, "jit.p")
-  if ok then
-    jitpActive = true
-    p.start(m, os.getenv("POKEPORT_JITP_OUT") or "jitp.txt")
-  else
-    print("[warn] POKEPORT_JITP: " .. tostring(p))
-  end
-end
-local function jitpStop()
-  if jitpActive then jitpActive = false; require("jit.p").stop() end
-end
-
 local SwitchDiagnostics = require("src.debug.SwitchDiagnostics")
 
 -- Global emergency quit: holding Start + Select for 5 seconds forcefully terminates LOVE.
@@ -673,7 +649,6 @@ local driverHost = {
 }
 
 function bootGame(version, cartId, opts)
-  jitpStart() -- dev profiling; after the launcher
   wrapPresent()
   opts = opts or {}
   if require("src.core.RequireGuard").repair() then
@@ -1766,7 +1741,6 @@ function love.quit()
   -- and the quit-to-launcher paths above return true and keep the run alive
   -- (scripted/bench runs never take those paths, so their summary and jit.p
   -- report still land exactly once, here).
-  jitpStop()
   FrameProfiler.finish()
   endProcessOnce()
 end
