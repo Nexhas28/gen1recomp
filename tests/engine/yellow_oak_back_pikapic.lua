@@ -115,20 +115,9 @@ T.check(extractor:find('self.symbols["ProfOakPicBack"]', 1, true) ~= nil,
   "the extractor gates Oak's back pic on the ProfOakPicBack symbol")
 requireSymbols({ "ProfOakPicBack" }, "#557")
 
--- Read the label list out of the extractor itself rather than repeating it:
--- the contract under test is that the manifest answers whatever
--- extractField asks for, so a later edit to PIKAPIC_BASE stays covered.
-local pikapicBlock = extractor:match("local PIKAPIC_BASE = {(.-)\n  }")
-T.check(pikapicBlock ~= nil, "RomExtractor's PIKAPIC_BASE table is readable")
-local pikapic, seen = {}, {}
-for label in (pikapicBlock or ""):gmatch('"([%w_]+)"') do
-  if not seen[label] then
-    seen[label] = true
-    pikapic[#pikapic + 1] = label
-  end
-end
--- 28 PikaPicAnimScripts, script 26 sharing script 11's base pic
-T.eq(#pikapic, 27, "PIKAPIC_BASE names 27 distinct base pics")
+local PikachuPicExtractor = require("src.import.PikachuPicExtractor")
+local pikapic = PikachuPicExtractor.symbolNames()
+T.eq(#pikapic, 12, "PikachuPicExtractor reads twelve pikachu tables")
 requireSymbols(pikapic, "#561")
 
 -- Red and Blue have neither pic, so neither manifest may grow one: a stray
