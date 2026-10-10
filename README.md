@@ -184,7 +184,8 @@ while a GPU stall in `present` still counts. The launcher is never profiled.
 
 `POKEPORT_JIT=0` turns the LuaJIT compiler off (prints `[info] jit off`), to
 approximate low-power devices that run Lua without it. It affects only the
-main Lua state; worker threads (music, SFX) keep their JIT.
+main Lua state; worker threads (music/SFX and the atlas/decode worker) keep
+their JIT.
 
 ## Bugs
 
