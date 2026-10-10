@@ -400,6 +400,14 @@ function BattleState.new(game, opts)
   -- the ball cannot fail and nothing it catches is kept.  Set only by
   -- World:startCatchTutorial; src/core/gen2/CatchTutorial.lua has the rest.
   self.tutorial = opts.tutorial and true or nil
+  -- pre-render both sides' cries on the SFX worker while the intro plays
+  -- (hint only; Gen 2 battle sounds besides cries are not move-keyed)
+  pcall(function()
+    local battle = self.battle
+    if not (battle and data.audio) then return end
+    require("src.core.Sound").prefetchMons(data,
+      { battle.enemy, battle.player }, { front = true })
+  end)
   self.queue = {}
   self.message = nil
   self.messageTimer = 0

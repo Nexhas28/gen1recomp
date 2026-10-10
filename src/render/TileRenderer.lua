@@ -4,6 +4,8 @@
 
 local Assets = require("src.render.Assets")
 local PaletteFX = require("src.render.PaletteFX")
+local AtlasBake = require("src.render.AtlasBake")
+local AtlasPrefetch = require("src.render.AtlasPrefetch")
 
 local TileRenderer = {}
 TileRenderer.__index = TileRenderer
@@ -165,17 +167,10 @@ end
 -- the water/flower branches did before they were data.
 -- ------------------------------------------------------------------
 
--- shade 0-3 -> one of `colors`' 4 entries (same cutoffs PaletteFX's shader
--- uses), alpha passed through unchanged; nil colors leaves r,g,b as-is.
--- Shared by the whole-atlas bake (getGbcAtlas) and the animated-tile
--- variants below, so water/flowers/spinners match the static tiles around
--- them under RED++ instead of showing their un-recolored grayscale.
-local function recolorSample(r, g, b, a, colors)
-  if not (colors and a > 0) then return r, g, b, a end
-  local col = r > 0.83 and colors[1] or r > 0.5 and colors[2]
-              or r > 0.17 and colors[3] or colors[4]
-  return col[1] / 255, col[2] / 255, col[3] / 255, a
-end
+-- shade 0-3 -> one of `colors`' 4 entries, alpha passed through; the one
+-- implementation lives in AtlasBake (pure, so the atlas worker shares it) and
+-- is used by the whole-atlas bake and the animated-tile variants below.
+local recolorSample = AtlasBake.recolorSample
 
 -- exported: a render pipeline bakes a map's palette into its own texture
 -- atlas the same way, and has to land on the identical colors as the 2D
@@ -407,59 +402,101 @@ local function gbcKeyFor(mapId)
   return "#gbc:" .. mapId .. PaletteFX.darkKey()
 end
 
+AtlasPrefetch.isFilled = function(key) return gbcAtlasCache[key] ~= nil end
+
+-- Everything the bake needs, resolved up front so AtlasBake (and the worker)
+-- never touch PaletteFX or save state: tile index -> 4-colour palette or
+-- false, plus the duplicate-tile alias copies.
+local function bakeInputs(groupColors, tilesetId, mapId, total)
+  local tileColors = {}
+  for t = 0, total - 1 do
+    local group = PaletteFX.worldGroupAt(tilesetId, mapId, t)
+    tileColors[t] = (group and groupColors[group + 1]) or false
+  end
+  -- duplicate-tile aliases: bake a copy of a shared tile graphic into
+  -- a spare slot under a different palette group, so block cells that
+  -- draw the alias can color apart from cells sharing the raw tile
+  local aliases = {}
+  for _, al in ipairs(PaletteFX.TILE_ALIASES and PaletteFX.TILE_ALIASES[mapId] or {}) do
+    if al.alias < total then
+      aliases[#aliases + 1] = { tile = al.tile, alias = al.alias,
+                                colors = groupColors[al.group + 1] }
+    end
+  end
+  return tileColors, aliases
+end
+
 local function getGbcAtlas(imagePath, tilesetId, mapId, perRow, data)
   local key = imagePath .. gbcKeyFor(mapId)
   if gbcAtlasCache[key] ~= nil then return gbcAtlasCache[key] or nil end
   local img = false
   if love.image and love.image.newImageData then
-    local groupColors = PaletteFX.worldGroupColors(data, tilesetId, mapId, nil)
-    if groupColors then
-      local src = Assets.imageData(imagePath)
-      local iw, ih = src:getDimensions()
-      local total = (iw / 8) * (ih / 8)
-      local out = love.image.newImageData(iw, ih)
-      local tileColors = {}
-      for t = 0, total - 1 do
-        local colors = tileColors[t]
-        if colors == nil then
-          local group = PaletteFX.worldGroupAt(tilesetId, mapId, t)
-          colors = (group and groupColors[group + 1]) or false
-          tileColors[t] = colors
-        end
-        local ox, oy = (t % perRow) * 8, math.floor(t / perRow) * 8
-        for py = 0, 7 do
-          for px = 0, 7 do
-            local sx, sy = ox + px, oy + py
-            local r, g, b, a = src:getPixel(sx, sy)
-            r, g, b, a = recolorSample(r, g, b, a, colors)
-            out:setPixel(sx, sy, r, g, b, a)
-          end
-        end
+    -- finished off-thread (AtlasPrefetch): only the GPU upload is left
+    local baked = AtlasPrefetch.take(key)
+    if baked then
+      img = love.graphics.newImage(baked)
+    else
+      local groupColors = PaletteFX.worldGroupColors(data, tilesetId, mapId, nil)
+      if groupColors then
+        local src = Assets.imageData(imagePath)
+        local iw, ih = src:getDimensions()
+        local out = love.image.newImageData(iw, ih)
+        local tileColors, aliases = bakeInputs(groupColors, tilesetId, mapId,
+                                               (iw / 8) * (ih / 8))
+        AtlasBake.bake(src, out, perRow, tileColors, aliases)
+        img = love.graphics.newImage(out)
       end
-      -- duplicate-tile aliases: bake a copy of a shared tile graphic into
-      -- a spare slot under a different palette group, so block cells that
-      -- draw the alias can color apart from cells sharing the raw tile
-      for _, al in ipairs(PaletteFX.TILE_ALIASES and PaletteFX.TILE_ALIASES[mapId] or {}) do
-        if al.alias < total then
-          local colors = groupColors[al.group + 1]
-          local sxo = (al.tile % perRow) * 8
-          local syo = math.floor(al.tile / perRow) * 8
-          local dxo = (al.alias % perRow) * 8
-          local dyo = math.floor(al.alias / perRow) * 8
-          for py = 0, 7 do
-            for px = 0, 7 do
-              local r, g, b, a = src:getPixel(sxo + px, syo + py)
-              r, g, b, a = recolorSample(r, g, b, a, colors)
-              out:setPixel(dxo + px, dyo + py, r, g, b, a)
-            end
-          end
-        end
-      end
-      img = love.graphics.newImage(out)
     end
   end
   gbcAtlasCache[key] = img
+  AtlasPrefetch.forget(key) -- a queued or late bake for this slot is moot
   return img or nil
+end
+
+TileRenderer._getGbcAtlas = getGbcAtlas -- tests
+
+-- Ask the worker to bake a map's RED++ atlas ahead of its first build.  No-op
+-- unless RED++ is active, the map has a world tileset, and nothing already
+-- holds / is making that key.  front: ahead of queued hints (a warp target).
+function TileRenderer.prefetchAtlas(data, mapId, front)
+  if not (data and PaletteFX.usesGbcPack()) then return false end
+  local def = data.maps and data.maps[mapId]
+  local ts = def and data.tilesets and data.tilesets[def.tileset]
+  if not (ts and ts.image and ts.id and PaletteFX.hasWorldTileset(ts.id)) then
+    return false
+  end
+  local imagePath, perRow = ts.image, ts.tilesPerRow
+  local key = imagePath .. gbcKeyFor(mapId)
+  if gbcAtlasCache[key] ~= nil or AtlasPrefetch.known(key) then return false end
+  local dark = PaletteFX.darkKey()
+  return AtlasPrefetch.request(key, function()
+    -- the dark shift is baked into the colours: a request made under another
+    -- shift would land under the wrong key
+    if gbcAtlasCache[key] ~= nil or PaletteFX.darkKey() ~= dark then return nil end
+    local groupColors = PaletteFX.worldGroupColors(data, ts.id, mapId, nil)
+    if not groupColors then return nil end
+    -- size from the PNG header and let the worker decode the file itself, so
+    -- no tileset decode runs on the main thread; anything else decodes here
+    local resolved = Assets.resolve(imagePath)
+    local workerPath = Assets.workerPath(resolved) -- NX overlay: what main would open
+    local iw, ih = Assets.pngSize(workerPath)
+    local src
+    if iw and Assets.prefetchable(resolved) then
+      -- a decode the worker already finished (the tileset decode hint, or an
+      -- earlier map on this tileset) is sent along; the worker only reads it
+      src = AtlasPrefetch.peekDecoded(resolved)
+      if src then iw, ih = src:getDimensions() end
+      workerPath = (not src) and workerPath or nil
+    else
+      src = AtlasPrefetch.source(imagePath, Assets.imageData)
+      iw, ih = src:getDimensions()
+      workerPath = nil
+    end
+    local tileColors, aliases = bakeInputs(groupColors, ts.id, mapId,
+                                           (iw / 8) * (ih / 8))
+    return { src = src, srcPath = workerPath, perRow = perRow,
+             tileColors = tileColors, aliases = aliases }
+  end, front)
 end
 
 -- data: Game.data (threaded through explicitly, not required lazily, so
@@ -944,6 +981,7 @@ end
 -- instances keep the batches they already built; MapLoader.invalidateAll
 -- is what drops those (14 §cache-invalidation contract).
 function TileRenderer.invalidate()
+  AtlasPrefetch.bump()
   imageCache = {}
   shiftVariants = {}
   frameImages = {}

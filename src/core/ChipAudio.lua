@@ -13,8 +13,12 @@
 -- to start, music falls back to the original synchronous, amortized queue fill
 -- so behavior is unchanged -- see the `threaded` branch in each entry point.
 --
--- SFX and cries stay synchronous: they are short one-shots rendered once into
--- a static Source, not a per-frame streaming cost.
+-- SFX and cries are short one-shots rendered once into a static Source.  Their
+-- render stays synchronous here (newSfx/newCry) and is the always-correct
+-- fallback; Sound.prefetch* pre-renders them on a SEPARATE worker
+-- (src/core/sfx_worker.lua) so a long render can never starve music buffers.
+-- The argument builders below (sfxRenderArgs/cryRenderArgs) are shared by both
+-- paths so the worker's output is identical to the synchronous render.
 
 local Assets = require("src.render.Assets")
 local ChipSynth = require("src.core.ChipSynth")
@@ -246,7 +250,16 @@ function ChipAudio.playMusic(data, header, allowLoops)
   return source
 end
 
+-- Anything that changes how an SFX/cry renders (rate, pan, channel mix) makes
+-- an in-flight Sound prefetch stale.  Sound is reached through package.loaded
+-- (it requires this module lazily); it only re-renders, never evicts.
+local function bumpSfxEpoch()
+  local Sound = package.loaded["src.core.Sound"]
+  if Sound and Sound.bumpRenderEpoch then Sound.bumpRenderEpoch() end
+end
+
 local function pushChannelMix()
+  bumpSfxEpoch()
   if workerReady and cmdCh then
     cmdCh:push({ cmd = "channelMix",
                  volumes = ChipSynth.getChannelVolumes(),
@@ -504,6 +517,7 @@ function ChipAudio.setStereo(enabled)
   if ChipSynth.getStereo() == enabled then return end
   ChipSynth.setStereo(enabled)
   stereoEpoch = stereoEpoch + 1
+  bumpSfxEpoch()
   local m = currentMusic
   if m and m.engine then
     ChipSynth.applyStereo(m.engine)
@@ -563,6 +577,7 @@ end
 function ChipAudio.setSampleRate(rate)
   local before = sampleRate()
   if ChipSynth.setSampleRate(rate) == before then return false end
+  bumpSfxEpoch()
   ChipAudio.stopMusic()
   return true
 end
@@ -634,25 +649,52 @@ local function renderEffect(data, header, options)
   return love.audio.newSource(sd, "static")
 end
 
-function ChipAudio.newSfx(data, name, pitch, tempo, header, plainFrames)
+-- (header, options) for renderEffectData: the single source of truth for how
+-- an SFX renders, used by newSfx here and by Sound's worker prefetch.
+function ChipAudio.sfxRenderArgs(data, name, pitch, tempo, header, plainFrames)
   header = header or data.audio.sfx[name]
-  return renderEffect(data, header, {
+  return header, {
     frequencyOffset = pitch or 0,
     frameTicks = 0x80 + (tempo or 0x80),
     plainFrames = plainFrames,
-  })
+  }
+end
+
+function ChipAudio.newSfx(data, name, pitch, tempo, header, plainFrames)
+  local h, options = ChipAudio.sfxRenderArgs(
+    data, name, pitch, tempo, header, plainFrames)
+  return renderEffect(data, h, options)
 end
 
 -- `resolved` is a {header|chip, pitch, length} def the caller already worked
 -- out -- a derived cry borrowing another species' header with its own
 -- modifiers, which no registry lookup under `species` could find
-function ChipAudio.newCry(data, species, resolved)
+function ChipAudio.cryRenderArgs(data, species, resolved)
   local cry = resolved or (data.audio.cries and data.audio.cries[species])
   if not cry then return nil end
-  return renderEffect(data, cry.chip and cry or cry.header, {
+  return cry.chip and cry or cry.header, {
     frequencyOffset = cry.pitch,
     cryLength = cry.length,
-  })
+  }
+end
+
+function ChipAudio.newCry(data, species, resolved)
+  local header, options = ChipAudio.cryRenderArgs(data, species, resolved)
+  if not options then return nil end
+  return renderEffect(data, header, options)
+end
+
+-- Everything the SFX worker needs to render like this thread does: the slim
+-- audio tables plus the live rate / mix / pan (the worker's ChipSynth starts
+-- at env defaults, not what applyOptions picked).
+function ChipAudio.effectWorkerConfig(data)
+  return {
+    audio = slimAudio(data),
+    sampleRate = sampleRate(),
+    volumes = ChipSynth.getChannelVolumes(),
+    pitches = ChipSynth.getChannelPitches(),
+    stereo = ChipSynth.getStereo(),
+  }
 end
 
 -- Two channels for the same reason ChipSynth.renderEffectData renders stereo:

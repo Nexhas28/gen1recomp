@@ -13,6 +13,37 @@ if POKEPORT_DISPLAY_COMPANION then
     POKEPORT_DISPLAY_COMPANION)
 end
 
+-- POKEPORT_JIT=0 runs without the LuaJIT compiler, approximating devices that
+-- only have an interpreter (see README "Measuring frame time").
+if os.getenv("POKEPORT_JIT") == "0" and jit and jit.off then
+  jit.off()
+  print("[info] jit off")
+end
+
+-- POKEPORT_JITP=<jit.p mode, e.g. Fl2 or v> samples the main Lua state
+-- (dev profiling only; mods can't require jit.p).  Started when a game boots,
+-- so launcher time is excluded; stopped first thing in love.quit.
+-- Report goes to POKEPORT_JITP_OUT (default jitp.txt).
+local jitpActive = false
+local function jitpStart()
+  local m = os.getenv("POKEPORT_JITP")
+  if not m or m == "" or jitpActive then return end
+  -- LOVE does not bundle jit/p.lua or jit/vmdef.lua: point POKEPORT_JITP_LIB
+  -- at a LuaJIT share dir (the one that contains jit/)
+  local lib = os.getenv("POKEPORT_JITP_LIB")
+  if lib and lib ~= "" then package.path = lib .. "/?.lua;" .. package.path end
+  local ok, p = pcall(require, "jit.p")
+  if ok then
+    jitpActive = true
+    p.start(m, os.getenv("POKEPORT_JITP_OUT") or "jitp.txt")
+  else
+    print("[warn] POKEPORT_JITP: " .. tostring(p))
+  end
+end
+local function jitpStop()
+  if jitpActive then jitpActive = false; require("jit.p").stop() end
+end
+
 local editorMode = os.getenv("POKEPORT_EDITOR") == "1" or POKEPORT_EDITOR_MODE == true
 
 local SwitchDiagnostics = require("src.debug.SwitchDiagnostics")
@@ -132,6 +163,28 @@ do
 end
 
 local Game, EditorApp, Importer, TouchEditor, Studio, Prelaunch
+local FrameProfiler = require("src.core.FrameProfiler")
+-- Short label for a frame-time spike: top state's screenId/name plus map id.
+FrameProfiler.context = function()
+  if not Game then return nil end
+  local parts = {}
+  local ok, top = pcall(function() return Game.stack and Game.stack:top() end)
+  if ok and type(top) == "table" then
+    local label = top.screenId or top.name
+      or (top == Game.overworld and "overworld" or nil)
+    if not label then
+      local mt = getmetatable(top)
+      label = mt and (mt.screenId or mt.name)
+    end
+    parts[#parts + 1] = tostring(label or "state")
+  end
+  local ok2, mapId = pcall(function()
+    local ow = Game.overworld or Game.world
+    return ow and ow.map and ow.map.id
+  end)
+  if ok2 and mapId then parts[#parts + 1] = "map=" .. tostring(mapId) end
+  return table.concat(parts, " ")
+end
 
 -- #887: quit-to-launcher state, shared by love.load and love.quit (both need
 -- it, so it is declared here rather than next to love.quit).
@@ -464,6 +517,7 @@ end
 local pendingLauncherReturn
 
 function bootGame(version, cartId, opts)
+  jitpStart() -- dev profiling; after the launcher
   opts = opts or {}
   if require("src.core.RequireGuard").repair() then
     print("boot: restored love.filesystem searcher (see #2001)")
@@ -824,7 +878,9 @@ function love.update(dt)
   end
   if driverCo then
     for _ = 1, iterations do
+      FrameProfiler.push("driver")
       local ok, err = coroutine.resume(driverCo, Game)
+      FrameProfiler.pop("driver")
       if not ok then
         print("driver error: " .. tostring(err))
         love.event.quit(1)
@@ -897,6 +953,7 @@ function love.draw()
       end
     end)
   end
+  FrameProfiler.draw()
   HostDisplay.endFrame("game", Game)
 end
 
@@ -907,6 +964,7 @@ function love.keypressed(key, scancode, isrepeat)
   if Prelaunch then return Prelaunch:cancel() end
   if Importer then return Importer:keypressed(key) end
   if not Game then return end
+  if key == "f3" then return FrameProfiler.toggle() end
   Game:keypressed(key)
 end
 
@@ -1349,6 +1407,8 @@ end
 local quitToLauncher = false
 
 function love.quit()
+  jitpStop()
+  FrameProfiler.finish()
   if editorMode and EditorApp.quit then
     -- true blocks the quit (unsaved-changes prompt).  A quit that proceeds
     -- must fall through to the worker shutdowns below instead of returning:
@@ -1366,7 +1426,7 @@ function love.quit()
   -- path import) keep the plain exit so they terminate as before.  Nothing
   -- is saved here on purpose: a window close never wrote the save, and the
   -- restart path must be no worse than that, not quietly better.
-  local scripted = os.getenv("POKEPORT_AUTOPILOT") or os.getenv("POKEPORT_DRIVER")
+  local scripted = os.getenv("POKEPORT_AUTOPILOT") or os.getenv("POKEPORT_DRIVER") or os.getenv("POKEPORT_GAME_PROF")
     or os.getenv("POKEPORT_IMPORT_ONLY") == "1" or os.getenv("POKEPORT_IMPORT_ROM")
   -- #887: a shortcut session (--game / POKEPORT_GAME) has no launcher to go
   -- back to and the restart would re-read the shortcut, so it exits instead.
@@ -1521,8 +1581,14 @@ function love.run()
 
     checkEmergencyQuit(dt)
 
+    -- frame profiler: records only while a game (not the launcher/editors) runs
+    FrameProfiler.beginFrame(Game ~= nil and not (Importer or editorMode
+      or Studio or TouchEditor or Prelaunch))
+
     -- call update and draw
+    FrameProfiler.push("update")
     if love.update then love.update(dt) end
+    FrameProfiler.pop("update")
 
     local visible = not (love.window and love.window.isVisible)
       or love.window.isVisible()
@@ -1550,13 +1616,21 @@ function love.run()
     if visible and love.graphics and love.graphics.isActive() then
       love.graphics.origin()
       love.graphics.clear(love.graphics.getBackgroundColor())
+      FrameProfiler.push("draw")
       if love.draw then love.draw() end
+      FrameProfiler.pop("draw")
+      FrameProfiler.sampleGfx()
+      FrameProfiler.push("present")
       PresentSync.waitBeforePresent()
       love.graphics.present()
+      FrameProfiler.pop("present")
       PresentSync.notePresent()
     end
 
     PresentSync.applyFixedStepPeriod()
+
+    -- before the pacing sleep, so the frame total is work time only
+    FrameProfiler.endFrame()
 
     if love.timer then
       if paced and cap ~= FrameCap.DISPLAY and not PresentSync.hardwarePacesCap(cap) then
