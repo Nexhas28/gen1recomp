@@ -132,13 +132,22 @@ local function pose(self, facing, walkPhase, stepFlip)
   return frame, flip
 end
 
+-- The image path SpriteRenderer.new loads for a sprite def (nil when the def
+-- names none).  Pure: the prefetch code asks this instead of re-deriving the
+-- path, so it cannot drift from what the constructor actually loads.
+function SpriteRenderer.imagePath(spriteDef)
+  local path = spriteDef and spriteDef.image
+  if type(path) == "string" then return path end
+  return nil
+end
+
 -- seed: any stable per-instance value (e.g. an NPC's `id`) used to resolve
 -- RED++'s per-instance "random" OBP sentinel (PaletteFX.spriteObp)
 function SpriteRenderer.new(spriteDef, seed)
   local self = setmetatable({}, SpriteRenderer)
   self.def = spriteDef
   self.seed = seed
-  self.image = getImage(spriteDef.image)
+  self.image = getImage(SpriteRenderer.imagePath(spriteDef))
   self.frameCount = positiveInteger(spriteDef.frames, 1)
   self.frameWidth = positiveInteger(spriteDef.frameWidth, DEFAULT_FRAME_WIDTH)
   self.frameHeight = positiveInteger(spriteDef.frameHeight, DEFAULT_FRAME_HEIGHT)

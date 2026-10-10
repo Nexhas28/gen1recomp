@@ -850,6 +850,8 @@ function PaletteFX.shadeMap()
 end
 
 local function invalidateColorCaches()
+  -- queued / finished background atlas bakes were made for the old colours
+  pcall(function() require("src.render.AtlasPrefetch").bump() end)
   pcall(function() require("src.battle.BattleState").invalidate() end)
   pcall(function() require("src.render.SpriteRenderer").invalidate() end)
   pcall(function()

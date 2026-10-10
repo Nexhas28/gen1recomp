@@ -766,6 +766,20 @@ function BattleState:playerPartyView()
   return self.playerParty or self.game.save.party
 end
 
+-- Ask the SFX worker to pre-render this battle's sounds NOW, while the
+-- transition animation plays, so the first cry / move sound is a cache hit
+-- instead of a main-thread synthesis.  Purely a hint: it never throws and
+-- changes nothing if there is no worker (Sound.prefetch*).
+local function prefetchBattleAudio(self, enemyMons)
+  pcall(function()
+    local Sound = require("src.core.Sound")
+    if Sound.prefetchBattle then
+      Sound.prefetchBattle(self.data, self:playerPartyView(), enemyMons,
+        self.enemy and self.enemy.mon, self.player and self.player.mon)
+    end
+  end)
+end
+
 -- opts.hooked: rod encounter, announced with _HookedMonAttackedText
 function BattleState.newWild(game, species, level, opts)
   local self = newBattle(game)
@@ -784,6 +798,7 @@ function BattleState.newWild(game, species, level, opts)
   else
     self.introText = self:romText("_WildMonAppearedText", "Wild %s\nappeared!", self.enemy.name)
   end
+  prefetchBattleAudio(self, { self.enemy.mon })
   return self
 end
 
@@ -917,6 +932,7 @@ function BattleState.newTrainer(game, oppClass, partyIndex, opts)
   self.trainerPic = BattleState.trainerSprite(
     game.data, self.trainer, oppClass, partyIndex)
   self.introText = Strings("%s wants\nto fight!", self.trainer.name)
+  prefetchBattleAudio(self, self.enemyParty)
   return self
 end
 

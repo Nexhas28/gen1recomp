@@ -2,6 +2,7 @@
 -- and save state.  Everything else reaches shared services through here.
 
 local Data = require("src.core.Data")
+local FrameProfiler = require("src.core.FrameProfiler")
 local FixedStep = require("src.core.FixedStep")
 local Input = require("src.core.Input")
 local Logger = require("src.core.Logger")
@@ -405,17 +406,24 @@ function Game:update(dt)
   -- or the anti-spiral clamp quietly caps every level above ~15X.
   local speed = self:logicSpeed()
   FixedStep.maxAccum = FixedStep.catchupLimit(speed)
+  FrameProfiler.push("logic")
   FixedStep:update(dt, speed)
+  FrameProfiler.pop("logic")
   -- Audio runs off real time at a fixed 60Hz regardless of game speed or
   -- display refresh, so fades and chip synthesis keep their intended tempo
   -- whether we are at 1X, 10X, or running with vsync disabled.  One-shot
   -- SFX stay at natural pitch too (#1990/#1991/#1997).
   local step = FixedStep.STEP
   self.audioAccum = math.min((self.audioAccum or 0) + dt, 0.25)
+  FrameProfiler.push("music")
   while self.audioAccum >= step do
     self.audioAccum = self.audioAccum - step
     require("src.core.Music").update(Data)
   end
+  FrameProfiler.pop("music")
+  -- finished background RED++ atlas bakes move into the ready store
+  local atlasPrefetch = package.loaded["src.render.AtlasPrefetch"]
+  if atlasPrefetch then atlasPrefetch.update() end
   -- Overworld tilt toggle tween: presentational, so it runs on the real
   -- frame dt (not the fixed logic step) for a smooth ~0.25s glide.
   require("src.render.Tilt").update(dt)
@@ -433,7 +441,11 @@ function Game:update(dt)
   -- frame (not every frame) so the stepping itself does not compete with
   -- the frame budget on weak single-core handhelds.
   self.gcStepFrame = (self.gcStepFrame or 0) + 1
-  if collectgarbage and self.gcStepFrame % 4 == 0 then collectgarbage("step", 1) end
+  if collectgarbage and self.gcStepFrame % 4 == 0 then
+    FrameProfiler.push("gc")
+    collectgarbage("step", 1)
+    FrameProfiler.pop("gc")
+  end
 end
 
 -- render.zones' identity default: unhooked, the zone list reaches the blit
@@ -1413,6 +1425,12 @@ function Game:applyOptions(opts)
   local Sound = require("src.core.Sound")
   if Music.applyOptions then Music.applyOptions(opts) end
   if Sound.applyOptions then Sound.applyOptions(opts) end
+  -- pre-render the common menu/overworld SFX and the party's cries on the SFX
+  -- worker (idempotent; no-op without a thread).  After Music.applyOptions so
+  -- a sample-rate change has already bumped the render epoch.
+  if Sound.prefetchCommon then
+    pcall(Sound.prefetchCommon, self.data, self.save and self.save.party)
+  end
   require("src.render.PaletteFX").applyOptions(opts)
   require("src.render.Tilt").applyOptions(opts)
   require("src.render.Letterbox").applyOptions(opts)
