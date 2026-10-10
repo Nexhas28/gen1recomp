@@ -105,6 +105,8 @@ local CALLERS = {
 }
 
 local cells, fastTaken = 0, 0
+local hitCount = 0
+local function onHit() hitCount = hitCount + 1 end
 for _, generation in ipairs({ 1, 2, 3 }) do
   for _, dev in ipairs({ false, true }) do
     local run = T.sdk.loadMods({ "mods/fp_plain", "mods/fp_net" },
@@ -120,10 +122,11 @@ for _, generation in ipairs({ 1, 2, 3 }) do
           Loader._setFastRequire(false)
           local slow = outcome(caller.chunk, name, owner)
           if thrower then armThrower(); pcall(require, name) end
-          Loader._setFastRequire(true)
-          local hitsBefore = Loader._fastRequireHits()
+          Loader._setFastRequire(true, onHit)
+          local hitsBefore = hitCount
           local fast = outcome(caller.chunk, name, owner)
-          if Loader._fastRequireHits() > hitsBefore then
+          Loader._setFastRequire(true)
+          if hitCount > hitsBefore then
             fastTaken = fastTaken + 1
             T.check(not owner.current and not owner.require and fast.ok,
               label .. ": fast return only for a clean no-owner success")

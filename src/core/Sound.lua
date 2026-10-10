@@ -7,6 +7,7 @@
 
 local Assets = require("src.render.Assets")
 local Logger = require("src.core.Logger")
+local WorkerLane = require("src.core.WorkerLane")
 local Runtime = require("src.mods.Runtime")
 local bit = require("bit")
 
@@ -927,72 +928,40 @@ end
 -- Without love.thread, with POKEPORT_NO_THREAD=1, or if the worker fails to
 -- start, every prefetch* is a no-op and nothing changes.
 --
--- Queueing lives on this side (a Channel cannot reorder or drop): at most
--- PREFETCH_INFLIGHT requests sit in the worker at once, so a front-of-queue
--- request overtakes everything not yet sent.
+-- Worker, queues, epoch and shutdown come from src/core/WorkerLane.lua: at
+-- most one lane's in-flight budget of requests sits in the worker at once, so
+-- a front-of-queue request overtakes everything not yet sent.
 -- ---------------------------------------------------------------------------
 local PREFETCH_DRAIN_CAP = 4  -- Sources built per Sound.update
-local PREFETCH_INFLIGHT = 2   -- requests handed to the worker at a time
 
-local renderEpoch = 0         -- bumps whenever a finished render may be stale
-local pqHigh, pqLow = {}, {}  -- queued entries, not yet sent
-local pqByKey = {}            -- key -> entry, for dedupe / promotion
-local inflight = {}           -- key -> entry sent to the worker
-local inflightCount = 0
 local badKeys = {}            -- keys that failed to render this epoch
 local audioRef                -- data.audio the queue was built from
-local noThreadEnv = os.getenv("POKEPORT_NO_THREAD")
-local fxWorker, fxCmd, fxOut
-local fxState                 -- nil = untried, true = running, false = off
 local sentEpoch, sentAudio    -- what the worker was last configured with
 
-local function ensureFxWorker()
-  if fxState ~= nil then return fxState end
-  fxState = false
-  if noThreadEnv == "1" then return false end
-  if not (love.thread and love.thread.newThread and love.thread.getChannel
-      and love.audio and love.audio.newSource) then
-    return false
-  end
-  local ok, thread = pcall(love.thread.newThread, "src/core/sfx_worker.lua")
-  if not ok or not thread then return false end
-  fxCmd = love.thread.getChannel("sfx_cmd")
-  fxOut = love.thread.getChannel("sfx_out")
-  -- channels are process-global: drop anything a previous run left behind
-  pcall(fxCmd.clear, fxCmd)
-  pcall(fxOut.clear, fxOut)
-  if not pcall(function() thread:start() end) then return false end
-  fxWorker = thread
-  sentEpoch, sentAudio = nil, nil
-  fxState = true
-  return true
-end
-
-local function clearQueues()
-  pqHigh, pqLow, pqByKey = {}, {}, {}
-  inflight, inflightCount = {}, 0
-end
+-- A separate thread from the music worker (chip_worker): a long effect render
+-- must never delay music buffers.
+local fxWorker = WorkerLane.newWorker({
+  name = "sfx", script = "src/core/sfx_worker.lua",
+  cmd = "sfx_cmd", out = "sfx_out",
+  capable = function() return love.audio and love.audio.newSource end,
+  onStop = function()
+    sentEpoch, sentAudio, audioRef = nil, nil, nil
+    badKeys = {}
+  end,
+})
+local fxLane = fxWorker:newLane({ inflight = 2 })
 
 -- A render finished (or still running) for the old epoch is discarded when it
 -- arrives.  requeue: keep the not-yet-delivered requests and send them again
 -- under the new epoch (a mix/rate change); otherwise drop every hint (the
 -- cache was invalidated, so the hints may name defs that no longer exist).
 local function bumpEpoch(requeue)
-  renderEpoch = renderEpoch + 1
   badKeys = {}
-  -- renders still waiting in the worker's inbox are obsolete; sentEpoch is
-  -- invalidated so the next request re-sends config before any render
-  if fxCmd then pcall(fxCmd.clear, fxCmd) end
+  -- renders still waiting in the worker's inbox are obsolete (Lane:bump
+  -- clears it); sentEpoch is invalidated so the next request re-sends config
+  -- before any render
   sentEpoch = nil
-  if requeue then
-    for key, entry in pairs(inflight) do
-      table.insert(pqHigh, 1, entry)
-      pqByKey[key] = entry
-    end
-    inflight, inflightCount = {}, 0
-  else
-    clearQueues()
-  end
+  fxLane:bump(requeue)
 end
 
 -- ChipAudio calls this when the sample rate, pan or channel mix changes: audio
@@ -1002,45 +971,33 @@ function Sound.bumpRenderEpoch()
   bumpEpoch(true)
 end
 
-function Sound.renderEpoch() return renderEpoch end
+function Sound.renderEpoch() return fxLane.epoch end
 
-local function failWorker(reason)
-  if reason then Logger.warn("sfx worker off: %s", tostring(reason)) end
-  if fxCmd then pcall(fxCmd.push, fxCmd, { cmd = "quit" }) end
-  fxState = false
-  fxWorker, fxCmd, fxOut = nil, nil, nil
-  clearQueues()
+local function sendRender(entry)
+  if cache[entry.key] ~= nil then return false end -- a sync play filled it
+  local epoch = fxLane.epoch
+  if sentEpoch ~= epoch or sentAudio ~= entry.audio then
+    local config = require("src.core.ChipAudio").effectWorkerConfig(entry.data)
+    config.cmd, config.epoch = "config", epoch
+    if not fxWorker:push(config) then
+      fxWorker:fail("config not transferable")
+      return false
+    end
+    sentEpoch, sentAudio = epoch, entry.audio
+  end
+  if fxWorker:push({
+    cmd = "render", epoch = epoch, key = entry.key,
+    header = entry.header, options = entry.options,
+  }) then
+    return true
+  end
+  badKeys[entry.key] = true -- e.g. a def carrying a function
+  return false
 end
 
--- Hand queued entries to the worker, keeping PREFETCH_INFLIGHT outstanding.
+-- Hand queued entries to the worker, keeping the in-flight budget full.
 local function pump()
-  if not fxState then return end
-  while inflightCount < PREFETCH_INFLIGHT do
-    local entry = table.remove(pqHigh, 1) or table.remove(pqLow, 1)
-    if not entry then return end
-    pqByKey[entry.key] = nil
-    if cache[entry.key] == nil then -- a sync play may have filled it meanwhile
-      if sentEpoch ~= renderEpoch or sentAudio ~= entry.audio then
-        local config = require("src.core.ChipAudio").effectWorkerConfig(
-          entry.data)
-        config.cmd, config.epoch = "config", renderEpoch
-        if not pcall(fxCmd.push, fxCmd, config) then
-          return failWorker("config not transferable")
-        end
-        sentEpoch, sentAudio = renderEpoch, entry.audio
-      end
-      local sent = pcall(fxCmd.push, fxCmd, {
-        cmd = "render", epoch = renderEpoch, key = entry.key,
-        header = entry.header, options = entry.options,
-      })
-      if sent then
-        inflight[entry.key] = entry
-        inflightCount = inflightCount + 1
-      else
-        badKeys[entry.key] = true -- e.g. a def carrying a function
-      end
-    end
-  end
+  fxLane:pump(sendRender)
 end
 
 -- A top-level metatable is dropped when a table crosses the channel, so copy
@@ -1057,25 +1014,15 @@ end
 -- header/options come from ChipAudio's shared builders, so the worker renders
 -- with exactly the arguments the synchronous path would use.
 local function enqueue(data, key, header, options, front)
-  if not (love.audio and ensureFxWorker()) then return false end
+  if not (love.audio and fxWorker:ensure()) then return false end
   if cache[key] ~= nil or badKeys[key] then return false end
-  if inflight[key] then return true end
+  if fxLane.inflight[key] then return true end
   local audio = data.audio
   if audioRef and audioRef ~= audio then bumpEpoch(false) end -- other dataset
   audioRef = audio
-  local entry = pqByKey[key]
-  if entry then
-    if front then -- promote a low-priority hint
-      for i, e in ipairs(pqLow) do
-        if e == entry then table.remove(pqLow, i) table.insert(pqHigh, entry) break end
-      end
-    end
-    return true
-  end
-  entry = { key = key, header = plainDef(header), options = options,
-            data = data, audio = audio }
-  pqByKey[key] = entry
-  table.insert(front and pqHigh or pqLow, entry)
+  if fxLane:promote(key, front) then return true end -- queued: maybe promoted
+  fxLane:push(key, { header = plainDef(header), options = options,
+                     data = data, audio = audio }, front)
   pump()
   return true
 end
@@ -1094,7 +1041,16 @@ function Sound.prefetchSfx(data, name, opts)
 end
 
 -- Pre-render a move sound (anim = { sound, pitch, tempo }).  Only the
--- unmodified-by-channel-overlap key (plain == 0) can be known ahead of time.
+-- unmodified-by-channel-overlap key (plain == 0) can be known ahead of time:
+-- plainMoveFrames depends on OTHER move sounds still playing on software
+-- channels 5/8 when the play call happens (moveSfxChannels), and then `plain`
+-- is their remaining frame count -- a timing-dependent number, a different
+-- '~N' key (and render) on nearly every overlap.  Not on the battle song, so
+-- there is nothing to compute once the music is known.  Measured over real
+-- battles (6 wild fights): 81 move plays, 8 sync renders, 6 of them '~N'
+-- overlaps (N = 3..20 frames), 2 plain keys the worker had not delivered yet.
+-- Overlaps are the minority, so prefetching the plain key is kept; the '~N'
+-- variants cannot be predicted and are left to the sync path.
 function Sound.prefetchMove(data, anim, opts)
   if not anim or not anim.sound then return false end
   local sfx = data and data.audio and data.audio.sfx
@@ -1183,8 +1139,7 @@ end
 function Sound.prefetchBattle(data, playerParty, enemyParty, enemyLead,
                               playerLead)
   -- an earlier battle's leftovers must not delay this one's leads
-  for _, entry in ipairs(pqLow) do pqHigh[#pqHigh + 1] = entry end
-  pqLow, pqHigh = pqHigh, {}
+  fxLane:demoteAll()
   local front = { front = true }
   local movesToo = { front = true, moves = true }
   local leads = {}
@@ -1206,74 +1161,53 @@ end
 
 -- nothing queued, nothing out at the worker (always true without a thread)
 function Sound.prefetchIdle()
-  if not fxState then return true end
-  return inflightCount == 0 and next(pqByKey) == nil
+  if not fxWorker.state then return true end
+  return fxLane:idle()
 end
 
 -- test/debug: how many requests are waiting or at the worker
 function Sound.prefetchPending()
-  local queued = 0
-  for _ in pairs(pqByKey) do queued = queued + 1 end
-  return queued, inflightCount
+  return fxLane:pending()
 end
 
 -- Per-frame drain, called from Music.update (both Game and Game2 tick it at
 -- 60 Hz).  Fills EMPTY cache slots only.
 function Sound.update()
-  if not fxState then return end
+  if not fxWorker.state then return end
   if deviceSuspended() then return end
-  if fxWorker then
-    local err = fxWorker:getError()
-    if err then return failWorker(err) end
-  end
-  local built = 0
-  while built < PREFETCH_DRAIN_CAP do
-    local result = fxOut:pop()
-    if not result then break end
-    if result.fatal then return failWorker(result.fatal) end
+  local drained = fxWorker:drain(PREFETCH_DRAIN_CAP, function(result)
     local key = result.key
-    local entry = inflight[key]
     -- a result is current only if it answers the request still in flight
     -- under this epoch; anything else (invalidated, superseded) is dropped
-    if entry and result.epoch == renderEpoch then
-      inflight[key] = nil
-      inflightCount = inflightCount - 1
-      if result.sd and cache[key] == nil then
-        local ok, src = pcall(love.audio.newSource, result.sd, "static")
-        if ok and src then
-          pcall(src.setVolume, src, volumeFor(key))
-          cache[key] = src
-          built = built + 1
-        end
-      elseif not result.sd then
-        badKeys[key] = true -- the sync path will reproduce and log it
+    if not fxLane:complete(key, result.epoch) then return false end
+    if result.sd and cache[key] == nil then
+      local ok, src = pcall(love.audio.newSource, result.sd, "static")
+      if ok and src then
+        pcall(src.setVolume, src, volumeFor(key))
+        cache[key] = src
+        return true -- only Sources actually built count against the cap
       end
+    elseif not result.sd then
+      badKeys[key] = true -- the sync path will reproduce and log it
     end
-  end
-  pump()
+    return false
+  end)
+  if drained then pump() end
 end
 
 -- End the worker thread (LOVE waits for live threads at exit).  Safe to call
--- repeatedly; the next prefetch starts a fresh worker.
+-- repeatedly; the next prefetch starts a fresh worker.  (Also registered with
+-- SessionLifecycle by WorkerLane.)
 function Sound.shutdown()
-  if fxState and fxCmd then
-    pcall(fxCmd.clear, fxCmd) -- do not make quit wait behind queued renders
-    pcall(fxCmd.push, fxCmd, { cmd = "quit" })
-  end
-  if fxWorker then pcall(function() fxWorker:wait() end) end
-  fxWorker, fxCmd, fxOut = nil, nil, nil
-  fxState = nil
-  sentEpoch, sentAudio, audioRef = nil, nil, nil
-  clearQueues()
-  badKeys = {}
+  fxWorker:shutdown()
 end
 
 function Sound._setNoThreadEnvForTest(value)
-  noThreadEnv = value
+  fxWorker.noThread = value
 end
 
 function Sound._setPrefetchLimitsForTest(inflightMax, drainCap)
-  PREFETCH_INFLIGHT = inflightMax or 2
+  fxLane.inflightMax = inflightMax or 2
   PREFETCH_DRAIN_CAP = drainCap or 4
 end
 
@@ -1313,8 +1247,6 @@ end
 -- the flush fan-out calls with no key, dropping everything, so an edited
 -- def is re-resolved on the next play (20 §2 cache contract, audio row)
 Assets.register(Sound.invalidate)
-
-require("src.core.SessionLifecycle").registerProcessShutdown(Sound.shutdown)
 
 function Sound.onDeviceReset()
   Sound.invalidate()

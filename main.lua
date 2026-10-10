@@ -964,7 +964,9 @@ function love.keypressed(key, scancode, isrepeat)
   if Prelaunch then return Prelaunch:cancel() end
   if Importer then return Importer:keypressed(key) end
   if not Game then return end
-  if key == "f3" then return FrameProfiler.toggle() end
+  if key == "f3" then
+    return FrameProfiler.keypressed(key, Game, require("src.core.Input"))
+  end
   Game:keypressed(key)
 end
 
@@ -1407,8 +1409,6 @@ end
 local quitToLauncher = false
 
 function love.quit()
-  jitpStop()
-  FrameProfiler.finish()
   if editorMode and EditorApp.quit then
     -- true blocks the quit (unsaved-changes prompt).  A quit that proceeds
     -- must fall through to the worker shutdowns below instead of returning:
@@ -1461,6 +1461,12 @@ function love.quit()
     require("src.core.HostShell").restart()
     return true -- abort this quit; the restart lands back in the launcher
   end
+  -- Only a quit that really proceeds ends the profilers: the editor prompt
+  -- and the quit-to-launcher paths above return true and keep the run alive
+  -- (scripted/bench runs never take those paths, so their summary and jit.p
+  -- report still land exactly once, here).
+  jitpStop()
+  FrameProfiler.finish()
   pcall(function()
     require("src.core.DiscordPresence").shutdown()
   end)

@@ -161,38 +161,41 @@ do
   PaletteFX.mode = "gbc"
 end
 
--- ---- outside RED++ the CPU copy is dropped once uploaded ------------------------
-do
+-- ---- the stored decode survives the upload in EVERY colour mode -------------------
+-- SpriteRenderer.getObpImage re-reads the sheet through Assets.imageData in
+-- dmgObj / ogObj / gen2Obp / gbc-pack alike.
+for _, mode in ipairs({ "gbc", "redpp" }) do
   reset()
-  PaletteFX.mode = "gbc"
+  PaletteFX.mode = mode
   Assets.prefetchImage(P, false); settle()
-  eq(AtlasPrefetch.decodedCount(), 1, "decoded and waiting")
+  eq(AtlasPrefetch.decodedCount(), 1, mode .. ": decoded and waiting")
   Assets.image(P)
-  eq(AtlasPrefetch.decodedCount(), 0, "gbc: the stored ImageData is dropped after upload")
-  check(newImageArgs[1] ~= P, "...and the upload still came from the store")
-  reset()
-  PaletteFX.mode = "redpp"
-  Assets.prefetchImage(P, false); settle()
-  Assets.image(P)
-  eq(AtlasPrefetch.decodedCount(), 1, "redpp: kept for the recolour paths")
-  PaletteFX.mode = "gbc"
+  eq(AtlasPrefetch.decodedCount(), 1, mode .. ": the stored ImageData is kept after upload")
+  check(newImageArgs[1] ~= P, mode .. ": ...and the upload came from the store")
+  local before = decodes[P]
+  Assets.imageData(P)
+  eq(decodes[P], before, mode .. ": the OBJ-bake read after the upload decodes nothing")
 end
+PaletteFX.mode = "gbc"
 
 -- ---- send-time skips are bounded per update --------------------------------------
 do
   reset()
   AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
+  -- thirty paths that resolve to nothing decodable cost a resolve each: one
+  -- update looks at a bounded number of them
+  local realResolve = AtlasPrefetch.resolveDecodable
+  AtlasPrefetch.resolveDecodable = function() return nil end
   for i = 1, 30 do
-    local path = "assets/generated/c" .. i .. ".png"
-    Assets.image(path) -- cached: a skipCached request is dropped when examined
-    Assets.prefetchImage(path, false, true)
+    Assets.prefetchImage("assets/generated/c" .. i .. ".png", false)
   end
   AtlasPrefetch.update()
   local queued = AtlasPrefetch.decodePending()
   check(queued >= 30 - 8 and queued < 30, "one update examines at most 8 queued entries (" .. queued .. " left)")
   for _ = 1, 4 do AtlasPrefetch.update() end
   eq((AtlasPrefetch.decodePending()), 0, "later updates drain the rest")
-  eq(#channel("atlas_cmd").queue, 0, "cached images were never sent")
+  eq(#channel("atlas_cmd").queue, 0, "unresolvable paths were never sent")
+  AtlasPrefetch.resolveDecodable = realResolve
 end
 
 -- ---- NX asset overlay: the worker gets the path main would open ------------------
@@ -266,6 +269,25 @@ do
   runWorker(); AtlasPrefetch.update()
   eq(AtlasPrefetch.decodedCount(), 0, "late result from the old epoch is discarded")
   check(AtlasPrefetch.idle(), "idle again")
+
+  -- a palette change only obsoletes bakes: decoded files (stored, queued and
+  -- the one already sitting in the worker's inbox) survive it
+  reset()
+  Assets.prefetchImage(P, false); settle()
+  Assets.prefetchImage("assets/generated/b.png", false)
+  AtlasPrefetch.update()                 -- b is in the worker's inbox
+  Assets.prefetchImage("assets/generated/c.png", false)  -- still queued
+  e = AtlasPrefetch.epoch()
+  PaletteFX.setMode("redpp")             -- invalidateColorCaches -> bumpBakes
+  check(AtlasPrefetch.epoch() > e, "palette change bumps the bake epoch")
+  eq(AtlasPrefetch.decodedCount(), 1, "palette change keeps the decoded store")
+  check(AtlasPrefetch.peekDecoded(P) ~= nil, "...and the decoded sheet is still served")
+  local queuedAfter = AtlasPrefetch.decodePending()
+  eq(queuedAfter, 2, "queued and un-started decodes are kept (b re-queued, c)")
+  for _ = 1, 3 do settle() end
+  eq(AtlasPrefetch.decodedCount(), 3, "every decode is still delivered")
+  check(AtlasPrefetch.idle(), "and nothing is stranded in flight")
+  PaletteFX.setMode("gbc")
 
   -- a mod-set change (installLoader) re-resolves paths: also a bump
   reset()
@@ -456,7 +478,8 @@ do
   check(keys:find("hidden.png", 1, true) ~= nil, "objectVisible filter is the rebuildGhosts one")
   Game.save.objectToggles = {}
 
-  -- non-RED++: an Image already cached needs no decode
+  -- every mode: a sheet whose Image is already cached is still decoded, the
+  -- sprite OBJ bake (getObpImage) re-reads its pixels through imageData
   reset()
   AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
   PaletteFX.mode = "gbc"
@@ -464,8 +487,8 @@ do
   channel("atlas_cmd"):clear()
   ow:prefetchAtlases("M4", false)
   AtlasPrefetch.update()
-  check(not table.concat(decodeKeys(), ","):find("s1.png", 1, true),
-    "gbc: a cached Image is not decoded again")
+  check(table.concat(decodeKeys(), ","):find("s1.png", 1, true) ~= nil,
+    "gbc: a cached Image's sheet is still decoded for the OBJ bake")
 
   -- warp: destination first
   reset()

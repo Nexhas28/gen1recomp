@@ -23,12 +23,8 @@ return function(game)
   local function frameNo() return U.frame() + held end
   local function hold(btn, n) held = held + n; U.hold(game, btn, n) end
 
-  local function phase(name, fn)
-    print(("PHASE %s start frame=%d"):format(name, frameNo()))
-    local ok, err = pcall(fn)
-    if not ok then print("PHASE " .. name .. " ERROR " .. tostring(err)) end
-    print(("PHASE %s end frame=%d"):format(name, frameNo()))
-  end
+  local P = dofile("tests/drivers/perf_util.lua")
+  local function phase(name, fn) P.phase(name, fn, frameNo) end
 
   -- { species, level, { move ids } }: slot 1 must be a strong damaging move
   -- because the fight mashes A on the first menu entry

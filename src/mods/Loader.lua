@@ -92,7 +92,7 @@ end
 local devShim = { installed = false, permissions = {}, warned = {}, depth = 0,
   -- fast path for already-loaded, undeniable modules (see fastEligible);
   -- `fast` is the test seam that forces every require down the slow path
-  fast = true, memo = {}, fastHits = 0 }
+  fast = true, memo = {}, onFastHit = nil }
 
 -- The Gen 1 engine modules a Gold boot never instantiates.  Each one still
 -- LOADS under Gen 2 -- require finds the file and hands back a module table --
@@ -270,14 +270,12 @@ local function resetFastMemo()
   devShim.memo = {}
 end
 
--- test seams: force the slow path, and read back the live memo
-function Loader._setFastRequire(enabled)
+-- test seams: force the slow path (optionally observing each fast return via
+-- onHit, nil in production), and read back the live memo
+function Loader._setFastRequire(enabled, onHit)
   devShim.fast = enabled and true or false
+  devShim.onFastHit = onHit
   resetFastMemo()
-end
-
-function Loader._fastRequireHits()
-  return devShim.fastHits
 end
 
 function Loader._resetShimWarned()
@@ -318,7 +316,8 @@ function Loader:_installDevShim()
         local kind = type(loaded)
         if (kind == "table" or kind == "function" or loaded == true)
             and fastEligible(name) then
-          devShim.fastHits = devShim.fastHits + 1
+          local onHit = devShim.onFastHit
+          if onHit then onHit(name) end
           return loaded
         end
       end

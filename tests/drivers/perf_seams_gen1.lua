@@ -12,17 +12,12 @@ return function(game)
   local Map = require("src.world.Map")
   local TR = require("src.render.TileRenderer")
   local Music = require("src.core.Music")
-  local now = love.timer.getTime
+  local P = dofile("tests/drivers/perf_util.lua")
+  local now = P.now
   local acc = {}
-  local function wrap(tbl, name, label)
-    local f = tbl[name]
-    tbl[name] = function(...)
-      local t0 = now()
-      local a, b, c, d = f(...)
-      acc[label] = (acc[label] or 0) + (now() - t0) * 1000
-      return a, b, c, d
-    end
-  end
+  local patches = P.patches()
+  local function sink(label, ms) acc[label] = (acc[label] or 0) + ms end
+  local function wrap(tbl, name, label) patches:timed(tbl, name, label, sink) end
   wrap(Map, "new", "Map.new")
   wrap(TR, "new", "TileRenderer.new")
   wrap(OW, "rebuildNeighbors", "rebuildNeighbors")
@@ -30,29 +25,25 @@ return function(game)
   -- sync bakes (AtlasBake.bake on the main thread) and ready-store hits
   wrap(require("src.render.AtlasBake"), "bake", "syncBake")
   local AP = require("src.render.AtlasPrefetch")
-  local realTake = AP.take
-  AP.take = function(key)
-    local r = realTake(key)
-    if r then acc.readyHit = (acc.readyHit or 0) + 1 end
-    return r
-  end
-  -- background image decodes: store hits vs the files Assets still decodes here
-  local realPeek = AP.peekDecoded
-  AP.peekDecoded = function(path)
-    local r = realPeek(path)
-    acc[r and "decodeHit" or "decodeMiss"] = (acc[r and "decodeHit" or "decodeMiss"] or 0) + 1
-    if not r and os.getenv("PROBE_MISS") then
-      print("MISS", path, (debug.traceback("", 2):gsub("\n%s*", " | ")))
+  patches:replace(AP, "take", function(realTake)
+    return function(key)
+      local r = realTake(key)
+      if r then acc.readyHit = (acc.readyHit or 0) + 1 end
+      return r
     end
-    return r
-  end
-  local realNewImage = love.graphics.newImage
-  love.graphics.newImage = function(...)
-    local t0 = now()
-    local img = realNewImage(...)
-    acc.newImage = (acc.newImage or 0) + (now() - t0) * 1000
-    return img
-  end
+  end)
+  -- background image decodes: store hits vs the files Assets still decodes here
+  patches:replace(AP, "peekDecoded", function(realPeek)
+    return function(path)
+      local r = realPeek(path)
+      acc[r and "decodeHit" or "decodeMiss"] = (acc[r and "decodeHit" or "decodeMiss"] or 0) + 1
+      if not r and os.getenv("PROBE_MISS") then
+        print("MISS", path, (debug.traceback("", 2):gsub("\n%s*", " | ")))
+      end
+      return r
+    end
+  end)
+  wrap(love.graphics, "newImage", "newImage")
   wrap(PaletteFX, "worldGroupColors", "worldGroupColors")
   wrap(PaletteFX, "worldGroupAt", "worldGroupAt")
   wrap(require("src.render.Assets"), "imageData", "imageData")
@@ -65,35 +56,39 @@ return function(game)
   wrap(OW, "prefetchAtlases", "prefetchAtlases")
   wrap(OW, "setMap", "setMap_total")
 
-  local mode = os.getenv("PROBE_COLORS") or "redpp"
-  PaletteFX.setMode(mode)
-  U.log("colors", PaletteFX.mode)
-  U.teleport(game, "PALLET_TOWN", 5, 5)
-  U.wait(30)
-  local chain = { "ROUTE_1", "VIRIDIAN_CITY", "ROUTE_2", "PEWTER_CITY", "ROUTE_3",
-    "ROUTE_4", "CERULEAN_CITY", "ROUTE_5", "SAFFRON_CITY", "ROUTE_8",
-    "LAVENDER_TOWN", "ROUTE_12", "ROUTE_13", "ROUTE_14", "ROUTE_15",
-    "FUCHSIA_CITY", "ROUTE_18", "ROUTE_17", "ROUTE_16", "CELADON_CITY",
-    "ROUTE_7", "SAFFRON_CITY", "ROUTE_6", "VERMILION_CITY" }
-  for _, id in ipairs(chain) do
-    acc = {}
-    local ow = game.overworld
-    if os.getenv("PROBE_MISS") then print("STEP", id) end
-    local t0 = now()
-    ow:setMap(id, 5, 5, "up", { seamless = true, keepMusic = true })
-    local total = (now() - t0) * 1000
-    local parts = {}
-    for k, v in pairs(acc) do parts[#parts + 1] = ("%s=%.1f"):format(k, v) end
-    table.sort(parts)
-    print(("SEAM %-16s total=%.1fms %s"):format(id, total, table.concat(parts, " ")))
-    U.wait(20)
-    local shot = os.getenv("PROBE_SHOT")
-    if shot and id == "VIRIDIAN_CITY" then
+  local ok, err = pcall(function()
+    local mode = os.getenv("PROBE_COLORS") or "redpp"
+    PaletteFX.setMode(mode)
+    U.log("colors", PaletteFX.mode)
+    U.teleport(game, "PALLET_TOWN", 5, 5)
+    U.wait(30)
+    local chain = { "ROUTE_1", "VIRIDIAN_CITY", "ROUTE_2", "PEWTER_CITY", "ROUTE_3",
+      "ROUTE_4", "CERULEAN_CITY", "ROUTE_5", "SAFFRON_CITY", "ROUTE_8",
+      "LAVENDER_TOWN", "ROUTE_12", "ROUTE_13", "ROUTE_14", "ROUTE_15",
+      "FUCHSIA_CITY", "ROUTE_18", "ROUTE_17", "ROUTE_16", "CELADON_CITY",
+      "ROUTE_7", "SAFFRON_CITY", "ROUTE_6", "VERMILION_CITY" }
+    for _, id in ipairs(chain) do
+      acc = {}
+      local ow = game.overworld
+      if os.getenv("PROBE_MISS") then print("STEP", id) end
+      local t0 = now()
+      ow:setMap(id, 5, 5, "up", { seamless = true, keepMusic = true })
+      local total = (now() - t0) * 1000
+      local parts = {}
+      for k, v in pairs(acc) do parts[#parts + 1] = ("%s=%.1f"):format(k, v) end
+      table.sort(parts)
+      print(("SEAM %-16s total=%.1fms %s"):format(id, total, table.concat(parts, " ")))
       U.wait(20)
-      U.shot(game, shot)
-      U.log("shot", shot)
-      if os.getenv("PROBE_SHOT_ONLY") then break end
+      local shot = os.getenv("PROBE_SHOT")
+      if shot and id == "VIRIDIAN_CITY" then
+        U.wait(20)
+        U.shot(game, shot)
+        U.log("shot", shot)
+        if os.getenv("PROBE_SHOT_ONLY") then break end
+      end
     end
-  end
+  end)
+  patches:restore()
+  if not ok then print("SEAM ERROR " .. tostring(err)) end
   love.event.quit()
 end
