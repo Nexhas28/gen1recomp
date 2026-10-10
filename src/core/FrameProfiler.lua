@@ -293,8 +293,14 @@ end
 -- (love.quit, so `all` mode and early exits still report).  No quit call.
 function FrameProfiler.finish()
   if not benchTarget then
-    -- overlay session: log what the F3 box showed (last WINDOW frames)
-    if FrameProfiler.enabled and frameRing and frameRing.n > 0 then emitBench() end
+    -- overlay session: one line of what the F3 box showed (last WINDOW
+    -- frames); handheld builds log stderr to the launch-failure log.txt
+    if FrameProfiler.enabled and frameRing and frameRing.n > 0 then
+      local f = ringStats(frameRing)
+      local w = FrameProfiler.out or function(s) io.stderr:write(s) end
+      w(("PROF overlay fps=%.1f frame mean=%.3fms p95=%.3fms worst=%.3fms over16=%d over33=%d\n")
+        :format(FrameProfiler.fps(), f.mean, f.p95, f.worst, over16, over33))
+    end
     return
   end
   if benchDone or recorded == 0 then return end

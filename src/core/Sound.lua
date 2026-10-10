@@ -1204,6 +1204,7 @@ end
 
 function Sound._setNoThreadEnvForTest(value)
   fxWorker.noThread = value
+  fxWorker.state = nil -- test reset: also clears a fatal "off"
 end
 
 function Sound._setPrefetchLimitsForTest(inflightMax, drainCap)
