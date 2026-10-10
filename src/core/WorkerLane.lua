@@ -127,6 +127,7 @@ function Lane:promote(key, front)
       if e == entry then
         table.remove(self.low, i)
         table.insert(self.high, entry)
+        entry.front = true
         break
       end
     end
@@ -137,6 +138,7 @@ end
 -- Queue `entry` (a table) under `key`; front puts it ahead of the hints.
 function Lane:push(key, entry, front)
   entry.key = key
+  entry.front = front and true or nil
   self.byKey[key] = entry
   table.insert(front and self.high or self.low, entry)
   return entry
@@ -171,8 +173,13 @@ function Lane:pump(send)
       if self.byKey[entry.key] == entry then self.byKey[entry.key] = nil end
       local ok, trackKey = send(entry)
       if ok then
-        self.inflight[trackKey or entry.key] = entry
-        self.inflightCount = self.inflightCount + 1
+        local k = trackKey or entry.key
+        -- a duplicate of a job already out is retired by one result only, so
+        -- it must not take a second unit of the budget
+        if self.inflight[k] == nil then
+          self.inflightCount = self.inflightCount + 1
+        end
+        self.inflight[k] = entry
         sent = sent + 1
       end
     end
@@ -197,8 +204,10 @@ function Lane:clear() resetQueues(self) end
 
 -- Put what is in flight back at the front of the queue, to be sent again.
 function Lane:requeueInflight()
+  -- back to the head of the queue it came from: a background hint must not
+  -- overtake front requests queued since
   for _, entry in pairs(self.inflight) do
-    table.insert(self.high, 1, entry)
+    table.insert(entry.front and self.high or self.low, 1, entry)
     self.byKey[entry.key] = entry
   end
   self.inflight, self.inflightCount = {}, 0
@@ -208,6 +217,7 @@ end
 function Lane:demoteAll()
   for _, entry in ipairs(self.low) do self.high[#self.high + 1] = entry end
   self.low, self.high = self.high, {}
+  for _, entry in ipairs(self.low) do entry.front = nil end
 end
 
 -- Obsolete everything this lane has pending (see the header).  requeue: keep
@@ -331,7 +341,8 @@ function Worker:shutdown()
     pcall(self.cmd.push, self.cmd, { cmd = "quit" })
   end
   if self.thread then pcall(function() self.thread:wait() end) end
-  self.state = nil
+  -- a worker failed by a fatal error stays off; only a clean one may restart
+  if self.state ~= false then self.state = nil end
   stopped(self)
 end
 

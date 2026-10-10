@@ -219,7 +219,10 @@ function AtlasPrefetch.readyCount() return ready:count() end
 -- SessionLifecycle by WorkerLane.)
 function AtlasPrefetch.shutdown() worker:shutdown() end
 
-function AtlasPrefetch._setNoThreadEnvForTest(value) worker.noThread = value end
+function AtlasPrefetch._setNoThreadEnvForTest(value)
+  worker.noThread = value
+  worker.state = nil -- test reset: also clears a fatal "off"
+end
 
 function AtlasPrefetch._setDecodeLimitsForTest(inflightMax, sendCap, readyCap)
   decodes.inflightMax = inflightMax or 4
