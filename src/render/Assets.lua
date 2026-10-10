@@ -56,7 +56,9 @@ function Assets.resolve(path)
   return path
 end
 
-function Assets.isCached(path) return cache[Assets.resolve(path)] ~= nil end
+-- cheap check by the RAW path (no resolve, so no per-mod filesystem lookups);
+-- a mod-overridden path reads as not cached
+function Assets.isCached(path) return cache[path] ~= nil end
 
 -- Only plain PNG paths use a background decode: newImage(path) derives a
 -- dpiscale from an "@2x" style suffix and handles compressed formats, neither

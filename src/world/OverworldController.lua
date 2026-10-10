@@ -762,12 +762,15 @@ local function prefetchMapImages(mapId, front, budget, seen)
   local queued = 0
   local SpriteRenderer = require("src.render.SpriteRenderer")
   -- Tileset hints stay even when cached (RED++ atlas bakes reuse the decode).
-  -- A sprite sheet whose Image is cached and OBJ bake exists never reads the
-  -- pixels again, so it is skipped.
+  -- Outside RED++ a sheet has one OBJ palette, so once its Image and OBJ bake
+  -- exist the pixels are never read again and it is skipped.  RED++ colours
+  -- the same sheet per sprite/instance, so a new group may still need them.
+  local skipDone = not PaletteFX.usesGbcPack()
   local function want(path, sprite)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
-    if sprite and Assets.isCached(path) and SpriteRenderer.hasObp(path) then return end
+    if sprite and skipDone and Assets.isCached(path)
+       and SpriteRenderer.hasObp(path) then return end
     if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
   local ts = data.tilesets and data.tilesets[def.tileset]
