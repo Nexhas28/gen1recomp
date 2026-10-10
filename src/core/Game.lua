@@ -1455,18 +1455,40 @@ function Game:writeOptions()
 end
 
 -- Push the live options table into audio + display subsystems.
+-- sounds menus and the overworld play first and most often
+Game.COMMON_SFX = {
+  "Press_AB", "Start_Menu", "Collision", "Save", "Go_Inside", "Go_Outside",
+  "Heal_HP", "Get_Item1", "Get_Item2", "Level_Up", "Tink", "Ledge_Jump",
+  "Withdraw_Deposit", "Ball_Toss", "Ball_Poof", "Faint_Fall", "Faint_Thud",
+  "Run", "Caught_Mon",
+}
+
+-- hand the common SFX (pinned, so battle prewarms can't evict them) and the
+-- party's cries to the chip audio worker; see ChipAudio.prewarmSfx
+function Game:prewarmCommonAudio()
+  local Sound = require("src.core.Sound")
+  require("src.core.ChipAudio").prewarmPinned(function()
+    for _, name in ipairs(Game.COMMON_SFX) do
+      pcall(Sound.prewarmSfx, self.data, name)
+    end
+  end)
+  for _, mon in ipairs(self.save and self.save.party or {}) do
+    if type(mon) == "table" and mon.species then
+      pcall(Sound.prewarmCry, self.data, mon.species)
+    end
+  end
+end
+
 function Game:applyOptions(opts)
   opts = opts or (self.save and self.save.options) or {}
   local Music = require("src.core.Music")
   local Sound = require("src.core.Sound")
   if Music.applyOptions then Music.applyOptions(opts) end
   if Sound.applyOptions then Sound.applyOptions(opts) end
-  -- pre-render the common menu/overworld SFX and the party's cries on the SFX
-  -- worker (idempotent; no-op without a thread).  After Music.applyOptions so
-  -- a sample-rate change has already bumped the render epoch.
-  if Sound.prefetchCommon then
-    pcall(Sound.prefetchCommon, self.data, self.save and self.save.party)
-  end
+  -- pre-render the common menu/overworld SFX (pinned) and the party's cries
+  -- on the chip audio worker; idempotent, a no-op without a worker.  After
+  -- Music.applyOptions so a sample-rate change is already in the render key.
+  pcall(Game.prewarmCommonAudio, self)
   require("src.render.PaletteFX").applyOptions(opts)
   require("src.render.Tilt").applyOptions(opts)
   require("src.render.Letterbox").applyOptions(opts)

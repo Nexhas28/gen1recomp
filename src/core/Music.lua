@@ -657,10 +657,6 @@ end
 -- call once per frame: chains a finished intro into its loop body and
 -- restores the map theme after a one-shot jingle
 function Music.update(data)
-  -- finished SFX/cry pre-renders become Sources here: this is the one audio
-  -- tick both Game and Game2 run at 60 Hz, and it runs with or without music
-  local Sound = package.loaded["src.core.Sound"]
-  if Sound then Sound.update() end
   if state.chip then require("src.core.ChipAudio").update() end
   -- distance / indoor muffling mods re-apply volume every frame while
   -- subscribed; otherwise applyVolume only runs on song/option changes
