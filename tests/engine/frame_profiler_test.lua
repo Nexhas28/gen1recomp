@@ -198,6 +198,29 @@ do
   love = nil
 end
 
+-- 7b. windowed stats: ring bigger than WINDOW, old samples slow, newest fast
+do
+  P.out = function() end
+  P.WARMUP = 0
+  fresh({ POKEPORT_GAME_PROF = "all" })
+  for i = 1, 450 do
+    P.beginFrame(true)
+    P.push("s"); adv(i <= 300 and 100 or 1); P.pop("s")
+    P.endFrame()
+  end
+  local W = P.WINDOW
+  near(P.stats("s", W).worst, 1, "windowed worst ignores old slow samples")
+  near(P.stats("s", W).mean, 1, "windowed mean")
+  near(P.stats("frame", W).p95, 1, "windowed frame p95")
+  near(P.stats("s").worst, 100, "whole-ring stats unchanged")
+  check(P.stats("s").mean > 60, "whole-ring mean includes old samples")
+  near(P.stats("s", 100000).worst, 100, "oversized window clamps to ring")
+  near(P.fps(W), 1000, "windowed fps uses newest intervals")
+  check(P.fps() < 100, "whole-ring fps includes old intervals")
+  P.out = nil
+  P.WARMUP = 60
+end
+
 T.finish("frame_profiler_test")
 
 -- 8. GC probe: alloc_kb ring + heap min/max, only with POKEPORT_GC_PROBE=1

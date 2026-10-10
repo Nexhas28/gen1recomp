@@ -45,6 +45,7 @@ local allocRing, heapStart = nil, 0
 local heapMin, heapMax = math.huge, 0
 local gfx = { drawcalls = 0, canvasswitches = 0, texturememory = 0 }
 local overlayText, overlayAt = "", -1
+local overlayW, overlayLines = 0, 1
 
 local function newRing(cap)
   return { cap = cap, n = 0, pos = 0, v = {} }
@@ -56,19 +57,22 @@ local function ringAdd(r, x)
   if r.n < r.cap then r.n = r.n + 1 end
 end
 
-local function ringStats(r)
+-- last: only the most recent `last` samples (the overlay's window, even when
+-- a bench run sizes the ring to the whole run)
+local function ringStats(r, last)
   if not r or r.n == 0 then return { mean = 0, p95 = 0, worst = 0 } end
+  local n = last and math.min(last, r.n) or r.n
   local a, sum, worst = {}, 0, 0
-  for i = 1, r.n do
-    local x = r.v[i]
-    a[i] = x
+  for j = 1, n do
+    local x = r.v[(r.pos - j) % r.cap + 1]
+    a[j] = x
     sum = sum + x
     if x > worst then worst = x end
   end
   table.sort(a)
-  local idx = math.ceil(0.95 * r.n)
+  local idx = math.ceil(0.95 * n)
   if idx < 1 then idx = 1 end
-  return { mean = sum / r.n, p95 = a[idx], worst = worst }
+  return { mean = sum / n, p95 = a[idx], worst = worst }
 end
 
 local function window()
@@ -213,22 +217,23 @@ function FrameProfiler.sampleGfx()
   end
 end
 
-function FrameProfiler.stats(name)
-  if name == "frame" then return ringStats(frameRing) end
-  return ringStats(rings[name])
+function FrameProfiler.stats(name, last)
+  if name == "frame" then return ringStats(frameRing, last) end
+  return ringStats(rings[name], last)
 end
 
 function FrameProfiler.sections()
   return order
 end
 
-function FrameProfiler.fps()
+function FrameProfiler.fps(last)
   local r = intervalRing
   if not r or r.n == 0 then return 0 end
+  local n = last and math.min(last, r.n) or r.n
   local sum = 0
-  for i = 1, r.n do sum = sum + r.v[i] end
+  for j = 1, n do sum = sum + r.v[(r.pos - j) % r.cap + 1] end
   if sum <= 0 then return 0 end
-  return r.n / sum
+  return n / sum
 end
 
 local function mean(r)
@@ -296,10 +301,10 @@ function FrameProfiler.finish()
     -- overlay session: one line of what the F3 box showed (last WINDOW
     -- frames); handheld builds log stderr to the launch-failure log.txt
     if FrameProfiler.enabled and frameRing and frameRing.n > 0 then
-      local f = ringStats(frameRing)
+      local f = ringStats(frameRing, FrameProfiler.WINDOW)
       local w = FrameProfiler.out or function(s) io.stderr:write(s) end
       w(("PROF overlay fps=%.1f frame mean=%.3fms p95=%.3fms worst=%.3fms over16=%d over33=%d\n")
-        :format(FrameProfiler.fps(), f.mean, f.p95, f.worst, over16, over33))
+        :format(FrameProfiler.fps(FrameProfiler.WINDOW),f.mean, f.p95, f.worst, over16, over33))
     end
     return
   end
@@ -354,13 +359,14 @@ function FrameProfiler.draw()
   local t = now()
   if t - overlayAt >= 0.25 then
     overlayAt = t
-    local f = ringStats(frameRing)
+    local W = FrameProfiler.WINDOW
+    local f = ringStats(frameRing, W)
     local lines = {
-      ("FPS %.0f"):format(FrameProfiler.fps()),
+      ("FPS %.0f"):format(FrameProfiler.fps(W)),
       ("frame %.2f / %.2f / %.2f ms"):format(f.mean, f.p95, f.worst),
     }
     for _, name in ipairs(order) do
-      local s = ringStats(rings[name])
+      local s = ringStats(rings[name], W)
       lines[#lines + 1] = ("%s %.2f / %.2f"):format(name, s.mean, s.p95)
     end
     lines[#lines + 1] = ("lua %.0f KB"):format(collectgarbage("count"))
@@ -368,11 +374,18 @@ function FrameProfiler.draw()
     lines[#lines + 1] = ("tex %.1f MB"):format(gfx.texturememory / (1024 * 1024))
     lines[#lines + 1] = ("spikes >16ms: %d  >33ms: %d"):format(over16, over33)
     overlayText = table.concat(lines, "\n")
+    local font, w = g.getFont(), 0
+    for _, line in ipairs(lines) do
+      w = math.max(w, font:getWidth(line))
+    end
+    overlayW, overlayLines = w, #lines
   end
+  local font = g.getFont()
   g.push("all")
   g.origin()
+  g.scale(math.max(1, math.floor(g.getHeight() / 540)))
   g.setColor(0, 0, 0, 0.6)
-  g.rectangle("fill", 4, 4, 190, 14 * (select(2, overlayText:gsub("\n", "")) + 1) + 8)
+  g.rectangle("fill", 4, 4, overlayW + 8, font:getHeight() * overlayLines + 8)
   g.setColor(1, 1, 1, 1)
   g.print(overlayText, 8, 8)
   g.pop()
