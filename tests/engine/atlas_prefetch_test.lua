@@ -51,7 +51,12 @@ local function makeSource(w, h)
 end
 
 love.image = love.image or {}
-love.image.newImageData = function(w, h) return newID(w, h) end
+local sources = {}   -- path -> ImageData (what the worker's file decode returns)
+local function stubNewImageData(w, h)
+  if type(w) == "string" then return sources[w] end
+  return newID(w, h)
+end
+love.image.newImageData = stubNewImageData
 local imagesBuilt = 0
 love.graphics = love.graphics or {}
 love.graphics.newImage = function(data)
@@ -60,7 +65,6 @@ love.graphics.newImage = function(data)
 end
 
 local Assets = require("src.render.Assets")
-local sources = {}   -- path -> ImageData
 local decodes = 0
 Assets.imageData = function(path)
   decodes = decodes + 1
@@ -222,6 +226,10 @@ local function newData()
   }
 end
 sources["gfx/ts.png"] = makeSource(32, 24)
+-- a readable PNG header lets the worker decode the file itself (no header: the
+-- hint is skipped, see section 8)
+love.filesystem.write("gfx/ts.png", "\137PNG\r\n\26\n" .. "\0\0\0\13" .. "IHDR" ..
+  string.char(0, 0, 0, 32) .. string.char(0, 0, 0, 24))
 
 local function keyFor(id) return "gfx/ts.png#gbc:" .. id .. PaletteFX.darkKey() end
 
@@ -523,7 +531,7 @@ do
   AtlasPrefetch.update()
   c = lastBake()
   check(c and c.src == stored and c.srcPath == nil, "stored tileset decode is reused as the bake source")
-  love.image.newImageData = function(w, h) return newID(w, h) end
+  love.image.newImageData = stubNewImageData
 
   -- NX: size and decode both go through the overlay's versioned path
   local savedSystem, savedVersion = love.system, GameVersion.get()
@@ -538,14 +546,29 @@ do
   c = lastBake()
   eq(c and c.srcPath, "yellow/" .. P2, "NX: bake srcPath is the versioned path")
 
-  -- unreadable header (no file at either path): sync decode, nothing sent as srcPath
+  -- unreadable header (no file at either path): the hint is skipped
   love.filesystem.remove("yellow/" .. P2)
   love.filesystem.remove(P2)
   reset()
+  local decodesBefore = decodes
   TileRenderer.prefetchAtlas(data2(), "M3", false)
   AtlasPrefetch.update()
-  c = lastBake()
-  check(c and c.src ~= nil and c.srcPath == nil, "no readable header: falls back to a main-thread decode")
+  check(lastBake() == nil, "no readable header: no bake is sent")
+  check(AtlasPrefetch.idle(), "no readable header: the hint is dropped")
+  eq(decodes, decodesBefore, "no readable header: nothing decoded on the main thread")
+
+  -- a file the worker cannot decode (not a PNG): skipped the same way
+  local P3 = "assets/generated/ts3.jpg"
+  sources[P3] = makeSource(32, 24)
+  love.filesystem.write("yellow/" .. P3, header)
+  love.filesystem.write(P3, header)
+  reset()
+  local d3 = data2()
+  d3.tilesets.OVERWORLD.image = P3
+  TileRenderer.prefetchAtlas(d3, "M3", false)
+  AtlasPrefetch.update()
+  check(lastBake() == nil and AtlasPrefetch.idle(), "non-PNG: hint skipped")
+  eq(decodes, decodesBefore, "non-PNG: nothing decoded on the main thread")
   Overlay.uninstall()
   love.system = savedSystem
   Platform._resetForTests()

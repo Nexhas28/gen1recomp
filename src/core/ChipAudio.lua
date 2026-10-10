@@ -258,28 +258,8 @@ local function bumpSfxEpoch()
   if Sound and Sound.bumpRenderEpoch then Sound.bumpRenderEpoch() end
 end
 
--- What the SFX render epoch last saw of the volume / pitch mix (channel 4 is
--- the noise / drum layer): a setter that leaves the effective mix unchanged
--- (the options screen re-applies it on every load) must not invalidate
--- renders in flight.
-local sfxMixSeen = { volumes = ChipSynth.getChannelVolumes(),
-                     pitches = ChipSynth.getChannelPitches() }
-
-local function sfxMixChanged()
-  local volumes = ChipSynth.getChannelVolumes()
-  local pitches = ChipSynth.getChannelPitches()
-  local seen = sfxMixSeen
-  sfxMixSeen = { volumes = volumes, pitches = pitches }
-  for hw = 1, 4 do
-    if seen.volumes[hw] ~= volumes[hw] or seen.pitches[hw] ~= pitches[hw] then
-      return true
-    end
-  end
-  return false
-end
-
 local function pushChannelMix()
-  if sfxMixChanged() then bumpSfxEpoch() end
+  bumpSfxEpoch() -- Sound skips the bump when the worker's mix already matches
   if workerReady and cmdCh then
     cmdCh:push({ cmd = "channelMix",
                  volumes = ChipSynth.getChannelVolumes(),

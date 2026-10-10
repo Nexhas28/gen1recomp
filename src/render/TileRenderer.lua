@@ -476,22 +476,17 @@ function TileRenderer.prefetchAtlas(data, mapId, front)
     local groupColors = PaletteFX.worldGroupColors(data, ts.id, mapId, nil)
     if not groupColors then return nil end
     -- size from the PNG header and let the worker decode the file itself, so
-    -- no tileset decode runs on the main thread; anything else decodes here
+    -- no tileset decode runs on the main thread
     local resolved = Assets.resolve(imagePath)
     local workerPath = Assets.workerPath(resolved) -- NX overlay: what main would open
     local iw, ih = Assets.pngSize(workerPath)
-    local src
-    if iw and Assets.prefetchable(resolved) then
-      -- a decode the worker already finished (the tileset decode hint, or an
-      -- earlier map on this tileset) is sent along; the worker only reads it
-      src = AtlasPrefetch.peekDecoded(resolved)
-      if src then iw, ih = src:getDimensions() end
-      workerPath = (not src) and workerPath or nil
-    else
-      src = AtlasPrefetch.source(imagePath, Assets.imageData)
-      iw, ih = src:getDimensions()
-      workerPath = nil
-    end
+    -- not decodable by the worker: skip the hint, the sync bake handles it
+    if not (iw and Assets.prefetchable(resolved)) then return nil end
+    -- a decode the worker already finished (the tileset decode hint, or an
+    -- earlier map on this tileset) is sent along; the worker only reads it
+    local src = AtlasPrefetch.peekDecoded(resolved)
+    if src then iw, ih = src:getDimensions() end
+    workerPath = (not src) and workerPath or nil
     local tileColors, aliases = bakeInputs(groupColors, ts.id, mapId,
                                            (iw / 8) * (ih / 8))
     return { src = src, srcPath = workerPath, perRow = perRow,

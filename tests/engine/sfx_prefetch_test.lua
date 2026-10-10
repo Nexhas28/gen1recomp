@@ -111,6 +111,16 @@ local function reset()
   installThread()
 end
 
+-- Make the worker configured with the current mix (what the first request
+-- after a bump does), so the next mix change is judged against it.
+local cfgN = 0
+local function configure(data)
+  cfgN = cfgN + 1
+  data.audio.sfx["Cfg" .. cfgN] = def(cfgN % 8) -- a fresh key: never cached
+  Sound.prefetchSfx(data, "Cfg" .. cfgN)
+  for _ = 1, 3 do runWorker(); Sound.update() end
+end
+
 local renders = 0
 local realRender = ChipSynth.renderEffectData
 ChipSynth.renderEffectData = function(...)
@@ -221,12 +231,20 @@ do
   check(Sound.prefetchIdle(), "re-rendered result delivered")
   check(Sound.play(data, "Foo").sd ~= stale, "cache holds the post-change render")
   ChipAudio.setChannelVolume(1, 1)
+  configure(data)
   local e2 = Sound.renderEpoch()
-  ChipAudio.setStereo(true); ChipAudio.setStereo(false)
+  ChipAudio.setStereo(true)
   check(Sound.renderEpoch() > e2, "stereo change bumps the epoch")
+  configure(data)
+  e2 = Sound.renderEpoch()
+  ChipAudio.setStereo(false)
+  check(Sound.renderEpoch() > e2, "stereo change back bumps the epoch")
+  configure(data)
   local e3 = Sound.renderEpoch()
-  ChipAudio.setChannelPitch(2, 1.5); ChipAudio.setChannelPitch(2, 1)
+  ChipAudio.setChannelPitch(2, 1.5)
   check(Sound.renderEpoch() > e3, "channel pitch change bumps the epoch")
+  ChipAudio.setChannelPitch(2, 1)
+  configure(data)
   local e4 = Sound.renderEpoch()
   local rate = ChipSynth.SAMPLE_RATE
   ChipAudio.setSampleRate(rate == 22050 and 44100 or 22050)
@@ -239,6 +257,7 @@ do
   reset()
   local data = newData()
   ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+  ChipAudio.setChannelPitches({ 1, 1, 1, 1 })
   Sound.prefetchSfx(data, "Foo")
   local e = Sound.renderEpoch()
   ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
@@ -257,13 +276,36 @@ do
   e = Sound.renderEpoch()
   ChipAudio.setChannelVolumes({ 1, 0.5, 1, 1 })
   eq(Sound.renderEpoch(), e, "repeating it does not")
+  configure(data)
+  e = Sound.renderEpoch()
   ChipAudio.setNoiseVolume(0.25)
   check(Sound.renderEpoch() > e, "a noise volume change bumps the epoch")
+  configure(data)
   e = Sound.renderEpoch()
   ChipAudio.setChannelPitches({ 1, 1.5, 1, 1 })
   check(Sound.renderEpoch() > e, "a real pitch change bumps the epoch")
-  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+  ChipAudio.setNoiseVolume(1)
   ChipAudio.setChannelPitches({ 1, 1, 1, 1 })
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+
+  -- a ChipSynth change made behind ChipAudio's back, then an identical-looking
+  -- setter call: judged against what the worker was configured with
+  reset()
+  data = newData()
+  Sound.prefetchSfx(data, "Foo")
+  runWorker()
+  ChipSynth.setChannelVolumes({ 1, 0.5, 1, 1 })
+  e = Sound.renderEpoch()
+  ChipAudio.setChannelVolumes({ 1, 0.5, 1, 1 })
+  check(Sound.renderEpoch() > e, "differs from the configured mix: bumps")
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+
+  -- nothing ever configured: nothing can be stale
+  reset()
+  e = Sound.renderEpoch()
+  ChipAudio.setChannelVolumes({ 1, 0.5, 1, 1 })
+  eq(Sound.renderEpoch(), e, "no worker configured: no bump")
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
 end
 
 -- ---- never replaces an existing cached Source ------------------------------
