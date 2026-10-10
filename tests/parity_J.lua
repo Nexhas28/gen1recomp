@@ -499,7 +499,7 @@ do
     }
     fg.save.party = { Pokemon.new(Data, "BULBASAUR", 20) }
     local demo = BattleState.newWild(fg, "PIKACHU", 5)
-    demo:makeOldManDemo("PROF.OAK")
+    demo:makeOldManDemo("oak")
     stack:push(demo)
     demo:enter()
     for _ = 1, 300 do

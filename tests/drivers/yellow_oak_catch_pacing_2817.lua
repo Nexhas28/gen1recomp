@@ -24,7 +24,7 @@ return function(game)
   U.wait(10)
 
   local battle = BattleState.newWild(game, "PIKACHU", 5)
-  battle:makeOldManDemo("PROF.OAK")
+  battle:makeOldManDemo("oak")
 
   local menuFrames, cursorItemAt = 0, nil
   local clearedDuringWait = nil

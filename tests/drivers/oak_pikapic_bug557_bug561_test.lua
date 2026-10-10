@@ -55,7 +55,7 @@ return function(game)
   check("it is Oak's pic, not the old man's", backPath == PROF_BACK)
 
   local battle = BattleState.newWild(game, "PIKACHU", 5)
-  battle:makeOldManDemo("PROF.OAK")
+  battle:makeOldManDemo("oak")
   check("the thrower is named PROF.OAK", battle.demoName == "PROF.OAK")
   check("the battle asks for the BATTLE_TYPE_PIKACHU back pic",
         battle.oakDemo == true)

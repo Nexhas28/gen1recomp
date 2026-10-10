@@ -8,8 +8,8 @@ local GameVersion = require("src.core.GameVersion")
 
 local CacheContract = {}
 
--- engine/battle/animations.asm:2418
-CacheContract.FORMAT = "rom-cache-v12-gen1:"
+-- engine/battle/animations.asm:2418, engine/battle/core.asm:2051
+CacheContract.FORMAT = "rom-cache-v13-gen1:"
 CacheContract.VERSION_FORMAT = {
   -- v11: Gen 2 maps carry their object list's ROM address, which a .sav
   -- export re-anchoring a save onto another map writes back into
@@ -22,8 +22,8 @@ CacheContract.VERSION_FORMAT = {
   crystal = "rom-cache-v15-crystal6:",
   -- engine/overworld/map_sprites.asm:181, engine/battle/animations.asm:2600
   -- data/pikachu/pikachu_pic_animation.asm:340, engine/movie/title.asm:76
-  -- engine/pikachu/pikachu_pic_animation.asm:412
-  yellow = "rom-cache-v12-yellow4:",
+  -- engine/pikachu/pikachu_pic_animation.asm:412, engine/battle/core.asm:2135-2138
+  yellow = "rom-cache-v12-yellow5:",
   -- v8: M4A tracks retain reachable patterns and explicit entry offsets.
   firered = "rom-cache-v25-firered:",
   leafgreen = "rom-cache-v10-leafgreen:",

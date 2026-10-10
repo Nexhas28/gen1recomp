@@ -1523,6 +1523,13 @@ function RomExtractor:extractText()
       self:symbol(label), metadata.dynamic[label] or {})
     self:tick("Dialogue", index, #metadata.labels)
   end
+  -- pokered engine/battle/core.asm:2051, pokeyellow engine/battle/core.asm:2135-2138
+  for _, label in ipairs({ "DisplayBattleMenu.oldManName", "DisplayBattleMenu.profOakName" }) do
+    if label == "DisplayBattleMenu.oldManName" or self.symbols[label] then
+      local s = self:symbol(label)
+      texts[label] = self.rom:readString(s.bank, s.address, self.manifest.charmap)
+    end
+  end
   local trainerHeaders = {}
   for mapLabel, headers in pairs(metadata.trainerHeaders) do
     local converted = {}

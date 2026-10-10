@@ -85,6 +85,7 @@ YELLOW_EXTRA_SYMBOLS = (
     "YellowIntroCloudGFX",
     "PikachuCriesPointerTable",
     "CGBBasePalettes",
+    "DisplayBattleMenu.profOakName",
     # Jessie & James share the ROCKET trainer class but battle behind their
     # own pic (home/trainers2.asm IsFightingJessieJames) (#439)
     "JessieJamesPic",

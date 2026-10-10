@@ -1038,8 +1038,7 @@ end
 -- scripted cursor hovers FIGHT, hops to ITEM and forces the item menu
 -- (one POKé BALL x50).  Nothing is kept.
 -- Yellow's Pallet intro (BATTLE_TYPE_PIKACHU) is the same simulated
--- script under "PROF.OAK" (pokeyellow core.asm .profOakName), so the
--- displayed thrower name is a parameter.
+-- script under .profOakName (pokeyellow core.asm:2117).
 -- The throw catches everywhere except Yellow's FIRST Viridian training.
 -- ItemUseBall's .oldManBattle branch checks EVENT_INITIAL_CATCH_TRAINING
 -- and, when it is set, stores anim data $63 in place of the $43 capture
@@ -1049,16 +1048,13 @@ end
 -- closely!" demo resets the event before its battle
 -- (ViridianCityOldManStartCatchTrainingScript), so only the initial
 -- tutorial passes failThrow -- it stands in for that event (#636).
-function BattleState:makeOldManDemo(name, failThrow)
+function BattleState:makeOldManDemo(kind, failThrow)
   self.demo = true
-  self.demoName = name or Strings("OLD MAN")
+  -- pokeyellow engine/battle/core.asm:2109-2121
+  self.oakDemo = kind == "oak"
+  self.demoName = self.data.text[self.oakDemo and "DisplayBattleMenu.profOakName"
+    or "DisplayBattleMenu.oldManName"]
   self.demoFails = failThrow and true or false
-  -- LoadPlayerBackPic and DisplayBattleMenu split on the same wBattleType:
-  -- BATTLE_TYPE_OLD_MAN gets .oldManName + OldManPicBack, BATTLE_TYPE_PIKACHU
-  -- gets .profOakName + ProfOakPicBack (pokeyellow core.asm).  The thrower
-  -- name the caller passes IS that distinction here, so it picks the pic too
-  -- -- data/scripts/story2.lua is the only site that names PROF.OAK (#557).
-  self.oakDemo = name == "PROF.OAK"
   -- Yellow's Pallet intro runs this before the player owns any mon
   -- (BATTLE_TYPE_PIKACHU precedes the lab gift), so newWild flagged the
   -- battle dead for lack of a party.  The demo never sends out, draws, or
@@ -2790,7 +2786,7 @@ function BattleState:oldManThrow()
   self.result = "run" -- nothing is kept; wBattleResult only ends the demo
   -- engine/items/item_effects.asm:148
   self:sayAuto(self:romText("_ItemUseText001", "%s used\n%s!",
-    self.demoName or Strings("OLD MAN"), self.data.items.POKE_BALL.name))
+    self.demoName, self.data.items.POKE_BALL.name))
   self:act(function()
     -- ItemUseBall's beat before the toss chain (like throwBall)
     self.nextInsert = (self.nextInsert or 0) + 1
