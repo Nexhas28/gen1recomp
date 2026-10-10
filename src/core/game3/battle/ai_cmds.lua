@@ -1,6 +1,7 @@
 -- FireRed battle AI command handlers (port of battle_ai_script_commands.c).
 
 local Moves = require("src.core.game3.battle.moves")
+local Pokemon = require("src.core.game3.pokemon")
 local Types = require("src.core.game3.battle.types")
 local Damage = require("src.core.game3.battle.damage")
 local EffectIds = require("src.core.game3.battle.effect_ids")
@@ -126,8 +127,9 @@ local function rng(vm, lo, hi)
       return v
     end
   end
-  if hi and lo then return math.random(lo, hi) end
-  return math.random(0, 255)
+  local Guard = require("src.core.game3.battle.link_guard")
+  if hi and lo then return Guard.fallback("ai_cmds.rng", lo, hi) end
+  return Guard.fallback("ai_cmds.rng", 0, 255)
 end
 
 local function random_u16(vm)
@@ -163,11 +165,12 @@ end
 local function status2_bits(battler)
   if not battler then return 0 end
   local b = 0
+  if battler.status2 then b = bit_or_local(b, tonumber(battler.status2) or 0) end
   if battler.confusionTurns and battler.confusionTurns > 0 then b = bit_or_local(b, STATUS2.CONFUSION) end
   if battler.focusEnergy or battler.expFocusEnergy then b = bit_or_local(b, STATUS2.FOCUS_ENERGY) end
   if (battler.substituteHP or 0) > 0 then b = bit_or_local(b, STATUS2.SUBSTITUTE) end
-  if battler.wrapped or battler.trapped then b = bit_or_local(b, STATUS2.WRAPPED) end
-  if battler.meanLook or battler.escapePrevention then b = bit_or_local(b, STATUS2.ESCAPE_PREVENTION) end
+  if battler.wrapped or battler.trapped or battler.expWrapped then b = bit_or_local(b, STATUS2.WRAPPED) end
+  if battler.meanLook or battler.escapePrevention or battler.expTrapped or battler.expTrappedBy then b = bit_or_local(b, STATUS2.ESCAPE_PREVENTION) end
   if battler.bideTurns then b = bit_or_local(b, STATUS2.BIDE) end
   if battler.recharge then b = bit_or_local(b, STATUS2.RECHARGE) end
   if battler.rage then b = bit_or_local(b, STATUS2.RAGE) end
@@ -224,6 +227,8 @@ local function side_status_bits(side)
 end
 
 local function move_effect(moveId)
+  -- pokeemerald/src/battle_ai_script_commands.c:1925
+  if moveId == nil or moveId == 0 then return 0 end
   local m = Moves.get(moveId)
   if not m then return 0 end
   local e = m.effect
@@ -231,13 +236,23 @@ local function move_effect(moveId)
   return 0
 end
 
+local function move_metadata(moveId)
+  if moveId == nil or moveId == 0 or moveId == "" then
+    assert(Moves.romReady(), "AI required ROM move cache missing")
+    local row = assert(Pokemon.battleMove(0), "AI ROM MOVE_NONE metadata missing")
+    assert(type(row.power) == "number" and type(row.type) == "number", "AI ROM MOVE_NONE metadata invalid")
+    return row
+  end
+  return Moves.get(moveId)
+end
+
 local function move_power(moveId)
-  local m = Moves.get(moveId)
+  local m = move_metadata(moveId)
   return m and tonumber(m.power) or 0
 end
 
 local function move_type(moveId)
-  local m = Moves.get(moveId)
+  local m = move_metadata(moveId)
   return m and tonumber(m.type) or 0
 end
 
@@ -253,7 +268,15 @@ local function ability_of(battler)
   if battler.mon then
     a = a or battler.mon.ability or battler.mon.abilityId
   end
-  return tonumber(a) or 0
+  if type(a) == "number" then return a end
+  if type(a) == "string" then
+    local ok, Abilities = pcall(require, "src.core.game3.battle.abilities")
+    if ok and Abilities and Abilities.id then
+      local okId, id = pcall(Abilities.id, a)
+      if okId and id then return id end
+    end
+  end
+  return 0
 end
 
 local function hp_percent(battler)
@@ -433,6 +456,12 @@ local function side_cmp(vm, op, wantSet)
   local b = AiCmds.battler(vm, op.battler)
   local side = AiCmds.side_of(vm, b)
   local bits = side_status_bits(side)
+  -- pokeemerald/src/battle_util.c:1815
+  if side and side.tokens and require("src.core.game3.battle.profile").rule(vm.st, "futureAttackSideStatus") then
+    for _, tok in ipairs(side.tokens) do
+      if tok.id == "EXP_FUTURE_SIGHT" then bits = bit_or_local(bits, SIDE_STATUS.FUTUREATTACK) end
+    end
+  end
   local hit = bit_and_local(bits, op.status or 0) ~= 0
   if (wantSet and hit) or ((not wantSet) and (not hit)) then
     branch(vm, op.target)
@@ -558,9 +587,10 @@ function CMD.get_how_powerful_move_is(vm, op)
   local mon = vm.user.mon
   for i = 1, 4 do
     local mv = mon and mon.moves and mon.moves[i]
-    local e = mv and move_effect(mv) or 0
-    local p = mv and move_power(mv) or 0
-    if mv and mv ~= 0 and mv ~= "" and not DISCOURAGED[e] and p > 1 then
+    local valid = mv and mv ~= 0 and mv ~= ""
+    local e = valid and move_effect(mv) or 0
+    local p = valid and move_power(mv) or 0
+    if valid and not DISCOURAGED[e] and p > 1 then
       moveDmgs[i] = ai_damage(vm, mv, i)
     else
       moveDmgs[i] = 0
@@ -795,16 +825,91 @@ local function mon_has_move(battler, moveId)
   for i = 1, 4 do
     local mv = mon.moves[i]
     if mv == moveId then return true end
-    if type(mv) == "string" and Moves.BY_NUM[moveId] == mv then return true end
+    if type(mv) == "string" and Moves.numForName(mv) == moveId then return true end
   end
   return false
 end
 
+local function rse_history(vm)
+  local rule = require("src.core.game3.battle.profile").rule(vm.st, "aiMoveHistory")
+  return rule == "battler" or rule == "rs_position"
+end
+
+local function rs_history(vm)
+  return require("src.core.game3.battle.profile").rule(vm.st, "aiMoveHistory") == "rs_position"
+end
+
+local function history_moves(vm)
+  local State = require("src.core.game3.battle.state")
+  return require("src.core.game3.battle.ai").usedMoves(vm.st, State.idOf(vm.target))
+end
+
+local function list_has(list, moveId)
+  local want = tonumber(moveId) or Moves.numForName(moveId)
+  for i = 1, #list do
+    if list[i] ~= 0 and list[i] == want then return true end
+  end
+  return false
+end
+
+local function own_moves(battler)
+  local out = { 0, 0, 0, 0 }
+  local mon = battler and battler.mon
+  for i = 1, 4 do
+    local mv = mon and mon.moves and mon.moves[i]
+    out[i] = (type(mv) == "number" and mv) or (mv and Moves.numForName(mv)) or 0
+  end
+  return out
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:1803
+local function rse_has_move(vm, op, negate)
+  local which = tonumber(op.battler) or 0
+  local list
+  if which == 1 or (which == 3 and (negate or rs_history(vm))) then
+    list = own_moves(vm.user)
+  elseif which == 3 then
+    local State = require("src.core.game3.battle.state")
+    local p = vm.st and State.battler(vm.st, State.PARTNER(State.idOf(vm.user)))
+    if not p or (tonumber(p.mon and p.mon.hp) or 0) <= 0 then return next_ip(vm) end
+    list = own_moves(p)
+  else
+    list = history_moves(vm)
+  end
+  local has = list_has(list, op.move)
+  if has ~= negate then branch(vm, op.target) else next_ip(vm) end
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:1901
+local function rse_has_effect(vm, op, negate)
+  local which = tonumber(op.battler) or 0
+  local found = false
+  if which == 1 or which == 3 then
+    for _, mv in ipairs(own_moves(vm.user)) do
+      if mv ~= 0 and move_effect(mv) == op.effect then found = true end
+    end
+  else
+    -- pokeruby/src/battle_ai_script_commands.c:1546
+    if rs_history(vm) then
+      if negate then next_ip(vm) else branch(vm, op.target) end
+      return
+    end
+    local hist = history_moves(vm)
+    local gate = negate and hist or own_moves(vm.user)
+    for i = 1, 4 do
+      if gate[i] ~= 0 and move_effect(hist[i]) == op.effect then found = true end
+    end
+  end
+  if found ~= negate then branch(vm, op.target) else next_ip(vm) end
+end
+
 function CMD.if_has_move(vm, op)
+  if rse_history(vm) then return rse_has_move(vm, op, false) end
   local b = AiCmds.battler(vm, op.battler)
   if mon_has_move(b, op.move) then branch(vm, op.target) else next_ip(vm) end
 end
 function CMD.if_doesnt_have_move(vm, op)
+  if rse_history(vm) then return rse_has_move(vm, op, true) end
   local b = AiCmds.battler(vm, op.battler)
   if not mon_has_move(b, op.move) then branch(vm, op.target) else next_ip(vm) end
 end
@@ -820,6 +925,7 @@ local function mon_has_effect(battler, effect)
 end
 
 function CMD.if_has_move_with_effect(vm, op)
+  if rse_history(vm) then return rse_has_effect(vm, op, false) end
   local b = AiCmds.battler(vm, op.battler)
   if b == vm.target then
     -- pret history path — best-effort use known moves
@@ -830,6 +936,7 @@ function CMD.if_has_move_with_effect(vm, op)
 end
 
 function CMD.if_doesnt_have_move_with_effect(vm, op)
+  if rse_history(vm) then return rse_has_effect(vm, op, true) end
   local b = AiCmds.battler(vm, op.battler)
   if not mon_has_effect(b, op.effect) then branch(vm, op.target) else next_ip(vm) end
 end
@@ -907,7 +1014,8 @@ end
 
 function CMD.get_protect_count(vm, op)
   local b = AiCmds.battler(vm, op.battler)
-  vm.funcResult = (b and b.protectUses) or 0
+  -- pokefirered/src/battle_ai_script_commands.c:1847-1856
+  vm.funcResult = (b and b.expProtectStreak) or 0
   next_ip(vm)
 end
 
@@ -929,6 +1037,147 @@ end
 
 function CMD.if_target_not_taunted(vm, op)
   branch(vm, op.target) -- always true (taunt unsupported)
+end
+
+local function can_escape_check(user, target)
+  if not user then return true end
+  if user.meanLook or user.escapePrevention or user.expTrapped or user.expTrappedBy or (user.expTrapTurns or 0) > 0 or user.wrapped or user.expIngrain then
+    return false
+  end
+  if target and not (target.fainted or (target.mon and (tonumber(target.mon.hp) or 0) <= 0)) then
+    local tab = ability_of(target)
+    local uab = ability_of(user)
+    -- SHADOW_TAG: 23
+    if tab == 23 and uab ~= 23 then
+      return false
+    end
+    -- ARENA_TRAP: 71, LEVITATE: 26, FLYING: 2
+    if tab == 71 and uab ~= 26 then
+      local t1, t2 = mon_types(user)
+      if t1 ~= Types.ID.FLYING and t2 ~= Types.ID.FLYING then
+        return false
+      end
+    end
+    -- MAGNET_PULL: 42, STEEL: 8
+    if tab == 42 then
+      local t1, t2 = mon_types(user)
+      if t1 == Types.ID.STEEL or t2 == Types.ID.STEEL then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function CMD.if_can_escape(vm, op)
+  if can_escape_check(vm.user, vm.target) then branch(vm, op.target) else next_ip(vm) end
+end
+
+function CMD.if_cant_escape(vm, op)
+  if not can_escape_check(vm.user, vm.target) then branch(vm, op.target) else next_ip(vm) end
+end
+
+function AiCmds.canEscape(user, target)
+  return can_escape_check(user, target)
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:1140
+local function wanted_battler(vm, which)
+  local State = require("src.core.game3.battle.state")
+  if which == 1 then return vm.user end
+  if which == 3 or which == 2 then
+    local base = (which == 3) and vm.user or vm.target
+    local id = State.idOf(base)
+    return id and vm.st and State.battler(vm.st, State.PARTNER(id)) or nil
+  end
+  return vm.target
+end
+
+local function same_side(a, b)
+  return a ~= nil and b ~= nil and a.side == b.side
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:2268
+function CMD.if_target_is_ally(vm, op)
+  if same_side(vm.user, vm.target) then branch(vm, op.target) else next_ip(vm) end
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:1156
+function CMD.is_of_type(vm, op)
+  local b = wanted_battler(vm, op.battler)
+  local t1, t2 = mon_types(b)
+  vm.funcResult = (b and (t1 == op.type or t2 == op.type)) and 1 or 0
+  next_ip(vm)
+end
+
+local ABILITY_SHADOW_TAG, ABILITY_MAGNET_PULL, ABILITY_ARENA_TRAP = 23, 42, 71
+
+-- pokeemerald/src/battle_ai_script_commands.c:1407
+function CMD.check_ability(vm, op)
+  local b = wanted_battler(vm, op.battler)
+  local want = tonumber(op.ability) or 0
+  local ability = want
+  if op.battler == 0 or op.battler == 2 then
+    local State = require("src.core.game3.battle.state")
+    local hist = vm.st and vm.st._aiHistory and vm.st._aiHistory.abilities
+    local recorded = hist and hist[State.idOf(b)]
+    local own = ability_of(b)
+    if recorded and recorded ~= 0 then
+      ability = recorded
+      vm.funcResult = ability
+    elseif own == ABILITY_SHADOW_TAG or own == ABILITY_MAGNET_PULL or own == ABILITY_ARENA_TRAP then
+      ability = own
+    else
+      local species = b and tonumber(b.species or (b.mon and b.mon.species)) or 0
+      local pair = require("src.core.game3.pokemon").abilities(species) or {}
+      local a1, a2 = pair[1] or 0, pair[2] or 0
+      if a1 ~= 0 then
+        if a2 ~= 0 then
+          if a1 ~= want and a2 ~= want then ability = a1 else ability = 0 end
+        else
+          ability = a1
+        end
+      else
+        ability = a2
+      end
+    end
+  else
+    ability = ability_of(b)
+  end
+  if ability == 0 then
+    vm.funcResult = 2
+  elseif ability == want then
+    vm.funcResult = 1
+  else
+    vm.funcResult = 0
+  end
+  next_ip(vm)
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:2276
+function CMD.if_flash_fired(vm, op)
+  local b = wanted_battler(vm, op.battler)
+  if b and b.expFlashFire then branch(vm, op.target) else next_ip(vm) end
+end
+
+-- pokeemerald/src/battle_ai_script_commands.c:2061
+function CMD.if_holds_item(vm, op)
+  local b = wanted_battler(vm, op.battler)
+  local item = 0
+  if same_side(b, vm.user) then
+    local mon = b and b.mon
+    item = tonumber(b and (b.item or (mon and (mon.item or mon.heldItem)))) or 0
+  else
+    local State = require("src.core.game3.battle.state")
+    local hist = vm.st and vm.st._aiHistory and vm.st._aiHistory.itemEffects
+    item = tonumber(hist and hist[State.idOf(b)]) or 0
+  end
+  local v = tonumber(op.item) or 0
+  if bit_or_local(v % 256, math.floor(v / 256) % 256) == item then
+    branch(vm, op.target)
+  else
+    next_ip(vm)
+  end
 end
 
 function AiCmds.dispatch(vm, op)

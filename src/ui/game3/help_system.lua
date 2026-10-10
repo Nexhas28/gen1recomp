@@ -2,12 +2,18 @@
 -- never replaces a menu or advances the field, scripts, battle, or their tasks.
 local Options = require('src.core.game3.options')
 local Stack = require('src.ui.game3.stack')
-local Strings = require('src.core.Strings')
+local RomText = require('src.core.game3.rom_text')
 local Rules = require('src.core.game3.help_rules')
 local Font = require('src.ui.game3.frlg_font')
 local Help = {open=false, seenIntro=false}
 local MENU_CONTEXT = {pokedex=4, party=5, bag=9, berry_pouch=9, tm_case=9,
   trainer=10, save=12, option=13, shop=17, pc_menu=27, box_storage=28}
+local HELD_KEYS = {'up','down','left','right'}
+local repeatInput, repeatKey, repeatOn
+local REPEAT_SHIM = {wasPressed=function(_,key)
+  if not repeatInput then return false end
+  return repeatInput:wasPressed(key) or (repeatOn and key==repeatKey)
+end}
 local function loaded(name) return package.loaded['src.'..name] end
 function Help.installPack(pack)
   Help.pack=pack
@@ -188,16 +194,15 @@ function Help.update(game)
   if not input then return false end
   if Help.open then
     -- GBA joypad repeat: delay before held directions repeat every five frames.
-    local repeatKey
-    for _,key in ipairs({'up','down','left','right'}) do
-      if input.isDown and input:isDown(key) then repeatKey=key;break end
+    local heldKey
+    for _,key in ipairs(HELD_KEYS) do
+      if input.isDown and input:isDown(key) then heldKey=key;break end
     end
-    if repeatKey~=Help._held then Help._held=repeatKey;Help._heldFrames=0 end
+    if heldKey~=Help._held then Help._held=heldKey;Help._heldFrames=0 end
     Help._heldFrames=(Help._heldFrames or 0)+1
-    local repeated=repeatKey and Help._heldFrames>=20 and (Help._heldFrames-20)%5==0
-    Help.handleInput({wasPressed=function(_,key)
-      return input:wasPressed(key) or (repeated and key==repeatKey)
-    end})
+    repeatInput, repeatKey = input, heldKey
+    repeatOn = heldKey ~= nil and Help._heldFrames>=20 and (Help._heldFrames-20)%5==0
+    Help.handleInput(REPEAT_SHIM)
     return true
   end
   if not Help.pack or Help.enabled==false then return false end
@@ -211,10 +216,37 @@ end
 local function expand(s)
   return tostring(s or ''):gsub('{PLAYER}',function() return Help.session.name or Help.session.playerName or 'PLAYER' end)
     :gsub('{RIVAL}',function() return Help.session.rivalName or 'RIVAL' end)
-    :gsub('{PC_OWNER}',function() return Rules.flag(Help.session,'SYS_NOT_SOMEONES_PC') and 'BILL' or 'SOMEONE' end)
+    -- src/help_system_util.c:429
+    :gsub('{PC_OWNER}',function() return RomText.plain(Rules.flag(Help.session,'SYS_NOT_SOMEONES_PC') and 'gString_Bill' or 'gString_Someone') end)
+end
+local function help_lines(s)
+  local clean=expand(s):gsub('\\n','\n'):gsub('\\l','\n'):gsub('\\p','\n')
+  local lines={}
+  for line in (clean..'\n'):gmatch('(.-)\n') do lines[#lines+1]=line end
+  return lines
+end
+-- src/help_system_util.c:373
+local function text_line(line,x,y,small,opts)
+  local space=small and 5 or 4
+  local px,depth,word=x,0,{}
+  local function flush()
+    if #word>0 then
+      local w=table.concat(word)
+      local room=x+208-px
+      if room>0 then opts.maxWidth=room;Font.draw(w,px,y,opts) end
+      px=px+Font.measure(w,{small=small})
+      word={}
+    end
+  end
+  for ch in line:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+    if ch=='{' then depth=depth+1 elseif ch=='}' then depth=math.max(0,depth-1) end
+    if ch==' ' and depth==0 then flush();px=px+space else word[#word+1]=ch end
+  end
+  flush()
 end
 local function text(s,x,y,small,color)
-  Font.draw(expand(s),x,y,{small=small,maxWidth=208,color=color or {1,1,1,1},shadow={98/255,98/255,98/255,1}})
+  local opts={small=small,color=color or {1,1,1,1},shadow={98/255,98/255,98/255,1}}
+  for i,line in ipairs(help_lines(s)) do text_line(line,x,y+(i-1)*15,small,opts) end
 end
 local function tile(index,x,y,w,h)
   local g=love.graphics
@@ -249,11 +281,14 @@ function Help.draw()
   if article then tile(3,8,24,224,136) end
   tile(article and 4 or 0,8,16,224,8)
   tile(article and 5 or 1,8,152,224,8)
-  text(Strings('HELP'),14,2,true)
-  local controls=Help.level=='welcome' and 'A: NEXT' or article and 'A B: CANCEL'
-    or Help.level=='main' and '↑↓ PICK  A OK  B END' or '↑↓ PICK  A OK  B CANCEL'
-  controls=Strings(controls)
-  text(controls,math.max(75,232-Font.measure(controls,{small=true})),2,true)
+  -- src/help_system_util.c:87
+  text(RomText.plain('gString_Help'),14,2,true)
+  local controls=RomText.plain(Help.level=='welcome' and 'gText_HelpSystemControls_A_Next' -- src/help_system.c:2291
+    or article and 'gText_HelpSystemControls_AorBtoCancel' -- src/help_system.c:2396
+    or Help.level=='main' and 'gText_HelpSystemControls_PickOkEnd' -- src/help_system.c:1942
+    or 'gText_HelpSystemControls_PickOkCancel') -- src/help_system.c:1975
+  local Chrome=require('src.ui.game3.pokedex_chrome')
+  Chrome.drawControlInfoLeft(controls,math.max(75,232-Chrome.measureControlInfo(controls)),2)
   g.setScissor(16,24,208,128)
   if Help.level=='welcome' then
     text(Help.pack.greetings,16,24)
@@ -262,8 +297,7 @@ function Help.draw()
     g.setScissor(8,24,224,128)
     tile(5,8,40,224,8)
     g.setScissor(16,48,208,104)
-    local wrapped=Font.wrap(expand(Help.article.answer),208)
-    local lines={};for line in (wrapped..'\n'):gmatch('(.-)\n') do lines[#lines+1]=line end
+    local lines=help_lines(Help.article.answer)
     Help.maxArticleScroll=math.max(0,#lines-7)
     for i=1,7 do text(lines[i+Help.articleScroll],16,48+(i-1)*15) end
   else
@@ -286,8 +320,10 @@ function Help.draw()
     else
       local row=Help.rows[Help.cursor]
       g.setColor(1,1,1,1);g.rectangle('fill',16,112,208,40)
-      Font.draw(Help.pack.descriptions[row.id or 6] or '',18,118,{maxWidth=204,
-        colors={fg={98/255,98/255,98/255,1},shadow={213/255,213/255,205/255,1}}})
+      local dopts={colors={fg={98/255,98/255,98/255,1},shadow={213/255,213/255,205/255,1}}}
+      for i,line in ipairs(help_lines(Help.pack.descriptions[row.id or 6] or '')) do
+        text_line(line,18,118+(i-1)*15,false,dopts)
+      end
     end
   end
   g.pop()

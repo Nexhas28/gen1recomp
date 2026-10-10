@@ -1,4 +1,5 @@
 -- Comprehensive unit tests for Battle Pokémon Switch and Faint systems in Game 3.
+require("tests.game3_cache").mountOrSkip("game3_battle_switch_and_faint_test")
 
 local State = require("src.core.game3.battle.state")
 local Engine = require("src.core.game3.battle.engine")
@@ -70,6 +71,24 @@ do
     { species = 4, hp = 0, maxHp = 19 },
   }
   eq(Engine.hasLivingMons(deadParty), false, "hasLivingMons false when all dead")
+
+  -- pokeemerald/src/battle_script_commands.c:3556 Cmd_checkteamslost
+  local eggParty = {
+    { species = 1, hp = 0, maxHp = 20 },
+    { species = 4, hp = 20, maxHp = 20, isEgg = true },
+  }
+  eq(Engine.hasLivingMons(eggParty), false, "an egg with HP is not a living battler")
+  eq(Engine.nextLivingMonIndex(eggParty, 1), nil, "nextLivingMonIndex skips the egg")
+  local foeUp = { { species = 16, hp = 30, maxHp = 30 } }
+  local foeDown = { { species = 16, hp = 0, maxHp = 30 } }
+  eq(Engine.checkEnd({ playerParty = eggParty, foeParty = foeUp }), "lose",
+    "egg-only party loses while the foe is still up")
+  eq(Engine.checkEnd({ playerParty = eggParty, foeParty = foeDown }), "lose",
+    "egg-only party loses even when the foe has also fainted")
+  eq(Engine.checkEnd({
+    playerParty = { { species = 1, hp = 12, maxHp = 20 } },
+    foeParty = { { species = 16, hp = 20, maxHp = 20, isEgg = true } },
+  }), "win", "a foe party that is only an egg is defeated")
 end
 
 print("\n--- Testing SwitchSeq Dynamic Withdraw Strings ---")
@@ -86,24 +105,29 @@ do
   local logged = {}
   local pushMsg = function(t) logged[#logged + 1] = t end
 
-  -- >50% HP
+  -- pokefirered/src/battle_script_commands.c:6025
   SwitchSeq.beginPlayerSwitch(st, 2, { headless = true, pushMsg = pushMsg })
-  check(logged[1]:find("that's enough!"), "HP > 50% uses 'that\\'s enough!'")
+  check(logged[1]:find("that's enough!"), "foe unhurt uses 'that\'s enough!'")
   eq(st.player.partyIndex, 2, "active player party index switched to 2")
   eq(st.enemy.participants[1], true, "outgoing mon index recorded as participant")
   eq(st.enemy.participants[2], true, "incoming mon index recorded as participant")
 
-  -- <=50% HP
   logged = {}
+  st.enemy.mon.hp = 24
   SwitchSeq.beginPlayerSwitch(st, 3, { headless = true, pushMsg = pushMsg })
-  check(logged[1]:find("good job!"), "HP <= 50% uses 'good job!'")
+  check(logged[1]:find(", come back!"), "foe lost 20% uses 'come back!'")
   eq(st.player.partyIndex, 3, "active player party index switched to 3")
 
-  -- <=20% HP
   logged = {}
+  st.enemy.mon.hp = 12
   SwitchSeq.beginPlayerSwitch(st, 1, { headless = true, pushMsg = pushMsg })
-  check(logged[1]:find("you did it!"), "HP <= 20% uses 'you did it!'")
+  check(logged[1]:find("OK!\nCome back!"), "foe lost 50% uses 'OK! Come back!'")
   eq(st.player.partyIndex, 1, "active player party index switched to 1")
+
+  logged = {}
+  st.enemy.mon.hp = 2
+  SwitchSeq.beginPlayerSwitch(st, 2, { headless = true, pushMsg = pushMsg })
+  check(logged[1]:find("good!\nCome back!"), "foe lost over 70% uses 'good! Come back!'")
 end
 
 print("\n--- Testing Manual Switch Turn Execution vs Opponent Attack ---")
@@ -112,7 +136,7 @@ do
   local pMon2 = Damage.ensureStats({ species = 4, level = 10, hp = 30, maxHp = 30, moves = { 33 }, pp = { 35 } })
   local foeMon = Damage.ensureStats({ species = 16, level = 10, hp = 30, maxHp = 30, moves = { 33 }, pp = { 35 } })
 
-  local ok, err = Battle.start({
+  local ok, err = Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1, pMon2 },
@@ -150,7 +174,7 @@ do
   local pMon2 = Damage.ensureStats({ species = 4, level = 10, hp = 30, maxHp = 30, moves = { 33 }, pp = { 35 } })
   local foeMon = Damage.ensureStats({ species = 19, level = 10, hp = 30, maxHp = 30, moves = { 228 }, pp = { 20 } })
 
-  Battle.start({
+  Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1, pMon2 },
@@ -182,7 +206,7 @@ do
   local eMon1 = Damage.ensureStats({ species = 16, level = 5, hp = 1, maxHp = 15, moves = { 33 }, pp = { 35 } })
   local eMon2 = Damage.ensureStats({ species = 19, level = 5, hp = 15, maxHp = 15, moves = { 33 }, pp = { 35 } })
 
-  local ok, err = Battle.start({
+  local ok, err = Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1, pMon2 },
@@ -228,7 +252,7 @@ do
   local pMon1 = Damage.ensureStats({ species = 1, level = 5, hp = 1, maxHp = 20, moves = { 33 }, pp = { 35 } })
   local foeMon = Damage.ensureStats({ species = 16, level = 20, hp = 50, maxHp = 50, moves = { 33 }, pp = { 35 } })
 
-  Battle.start({
+  Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1 },
@@ -334,7 +358,7 @@ do
   local pMon2 = Damage.ensureStats({ species = 4, level = 10, hp = 30, maxHp = 30, exp = 1000, moves = { 33 }, pp = { 35 } })
   local foeMon = Damage.ensureStats({ species = 16, level = 10, hp = 1, maxHp = 30, moves = { 33 }, pp = { 35 } })
 
-  Battle.start({
+  Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1, pMon2 },
@@ -382,6 +406,9 @@ do
     },
     trainerName = "CAMPER",
   })
+  -- include/constants/trainers.h:244
+  st.trainerClass = 61
+  st.trainerName = "RICKY"
   local logged = {}
   local pushMsg = function(t) logged[#logged + 1] = t end
 
@@ -390,8 +417,8 @@ do
   eq(st.player.partyIndex, 2, "player active slot is 2")
   eq(st.enemy.partyIndex, 2, "enemy active slot is 2")
   check(logged[1]:find("that's enough!"), "step 1: player recall message")
-  check(logged[2]:find("sent\nout"), "step 2: enemy sendout message (BEFORE player sendout)")
-  check(logged[3]:find("Go!"), "step 3: player sendout message (AFTER enemy sendout)")
+  check(logged[2]:find("Go!"), "step 2: player sendout message (BEFORE enemy sendout)")
+  check(logged[3]:find("sent\nout"), "step 3: enemy sendout message (AFTER player sendout)")
 
   -- Non-headless step ordering test
   SwitchSeq.beginShiftSwitch(st, 2, 2, { headless = false, pushMsg = pushMsg })
@@ -410,16 +437,16 @@ do
   local iWithdraw = find_step("withdraw")
   local iEnemySend = find_step("sendout_enemy")
   local iPlayerSend = find_step("sendout_player")
-  local iEntryTriggers = find_step("entry_triggers")
+  local iEntryTriggers = find_step("entry_triggers", iEnemySend)
 
   check(iWithdraw ~= nil, "has withdraw step")
   check(iEnemySend ~= nil, "has sendout_enemy step")
   check(iPlayerSend ~= nil, "has sendout_player step")
   check(iEntryTriggers ~= nil, "has entry_triggers step")
 
-  check(iWithdraw < iEnemySend, "player withdraws BEFORE enemy sends out")
-  check(iEnemySend < iPlayerSend, "enemy sends out BEFORE player sends out (retail FRLG)")
-  check(iPlayerSend < iEntryTriggers, "entry triggers fire AFTER both mons placed on field")
+  check(iWithdraw < iPlayerSend, "player withdraws BEFORE player sends out")
+  check(iPlayerSend < iEnemySend, "player sends out BEFORE enemy sends out (retail FRLG)")
+  check(iEnemySend < iEntryTriggers, "entry triggers fire AFTER the enemy send-out")
 end
 
 print("\n--- Testing SwitchSeq.beginTrainerSlideIn ---")
@@ -442,7 +469,7 @@ do
   local eMon1 = Damage.ensureStats({ species = 16, level = 10, hp = 1, maxHp = 30, moves = { 33 }, pp = { 35 } })
   local eMon2 = Damage.ensureStats({ species = 19, level = 10, hp = 30, maxHp = 30, moves = { 33 }, pp = { 35 } })
 
-  local ok = Battle.start({
+  local ok = Battle.start({ playerName = "RED",
     headless = true,
     autoFight = false,
     playerParty = { pMon1, pMon2 },

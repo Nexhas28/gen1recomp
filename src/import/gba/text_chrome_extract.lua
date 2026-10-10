@@ -1,7 +1,9 @@
 -- Pure ROM extractor for GBA FireRed font glyphs, widths, and text window chrome.
 -- Extracts:
 --   1) latin_normal font (512 glyphs @ 0x1FF300, widths @ 0x207300) -> 256x512 FG/Shadow
---   2) latin_small font (288 glyphs @ 0x1EAF00, widths @ 0x1EEF00) -> 256x288 FG/Shadow
+--   2) latin_small font (512 glyphs @ 0x1EAF00, widths @ 0x1EEF00) -> 256x512 FG/Shadow
+--   2b) japanese_normal (512 glyphs @ 0x207500, widths @ 0x20F500) and
+--       japanese_small (512 glyphs @ 0x1EF100) -> 256x512 FG/Shadow each
 --   3) down_arrows prompt icon (8 frames 16x16 @ 0x1EA14C) -> 128x16 FG
 --   4) menu_message dialogue frame (18 4bpp tiles @ 0x41F1C8, stdpal_0 @ 0x471DEC) -> 48x24 RGBA
 --   5) std menu frame (9 4bpp tiles @ 0x471A4C, stdpal_3 @ 0x471E4C) -> 24x24 RGBA
@@ -58,8 +60,8 @@ end
 
 --- Decode latin_normal font: 512 glyphs (each is four 8x8 2bpp tiles in 16x16 layout)
 function TextChromeExtract.extractLatinNormal(rom)
-  local baseGfx = 0x1FF300
-  local baseWidths = 0x207300
+  local baseGfx = Versions.address(0x1FF300)
+  local baseWidths = Versions.address(0x207300)
   local glyphCount = 512
   local cols = 16
   local rows = math.floor((glyphCount + cols - 1) / cols)
@@ -128,14 +130,15 @@ function TextChromeExtract.extractLatinNormal(rom)
   }
 end
 
---- Decode latin_small font: 288 glyphs (each is two 8x8 2bpp tiles in 8x16 layout)
+--- Decode latin_small font: 512 glyphs (each is two 8x8 2bpp tiles in 8x16 layout)
 function TextChromeExtract.extractLatinSmall(rom)
-  local baseGfx = 0x1EAF00
-  local baseWidths = 0x1EEF00
-  local glyphCount = 288 -- 0x120
+  local baseGfx = Versions.address(0x1EAF00)
+  local baseWidths = Versions.address(0x1EEF00)
+  -- pokefirered/src/text.c:1380
+  local glyphCount = 512
   local cols = 16
-  local rows = math.floor((glyphCount + cols - 1) / cols) -- 18
-  local sheetW, sheetH = cols * 16, rows * 16 -- 256x288
+  local rows = math.floor((glyphCount + cols - 1) / cols)
+  local sheetW, sheetH = cols * 16, rows * 16
 
   local fgPixels = {}
   local shPixels = {}
@@ -196,9 +199,78 @@ function TextChromeExtract.extractLatinSmall(rom)
   }
 end
 
+-- The US cart still carries its Japanese fonts (pokefirered/src/text.c:141,
+-- :227), which the text printer draws for a string in Japanese mode; a Japanese
+-- translation prints with them.  Each glyph is 2bpp tiles like the Latin ones,
+-- laid out differently: DecompressGlyph_Normal (text.c:1452) reads the normal
+-- font eight glyphs to a 0x200-byte row, the glyph's top tiles at +0x20*n and
+-- its bottom tiles 0x100 bytes below; DecompressGlyph_Small (text.c:1372) reads
+-- the small font sixteen to a row, one 8px tile over one.
+local function decode_glyph_sheet(rom, glyphCount, tilesOf)
+  local cols = 16
+  local sheetW, sheetH = cols * 16, math.floor((glyphCount + cols - 1) / cols) * 16
+  local fg, sh = {}, {}
+  for i = 1, sheetW * sheetH * 4 do
+    fg[i] = 0
+    sh[i] = 0
+  end
+  for gid = 0, glyphCount - 1 do
+    local ox = (gid % cols) * 16
+    local oy = math.floor(gid / cols) * 16
+    for _, sub in ipairs(tilesOf(gid)) do
+      local t = unpack_tile16(rom, sub[1])
+      for y = 0, 7 do
+        for x = 0, 7 do
+          local v = t[y][x]
+          if v == 1 or v == 2 then
+            local pi = ((oy + sub[3] + y) * sheetW + ox + sub[2] + x) * 4 + 1
+            local dst = (v == 1) and fg or sh
+            dst[pi], dst[pi + 1], dst[pi + 2], dst[pi + 3] = 255, 255, 255, 255
+          end
+        end
+      end
+    end
+  end
+  local fgChars, shChars = {}, {}
+  for i = 1, sheetW * sheetH * 4 do
+    fgChars[i] = string.char(fg[i])
+    shChars[i] = string.char(sh[i])
+  end
+  return table.concat(fgChars), table.concat(shChars), sheetW, sheetH
+end
+
+TextChromeExtract.JAPANESE_GLYPHS = 512
+
+-- pokefirered/src/text.c:227 sFontNormalJapaneseGlyphs, :228 its widths (0x118 bytes)
+function TextChromeExtract.extractJapaneseNormal(rom)
+  local base = Versions.address(0x207500)
+  local baseWidths = Versions.address(0x20F500)
+  local fgRgba, shRgba, w, h = decode_glyph_sheet(rom, TextChromeExtract.JAPANESE_GLYPHS, function(gid)
+    local g = base + 0x200 * math.floor(gid / 8) + 0x20 * (gid % 8)
+    return { { g, 0, 0 }, { g + 0x10, 8, 0 }, { g + 0x100, 0, 8 }, { g + 0x110, 8, 8 } }
+  end)
+  local widths = {}
+  for gid = 0, 0x118 - 1 do
+    widths[gid] = rom:get(baseWidths + gid) or 10
+  end
+  -- text.c:1492 a Japanese space is 10px wide
+  widths[0] = 10
+  return { fgRgba = fgRgba, shRgba = shRgba, width = w, height = h, widths = widths }
+end
+
+-- pokefirered/src/text.c:141 sFontSmallJapaneseGlyphs; every glyph is 8px wide (text.c:1391)
+function TextChromeExtract.extractJapaneseSmall(rom)
+  local base = Versions.address(0x1EF100)
+  local fgRgba, shRgba, w, h = decode_glyph_sheet(rom, TextChromeExtract.JAPANESE_GLYPHS, function(gid)
+    local g = base + 0x200 * math.floor(gid / 16) + 0x10 * (gid % 16)
+    return { { g, 0, 0 }, { g + 0x100, 0, 8 } }
+  end)
+  return { fgRgba = fgRgba, shRgba = shRgba, width = w, height = h }
+end
+
 -- src/braille_text.c:15
 function TextChromeExtract.extractBraille(rom)
-  local baseGfx = TextChromeExtract.BRAILLE_GFX
+  local baseGfx = Versions.address(TextChromeExtract.BRAILLE_GFX)
   local glyphCount = TextChromeExtract.BRAILLE_GLYPHS
   local cols = 16
   local rows = math.floor((glyphCount + cols - 1) / cols)
@@ -264,7 +336,7 @@ end
 
 --- Decode down_arrows: 8 frames of 16x16 (sDownArrowTiles @ 0x1EA14C in FireRed)
 function TextChromeExtract.extractDownArrows(rom)
-  local baseGfx = 0x1EA14C
+  local baseGfx = Versions.address(0x1EA14C)
   local sheetW, sheetH = 128, 16
   local pal = {
     [0] = { 0, 0, 0, 0 },
@@ -326,7 +398,7 @@ end
 
 -- pokefirered/src/text.c:32
 function TextChromeExtract.extractTextCursor(rom)
-  local baseGfx, basePal = 0x1EA54C, 0x3CC2E4
+  local baseGfx, basePal = Versions.address(0x1EA54C), Versions.address(0x3CC2E4)
   local pal = { [0] = { 0, 0, 0, 0 } }
   for i = 1, 15 do
     local lo = (rom and rom:get(basePal + i * 2)) or 0
@@ -407,13 +479,13 @@ local function decode_4bpp_frame(rom, offset, tilesW, tilesH, pal, maxTiles)
 end
 
 function TextChromeExtract.extractMenuMessage(rom)
-  local pal0 = read_pal(rom, 0x471DEC)
-  return decode_4bpp_frame(rom, 0x41F1C8, 6, 3, pal0, 18)
+  local pal0 = read_pal(rom, Versions.address(0x471DEC))
+  return decode_4bpp_frame(rom, Versions.address(0x41F1C8), 6, 3, pal0, 18)
 end
 
 function TextChromeExtract.extractStdFrame(rom)
-  local pal3 = read_pal(rom, 0x471E4C)
-  return decode_4bpp_frame(rom, 0x471A4C, 3, 3, pal3, 9)
+  local pal3 = read_pal(rom, Versions.address(0x471E4C))
+  return decode_4bpp_frame(rom, Versions.address(0x471A4C), 3, 3, pal3, 9)
 end
 
 local KEYPAD_PALETTE = {
@@ -483,8 +555,8 @@ function TextChromeExtract.extractKeypadIcons(rom)
 end
 
 function TextChromeExtract.extractSignpostFrame(rom)
-  local pal1 = read_pal(rom, 0x471E0C)
-  return decode_4bpp_frame(rom, 0x470B0C, 5, 4, pal1, 19)
+  local pal1 = read_pal(rom, Versions.address(0x471E0C))
+  return decode_4bpp_frame(rom, Versions.address(0x470B0C), 5, 4, pal1, 19)
 end
 
 local function format_widths_lua(widths, comment)
@@ -516,7 +588,7 @@ local function read_ptr(rom, offset)
 end
 
 function TextChromeExtract.extractUserFrame(rom, frameType)
-  local entry = TextChromeExtract.USER_FRAMES_TABLE + frameType * 8
+  local entry = Versions.address(TextChromeExtract.USER_FRAMES_TABLE) + frameType * 8
   local tiles = read_ptr(rom, entry)
   local pal = read_pal(rom, read_ptr(rom, entry + 4))
   return decode_4bpp_frame(rom, tiles, 3, 3, pal, 9)
@@ -546,6 +618,15 @@ function TextChromeExtract.run(rom, cache, opts)
   write_cache(cache, fDir .. "/latin_small_fg.rgba", small.fgRgba)
   write_cache(cache, fDir .. "/latin_small_shadow.rgba", small.shRgba)
   write_cache(cache, fDir .. "/latin_small_widths.lua", format_widths_lua(small.widths, "sFontSmallLatinGlyphWidths (FireRed @ 0x1EEF00)"))
+
+  local jpn = TextChromeExtract.extractJapaneseNormal(rom)
+  write_cache(cache, fDir .. "/japanese_normal_fg.rgba", jpn.fgRgba)
+  write_cache(cache, fDir .. "/japanese_normal_shadow.rgba", jpn.shRgba)
+  write_cache(cache, fDir .. "/japanese_widths.lua", format_widths_lua(jpn.widths, "sFontNormalJapaneseGlyphWidths (FireRed @ 0x20F500)"))
+
+  local jps = TextChromeExtract.extractJapaneseSmall(rom)
+  write_cache(cache, fDir .. "/japanese_small_fg.rgba", jps.fgRgba)
+  write_cache(cache, fDir .. "/japanese_small_shadow.rgba", jps.shRgba)
 
   local braille = TextChromeExtract.extractBraille(rom)
   write_cache(cache, fDir .. "/braille_fg.rgba", braille.fgRgba)
@@ -579,13 +660,18 @@ function TextChromeExtract.run(rom, cache, opts)
     write_cache(cache, cDir .. "/user_frame_" .. i .. ".rgba", user.rgba)
   end
 
+  local OnlineUi = require("src.import.gba.online_ui_extract")
+  local listRows = OnlineUi.listChrome(rom, function(path, data) write_cache(cache, path, data) end, cDir)
+
   -- 3) Manifest
   local manifestContent = table.concat({
     "return {",
     "  formatVersion = 1,",
     "  fonts = {",
     "    latin_normal = { width = 256, height = 512, glyphs = 512 },",
-    "    latin_small = { width = 256, height = 288, glyphs = 288 },",
+    "    latin_small = { width = 256, height = 512, glyphs = 512 },",
+    "    japanese_normal = { width = 256, height = 512, glyphs = 512 },",
+    "    japanese_small = { width = 256, height = 512, glyphs = 512 },",
     "    down_arrows = { width = 128, height = 16, frames = 8 },",
     "  },",
     "  frames = {",
@@ -593,6 +679,7 @@ function TextChromeExtract.run(rom, cache, opts)
     "    std = { width = 24, height = 24, tilesW = 3, tilesH = 3 },",
     "    signpost = { width = 40, height = 32, tilesW = 5, tilesH = 4 },",
     "  },",
+    OnlineUi.manifestRows(listRows),
     "}",
     "",
   }, "\n")

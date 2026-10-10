@@ -43,7 +43,8 @@ local session = {
   party = {},
   bag = { pockets = { items = { { id = 4, qty = 3 } } } },
 }
-local game = { data = { maps = MAPS }, session = session }
+local game = { data = { maps = MAPS }, session = session,
+  saveGame = function() return true end }
 
 package.loaded["src.core.game3.runtime"] = {
   getSession = function() return session end,
@@ -75,10 +76,24 @@ local adapters = {
   end,
 }
 
+local romBundle = require("tests.game3_cache").bundle()
+if not romBundle then
+  package.loaded["src.core.game3.rom_text"] = {
+    plain = function(key) return key end, box = function(key) return key end,
+    ascii = function(key) return key end, has = function() return true end,
+    ir = function(key) return { { t = "text", s = key } } end,
+    key = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+    at = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+    count = function() return 0 end, list = function() return {} end,
+    lazy = function(map) return setmetatable({}, { __index = function(_, k) return map[k] end }) end,
+  }
+end
+
 package.loaded["src.core.game3.scripting.space"] = {
   store = store,
   mapId = COUNTER_MAP,
   vm = { ctx = ctx, adapters = adapters },
+  ensureBundle = function() return romBundle end,
 }
 local Space = package.loaded["src.core.game3.scripting.space"]
 
@@ -86,6 +101,7 @@ local Natives = require("src.core.game3.scripting.natives")
 local NativesLink = require("src.core.game3.scripting.natives_link")
 local Link = require("src.core.game3.link")
 local Game3Link = require("src.link.Game3Link")
+local FakeRelay = require("tests.g3link_fake_relay")
 local Versions = require("src.import.gba.versions")
 local Flags = require("src.core.game3.scripting.flags")
 local SaveMenu = require("src.ui.game3.save_menu")
@@ -206,36 +222,45 @@ SaveMenu.confirm()
 eq(result(), 1, "saving reports TRUE, which lets the link continue")
 check(not SaveMenu.isOpen(), "the save menu closed")
 
-print("[test] 7. two FireRed peers pair, anything else is refused")
-local host, guest = Game3Link.loopback({ game = game })
+print("[test] 7. two FireRed peers pair over the relay, anything else is refused")
+local host, guest, room = FakeRelay.pair({ game = game })
 host:update(0)
 guest:update(0)
 check(host:isReady(), "the host reached ready")
 check(guest:isReady(), "the guest reached ready")
+eq(host._transport.relay, true, "over the relay transport")
 eq(#host:players(), 2, "the host lists both players")
 eq(host.myHello.generation, 3, "the hello announces generation 3")
 eq(host.myHello.game3.cacheVersion, Versions.CACHE_VERSION, "the hello carries the cache version")
 
-local Net = require("src.link.Net")
-local a, b = Net.loopbackPair()
-local lone = Game3Link.attach(a, { role = "host", game = game })
-local Session = require("src.link.Session")
-local gen1 = Session.new(b, { role = "guest", kind = "link" })
+local r7 = FakeRelay.room({ seats = 2 })
+local lone = Game3Link.attach(FakeRelay.transport(r7, 0), { game = game })
 local Handshake = require("src.link.Handshake")
-gen1:send(Handshake.hello(game, "battle"))
+r7:session(1):send(Handshake.hello(game, "battle"))
 lone:update(0)
 check(not lone:isOpen(), "a peer with no FireRed hello is refused")
 eq(lone.reason, "peer_is_not_firered", "and says why")
 
-local c, d = Net.loopbackPair()
-local strict = Game3Link.attach(c, { role = "host", game = game })
-local stale = Session.new(d, { role = "guest", kind = "game3" })
+local r7b = FakeRelay.room({ seats = 2 })
+local strict = Game3Link.attach(FakeRelay.transport(r7b, 0), { game = game })
 local staleHello = Game3Link.hello(game, Game3Link.LINKTYPE.BATTLE)
 staleHello.game3.cacheVersion = Versions.CACHE_VERSION + 1
-stale:send(staleHello)
+r7b:session(1):send(staleHello)
 strict:update(0)
 check(not strict:isOpen(), "a peer built on another cache is refused")
 eq(strict.reason, "cache_version_mismatch", "and says why")
+
+local Handshake = require("src.link.Handshake")
+local realRuleset = Handshake.ruleset
+Handshake.ruleset = function() return "gen1_modern" end
+local r7c = FakeRelay.room({ seats = 2 })
+local mixed = Game3Link.attach(FakeRelay.transport(r7c, 0), { game = game })
+local otherHello = Game3Link.hello(game, Game3Link.LINKTYPE.BATTLE)
+Handshake.ruleset = realRuleset
+eq(otherHello.ruleset, Handshake.DEFAULT_RULESET, "the Gen 1 RULESET option never reaches a FireRed hello")
+r7c:session(1):send(otherHello)
+mixed:update(0)
+check(mixed:isOpen() and mixed:isReady(), "so two players with different Gen 1 rulesets still link")
 
 print("[test] 8. CloseLink tears the session down and the peer hears it")
 Link.reset()
@@ -247,10 +272,12 @@ eq(Link.link, nil, "and cleared the cable club session")
 guest:update(0)
 check(not guest:isOpen(), "the peer saw the goodbye")
 eq(guest.reason, "peer_left", "and reports the peer leaving")
+eq(#room.players, 1, "CloseLink also left the relay room")
+eq(room.players[1] and room.players[1].seat, 1, "only the peer is still seated")
 
 print("[test] 9. a peer drop in a link room returns the player to the counter")
 Link.reset()
-local host2, guest2 = Game3Link.loopback({ game = game })
+local host2, guest2, room2 = FakeRelay.pair({ game = game })
 host2:update(0)
 guest2:update(0)
 Link.attach(host2)
@@ -261,7 +288,7 @@ session.warpDestination = nil
 Flags.setVar(store, ctx, Link.VAR_CABLE_CLUB_STATE, Link.USING.UNION_ROOM)
 Flags.setVar(store, ctx, Link.VAR_0x8004, Link.USING.UNION_ROOM)
 mapLoads = {}
-guest2._transport:close()
+room2:drop(1)
 Link.update(0)
 check(not host2:isOpen(), "the survivor closed its end")
 eq(host2.reason, "peer_dropped", "the drop is reported as a peer drop")
@@ -269,8 +296,9 @@ eq(#mapLoads, 1, "the player was warped back")
 eq(mapLoads[1] and mapLoads[1].map, COUNTER_MAP, "to the cable club counter map")
 eq(mapLoads[1] and mapLoads[1].x, 9, "onto the link room door x")
 eq(mapLoads[1] and mapLoads[1].y, 1, "onto the link room door y")
-eq(tonumber(Flags.getVar(store, ctx, Link.VAR_CABLE_CLUB_STATE)), 0,
-  "VAR_CABLE_CLUB_STATE is cleared")
+-- pokefirered/data/scripts/cable_club.inc:106 the 2F's OnFrame exit script clears it
+check(tonumber(Flags.getVar(store, ctx, Link.VAR_CABLE_CLUB_STATE)) ~= 0,
+  "VAR_CABLE_CLUB_STATE stays set for the Pokemon Center's exit script")
 
 print("[test] 10. CleanupLinkRoomState restores the bag and asks for the saved party")
 Link.reset()
@@ -308,8 +336,9 @@ mapLoads = {}
 Natives.special(ctx, NativesLink.SPECIAL.ExitLinkRoom, adapters)
 eq(#mapLoads, 1, "the player left the link room")
 eq(mapLoads[1] and mapLoads[1].map, COUNTER_MAP, "back to the counter")
-eq(tonumber(Flags.getVar(store, ctx, Link.VAR_CABLE_CLUB_STATE)), 0,
-  "VAR_CABLE_CLUB_STATE is cleared")
+-- pokefirered/data/scripts/cable_club.inc:106 the 2F's OnFrame exit script clears it
+check(tonumber(Flags.getVar(store, ctx, Link.VAR_CABLE_CLUB_STATE)) ~= 0,
+  "VAR_CABLE_CLUB_STATE stays set for the Pokemon Center's exit script")
 
 print("[test] 12. the real Pokemon Center 2F door is a dynamic warp back to the counter")
 local Cache = require("tests.game3_cache")
@@ -349,7 +378,7 @@ print("[test] the trainer cards the two machines swap, and the special that show
 Link.reset()
 session.name = "RED"
 session.trainerId = 0x1234
-local cardHost, cardGuest = Game3Link.loopback({ game = game })
+local cardHost, cardGuest = FakeRelay.pair({ game = game })
 cardHost:update(0)
 cardGuest:update(0)
 Link.attach(cardHost)
@@ -365,6 +394,7 @@ cardGuest:send({ type = Link.MSG.CARD, card = { name = "BLUE", trainerId = 0x222
 cardHost:update(0)
 Link.update(0)
 eq(Link.peerCard and Link.peerCard.name, "BLUE", "and the peer's card arrives the same way")
+eq(Link.peerCards[1] and Link.peerCards[1].name, "BLUE", "filed under the sender's seat")
 eq(NativesLink.SPECIAL.Script_ShowLinkTrainerCard, 0x2A,
   "Script_ShowLinkTrainerCard is def_special 0x2A")
 local cardLogs = {}
@@ -373,25 +403,146 @@ local _, _, known = Natives.special({ specialVars = {} }, 0x2A,
 check(known, "and it dispatches to a handler instead of logging an unknown special")
 eq(#cardLogs, 0, "nothing reached the unknown-special log")
 
-print("[test] the counter opens a real transport when the player asks for one")
+print("[test] the counter opens the relay transport, never a LAN socket")
 Link.reset()
 -- pokefirered/src/link.c:386 OpenLink
-local Net = require("src.link.Net")
-local pair = { Net.loopbackPair() }
-local opened = Link.open({ transport = pair[1], role = "host", game = game })
-check(opened ~= nil, "Link.open adopts a transport and attaches it")
+local openRoom = FakeRelay.room({ seats = 2 })
+local opened = Link.open({ transport = FakeRelay.transport(openRoom, 1), game = game })
+check(opened ~= nil, "Link.open adopts a relay transport and attaches it")
 eq(Link.link, opened, "and it becomes the live session")
+eq(opened.seat, 1, "seated from the transport")
 Link.reset()
 local bad, why = Link.open({ address = "203.0.113.1:1", game = game })
-if Net.available() then
-  check(bad == nil or Link.link ~= nil, "a join either connects or reports why")
-else
-  eq(bad, nil, "with no enet backend the open reports a failure rather than half a session")
-  check(why ~= nil, "and says why")
-end
+eq(bad, nil, "an address opens nothing: there is no LAN for Gen 3")
+eq(why, "no_transport", "and says why")
+eq(Link.dial, nil, "Link.dial is gone")
 Link.reset()
 eq(Link.beginConnect({}), false,
-  "headless there is no connect screen, so the counter just keeps waiting")
+  "with no link there is no connect screen, so the counter just keeps waiting")
+local towerRoom = FakeRelay.room({ seats = 2 })
+check(Link.beginConnect({ session = towerRoom:session(0), client = towerRoom:client(0),
+  linkType = Game3Link.LINKTYPE.BATTLE_TOWER }),
+  "Battle Tower reconnect starts a replacement link from the existing relay room")
+check(Link.link ~= nil and Link.link.linkType == Game3Link.LINKTYPE.BATTLE_TOWER,
+  "and keeps the Battle Tower link type on the replacement session")
+Flags.setVar(store, ctx, Link.VAR_CABLE_CLUB_STATE, Link.USING.BATTLE_TOWER)
+local droppedLink, towerSession = Link.link, Link.link._transport:session()
+droppedLink:close("tower_round_transition")
+eq(Link._towerReconnectPending, true,
+  "a dropped Battle Tower session leaves its link room available to the reconnect special")
+eq(towerSession.left, false, "and does not leave the relay room during the round transition")
+check(Link.beginConnect({ session = towerSession, client = towerRoom:client(0),
+  linkType = Game3Link.LINKTYPE.BATTLE_TOWER }),
+  "the existing Battle Tower room can create a replacement after link loss")
+check(Link.link ~= nil and Link.link ~= droppedLink,
+  "and the replacement is a fresh live link object")
+local reconnectCtx = { specialVars = {} }
+local reconnectHandler = require("src.core.game3.scripting.natives_link_rse").BY_NAME.BattleTowerReconnectLink
+eq(reconnectHandler(reconnectCtx, {}), true,
+  "BattleTowerReconnectLink yields while the replacement link handshakes")
+local towerPeer = Game3Link.attach(FakeRelay.transport(towerRoom, 1), {
+  game = game, linkType = Game3Link.LINKTYPE.BATTLE_TOWER,
+})
+for _ = 1, 8 do
+  Link.link:update(0)
+  towerPeer:update(0)
+end
+eq(Link.link:isReady(), true, "the replacement Tower link reaches ready with its partner")
+eq(reconnectCtx.nativePoll(), true, "the reconnect special resumes after both seats are ready")
+towerPeer:close("test_cleanup")
+Link.reset()
+
+print("[test] ExitLinkRoom leaves at once; the rest of the room stays linked")
+local function stubLink(nseats, queue)
+  local s = { nseats = nseats, seat = 0, open = true, queue = queue }
+  function s:update() end
+  function s:isReady() return false end
+  function s:isOpen() return self.open end
+  function s:send() end
+  function s:close() self.open = false end
+  function s:take(kind)
+    if kind ~= "game3_exit_link_room" then return nil end
+    return table.remove(self.queue, 1)
+  end
+  return s
+end
+local function queueExit(lk)
+  Link.reset()
+  Space.mapId = LINK_ROOM_MAP
+  session.map = LINK_ROOM_MAP
+  session.dynamicWarp = { map = COUNTER_MAP, warpId = 1, x = 9, y = 1 }
+  session.warpDestination = nil
+  mapLoads = {}
+  Link.link = lk
+  Link.exitQueued = true
+end
+local solo = stubLink(4, {})
+queueExit(solo)
+Link.update(0)
+eq(#mapLoads, 1, "the leaver warps out without waiting on the others")
+check(not solo.open, "and its link is closed")
+
+local exitRoom, trio = FakeRelay.links({ game = game, seats = 3 })
+for _ = 1, 4 do for _, l in ipairs(trio) do l:update(0) end end
+check(trio[1]:isReady() and trio[2]:isReady() and trio[3]:isReady(), "three seats handshake")
+trio[2]:send({ type = Game3Link.EXIT, seat = 1 })
+trio[2]:close("exit_link_room")
+trio[2]:leave()
+for _ = 1, 3 do trio[1]:update(0); trio[3]:update(0) end
+check(trio[1]:isOpen() and trio[3]:isOpen(), "a graceful leave keeps the link open for the others")
+eq(#trio[1]:players(), 2, "the departed seat is gone from the link players")
+eq(trio[1].departed[1], true, "and is recorded as departed")
+eq(#exitRoom.players, 2, "the leaver left the relay room")
+
+local soloRoom, duo = FakeRelay.links({ game = game, seats = 2 })
+for _ = 1, 4 do duo[1]:update(0); duo[2]:update(0) end
+duo[2]:send({ type = Game3Link.EXIT, seat = 1 })
+duo[2]:close("exit_link_room")
+duo[2]:leave()
+for _ = 1, 3 do duo[1]:update(0) end
+check(duo[1]:isOpen(), "the last player in the room keeps a working link")
+eq(#duo[1]:players(), 1, "with only itself left")
+local LT = require("src.core.game3.link.trade")
+Link.reset()
+Link.attach(duo[1])
+local okSeat = pcall(function()
+  local yielded = LT.enterTradeSeat(ctx, adapters)
+  if yielded and ctx.nativePoll then eq(ctx.nativePoll(), true, "a trade seat with nobody left fails instead of waiting") end
+end)
+check(okSeat, "trade seat failure path runs")
+eq(LT.state, "off", "the seat wait ends in CABLE_SEAT_FAILED")
+duo[1]:close("test_cleanup")
+Link.reset()
+
+print("[test] a 4-seat link card is the seat's own, never the last one received")
+Link.reset()
+local shown
+package.loaded["src.ui.game3.trainer_card"] = { show = function(o) shown = o.session end }
+local hadLove = love
+love = { graphics = {} }
+Link.link = stubLink(4, {})
+Link.peerCards = { [1] = { name = "BLUE" } }
+Link.peerCard = { name = "BLUE" }
+Flags.setVar(store, ctx, Link.VAR_0x8006, 2)
+Link.showLinkTrainerCard(ctx, adapters)
+check(shown ~= nil and shown.name ~= "BLUE", "seat 2's card has not arrived: not BLUE's")
+Link.link = stubLink(2, {})
+Link.peerCards = {}
+Link.peerCard = { name = "BLUE" }
+Flags.setVar(store, ctx, Link.VAR_0x8006, 1)
+Link.showLinkTrainerCard(ctx, adapters)
+eq(shown and shown.name, "BLUE", "a 2-seat link still falls back to the peer's card")
+love = hadLove
+package.loaded["src.ui.game3.trainer_card"] = nil
+Link.link = nil
+
+print("[test] upgrade_required shows the Connect text verbatim")
+local hadConnect = package.loaded["src.online.Connect"]
+package.loaded["src.online.Connect"] = { upgradeText = function() return "Please update." end }
+eq(Link.reasonText("upgrade_required"), "Please update.", "the whole upgrade line, period kept")
+package.loaded["src.online.Connect"] = { upgradeText = function() return nil end }
+check(Link.reasonText("timeout"):find("timeout", 1, true) ~= nil, "other reasons still name the cause")
+package.loaded["src.online.Connect"] = hadConnect
 
 Link.reset()
 if failed == 0 then

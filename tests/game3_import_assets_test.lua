@@ -27,6 +27,7 @@ local Seagallop = require("src.import.gba.seagallop_extract")
 local BattleChrome = require("src.import.gba.battle_chrome_extract")
 local CacheContract = require("src.import.CacheContract")
 local Versions = require("src.import.gba.versions")
+local CacheBlob = require("src.import.CacheBlob")
 
 local function fakeRom(str)
   return {
@@ -205,6 +206,9 @@ for _, path in ipairs(CacheContract.VERSION_REQUIRED_FILES_OVERRIDE.firered) do
   required[path] = true
 end
 local NEW_KEYS = {
+  "data/generated/gba/chrome/fonts/japanese_normal_fg.rgba",
+  "data/generated/gba/chrome/fonts/japanese_small_fg.rgba",
+  "data/generated/gba/chrome/fonts/japanese_widths.lua",
   "data/generated/gba/chrome/fonts/braille_fg.rgba",
   "data/generated/gba/chrome/fonts/braille_shadow.rgba",
   "data/generated/gba/chrome/fonts/braille.lua",
@@ -253,7 +257,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local data = f:read("*a")
+  local data = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return data
 end

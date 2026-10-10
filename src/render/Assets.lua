@@ -56,6 +56,12 @@ function Assets.resolve(path)
   return path
 end
 
+local composed = {}
+
+function Assets.compose(path, build)
+  composed[path] = build
+  cache[path] = nil
+end
 
 -- Only plain PNG paths use a background decode: newImage(path) derives a
 -- dpiscale from an "@2x" style suffix and handles compressed formats, neither
@@ -108,12 +114,14 @@ function Assets.pngSize(resolved)
 end
 
 function Assets.image(path)
-  local resolved = Assets.resolve(path)
+  local build = composed[path]
+  local resolved = build and path or Assets.resolve(path)
   local image = cache[resolved]
   if not image then
     -- decoded off-thread: only the GPU upload is left (fills an empty slot)
-    local decoded = prefetchable(resolved) and AtlasPrefetch.peekDecoded(resolved)
-    image = love.graphics.newImage(decoded or resolved)
+    local decoded = not build and prefetchable(resolved)
+      and AtlasPrefetch.peekDecoded(resolved)
+    image = love.graphics.newImage(build and build() or decoded or resolved)
     cache[resolved] = image
     -- The stored decode STAYS (bounded LRU in AtlasPrefetch): the sprite OBJ
     -- palette bakes (SpriteRenderer.getObpImage, every COLORS mode) and the
@@ -127,6 +135,8 @@ end
 -- A prefetched decode is handed out as a CLONE -- callers mutate what they
 -- get (mapPixel), and the stored copy is shared with Assets.image.
 function Assets.imageData(path)
+  local build = composed[path]
+  if build then return build() end
   local resolved = Assets.resolve(path)
   local decoded = prefetchable(resolved) and AtlasPrefetch.peekDecoded(resolved)
   if decoded then return decoded:clone() end

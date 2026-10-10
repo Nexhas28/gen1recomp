@@ -1,4 +1,5 @@
-local Strings = require("src.core.Strings")
+local Std = require("src.core.game3.scripting.stdscripts")
+local RomText = require("src.core.game3.rom_text")
 local MysteryGift = require("src.core.game3.mystery_gift")
 
 local Gift = {}
@@ -37,24 +38,15 @@ end
 -- pokefirered/data/mystery_event_msg.s:244
 function Gift.deliveryText(session, code)
   local card = MysteryGift.getSavedCard(session)
-  if code == MysteryGift.DELIVER_NO_ROOM then
-    -- pokefirered/data/mystery_event_msg.s:260 sText_AuroraTicketNoPlace
-    return Strings("Oh, I'm sorry. Your BAG's\npocket is full.\\pPlease store something on your PC,\nthen come back for this.")
-  end
-  if code == MysteryGift.DELIVER_PARTY_FULL then
-    -- pokefirered/data/mystery_event_msg.s:108 sText_FullParty
-    return Strings("Oh, your party appears to be full.\\pPlease come see me after storing\na POKéMON on a PC.")
-  end
-  if code == MysteryGift.DELIVER_ALREADY or code == MysteryGift.DELIVER_NOTHING then
-    -- pokefirered/data/mystery_event_msg.s:256 sText_AuroraTicketGot
-    return Strings("Thank you for using the MYSTERY\nGIFT System.")
-  end
+  local ctx = { playerName = type(session) == "table" and (session.name or session.playerName) or nil }
+  local key = MysteryGift.deliveryTextKey(session, code, card)
+  if key then return RomText.ascii(key, ctx) end
   local lines = {}
   for _, line in ipairs((card and card.bodyText) or {}) do
     if line ~= "" then lines[#lines + 1] = line end
   end
   if #lines == 0 then
-    return Strings("Thank you for using the MYSTERY\nGIFT System.")
+    return RomText.ascii(MysteryGift.fallbackTextKey(session, card), ctx)
   end
   -- pokefirered/data/mystery_event_msg.s:303 sText_MysticTicket2
   local pages = {}
@@ -75,6 +67,32 @@ local function textBox(ascii, adapters)
 end
 Gift.textBox = textBox
 
+-- pokefirered/include/constants/songs.h:264
+local Song = require("src.core.game3.song_ids")
+
+function Gift.obtainedLine(session, code)
+  if code ~= MysteryGift.DELIVER_GIVEN then return nil end
+  local card = MysteryGift.getSavedCard(session)
+  local gift = card and card.gift or {}
+  local Strings = require("src.core.Strings")
+  local player = type(session) == "table" and (session.name or session.playerName) or ""
+  if gift.kind == "mon" then
+    local Pokemon = require("src.core.game3.pokemon")
+    local ok, name = pcall(Pokemon.name, tonumber(gift.species))
+    -- pokefirered/data/maps/CeladonCity_Condominiums_RoofRoom/scripts.inc:21
+    return Strings("%s obtained %s!", player, ok and name or ""), Song.MUS_LEVEL_UP
+  elseif gift.kind == "egg" then
+    -- pokefirered/data/mystery_event_msg.s:55
+    return Strings("%s received an EGG!", player), Song.MUS_OBTAIN_ITEM
+  elseif gift.kind == "item" then
+    local Items = require("src.core.game3.items_data")
+    local id = tonumber(gift.item)
+    local key = Items.pocketOf(id) == "KEY_ITEMS"
+    return Strings("%s obtained the %s!", player, Items.displayName(id)), key and Song.MUS_OBTAIN_KEY_ITEM or Song.MUS_OBTAIN_ITEM
+  end
+  return nil
+end
+
 -- pokefirered/src/scrcmd.c:275 ScrCmd_trywondercardscript
 function Gift.runWonderCardScript(ctx, adapters)
   local session = sessionOf()
@@ -82,37 +100,51 @@ function Gift.runWonderCardScript(ctx, adapters)
   local code = MysteryGift.deliverGift(session)
   Gift.lastDelivery = code
   local text = textBox(Gift.deliveryText(session, code), adapters)
+  local line, song = Gift.obtainedLine(session, code)
+  Gift.lastObtained = line
   if not (adapters and (adapters.openMessageAsync or adapters.openMessage)) then
     return false, true
   end
   local Natives = require("src.core.game3.scripting.natives")
-  local yield = Natives.yieldHost(ctx, adapters, function(done)
+  local function show(msg, after)
     if adapters.openMessageAsync then
-      adapters.openMessageAsync(text, done)
+      adapters.openMessageAsync(msg, after)
     else
-      adapters.openMessage(text)
-      done()
+      adapters.openMessage(msg)
+      after()
     end
+  end
+  local yield = Natives.yieldHost(ctx, adapters, function(done)
+    show(text, function()
+      if not line then return done() end
+      local Audio = require("src.core.game3.audio")
+      Audio.playFanfare(song)
+      show(textBox(line, adapters), function()
+        if adapters.waitFanfare then return adapters.waitFanfare(done) end
+        Audio.waitFanfare(done)
+      end)
+    end)
   end)
   return yield, true
 end
 
-Gift.HANDLERS = {
+Gift.BY_NAME = {
   -- pokefirered/src/mystery_gift.c:180 ValidateSavedWonderCard
-  [SPECIAL_ValidateSavedWonderCard] = function()
+  ValidateSavedWonderCard = function()
     return false, MysteryGift.validateSavedCard(sessionOf()) and 1 or 0
   end,
   -- pokefirered/src/field_specials.c:1955 GetMysteryGiftCardStat
-  [SPECIAL_GetMysteryGiftCardStat] = function(ctx)
+  GetMysteryGiftCardStat = function(ctx)
     return false, MysteryGift.getCardStatForScript(sessionOf(), varGet(ctx, VAR_RESULT))
   end,
   -- pokefirered/src/wonder_news.c:68 WonderNews_GetRewardInfo
-  [SPECIAL_WonderNews_GetRewardInfo] = function(ctx)
+  WonderNews_GetRewardInfo = function(ctx)
     local rewardType, item = MysteryGift.getNewsRewardInfo(sessionOf())
     if item then varSet(ctx, VAR_RESULT, item) end
     return false, rewardType
   end,
 }
+Std.legacyHandlers(Gift)
 
 Gift.SPECIAL_IDS = {
   ValidateSavedWonderCard = SPECIAL_ValidateSavedWonderCard,

@@ -43,10 +43,16 @@ do
     "and each of them names itself")
   eq(table.concat(ModTargets.expand("crystal"), ","), "crystal",
     "Crystal included, the day its VERSIONS row landed")
-  eq(table.concat(ModTargets.expand("gen3"), ","), "firered",
+  eq(table.concat(ModTargets.expand("gen3"), ","), "firered,leafgreen,ruby,sapphire,emerald",
     "gen3 is every Gen 3 game")
   eq(table.concat(ModTargets.expand("FireRed"), ","), "firered",
     "and FireRed names itself, case-insensitive")
+  eq(table.concat(ModTargets.expand("LeafGreen"), ","), "leafgreen",
+    "and LeafGreen names itself, case-insensitive")
+  eq(table.concat(ModTargets.expand("Ruby"), ","), "ruby",
+    "and Ruby names itself, case-insensitive")
+  eq(table.concat(ModTargets.expand("sapphire"), ","), "sapphire",
+    "and so does Sapphire")
   eq(table.concat(ModTargets.expand("all"), ","),
     table.concat(GameVersion.ORDER, ","), "all is the launcher order itself")
   eq(ModTargets.expand(NO_SUCH_GAME), nil, "a game this engine has no cache for")
@@ -133,9 +139,17 @@ do
   eq(ModTargets.label(mf({})), "Gen 1", "whole generations read as generations")
   eq(ModTargets.label(mf({ games = { "all" } })), "Gen 1+2+3", "all of them")
   eq(ModTargets.label(mf({ games = { "gen1", "gen2" } })), "Gen 1+2", "both of them")
-  eq(ModTargets.label(mf({ games = { "gen3" } })), "Gen 3", "FireRed's generation")
-  eq(ModTargets.label(mf({ games = { "firered" } })), "Gen 3",
-    "one game that is its whole generation reads as the generation")
+  eq(ModTargets.label(mf({ games = { "gen3" } })), "Gen 3", "FireRed and LeafGreen's generation")
+  eq(ModTargets.label(mf({ games = { "firered" } })), "FireRed",
+    "FireRed alone is only part of Gen 3")
+  eq(ModTargets.label(mf({ games = { "leafgreen" } })), "LeafGreen",
+    "LeafGreen alone is only part of Gen 3")
+  eq(ModTargets.label(mf({ games = { "firered", "leafgreen", "emerald", "ruby", "sapphire" } })), "Gen 3",
+    "every Gen 3 game reads as the generation")
+  eq(ModTargets.label(mf({ games = { "firered", "leafgreen", "emerald" } })), "FireRed/LeafGreen/Emerald",
+    "without Ruby and Sapphire it is only part of Gen 3")
+  eq(ModTargets.label(mf({ games = { "ruby", "sapphire" } })), "Ruby/Sapphire",
+    "Ruby and Sapphire name themselves")
   eq(ModTargets.label(mf({ games = { "gen1", "gen3" } })), "Gen 1+3",
     "generations need not be contiguous")
   eq(ModTargets.detail(mf({}), "firered"), "For Gen 1, not FireRed",

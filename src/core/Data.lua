@@ -182,6 +182,7 @@ function Data:seedDefaults(version)
   Data.seedMtMoonB2FSuperNerd(self)
   -- #189: 1F cabin door order vs rooms map (survey zoom)
   require("src.world.SsAnneLayout").apply(self.maps)
+  if gen == 1 then require("src.world.gen1.UnionCenters").seed(self) end
 end
 
 -- The Karate Master (FightingDojo.asm) is a text_asm object: his object has
@@ -264,7 +265,11 @@ local function loadModule(dir, name)
   local path = "data/generated/" .. name .. ".lua"
   local bytes = CacheFs.readActive(path)
   if type(bytes) == "string" then
-    local chunk = loadstring(bytes, "@" .. GameVersion.cachePrefix() .. path)
+    -- Sandbox the generated module the way every other cache loader in the
+    -- engine does (dataset/doors/field/...).  Without an environment the chunk
+    -- ran with the real os/io/loadfile in scope, so a file dropped into the
+    -- user-writable cache would execute at boot.
+    local chunk = load(bytes, "@" .. GameVersion.cachePrefix() .. path, "t", {})
     if chunk then
       local ok, res = pcall(chunk)
       if ok then return true, res end
@@ -274,6 +279,10 @@ local function loadModule(dir, name)
   if ok then return true, mod end
   return false, nil
 end
+
+-- Test seam: the generated-module loader, so a suite can pin the sandbox that
+-- keeps cache files from reaching os/io/loadfile at boot.
+Data._loadModule = loadModule
 
 function Data:load()
   local dir = os.getenv("POKEPORT_DATA_DIR")

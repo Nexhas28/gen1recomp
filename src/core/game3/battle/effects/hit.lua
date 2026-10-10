@@ -7,10 +7,19 @@ local Secondary = require("src.core.game3.battle.effects.secondary")
 local HeldItems = require("src.core.game3.battle.held_items")
 local Oak = require("src.core.game3.battle.oak_advice")
 local ModRuntime = require("src.mods.Runtime")
-local Strings = require("src.core.Strings")
+local H = require("src.core.game3.battle.effects._helpers")
 
 local E = EffectIds
 local Hit = {}
+local BattleProfile = require("src.core.game3.battle.profile")
+
+local function chance_policy(M)
+  return BattleProfile.rule(M.st, "effectChanceOpcode")
+end
+
+local function adjustment_policy(M)
+  return BattleProfile.rule(M.st, "damageAdjustment")
+end
 
 local MOVE_SURF, MOVE_WHIRLPOOL, MOVE_SLEEP_TALK = 57, 250, 214
 
@@ -48,14 +57,16 @@ function Hit.dealDamage(M, dmg, info)
     local subHp = target.substituteHP
     local dealt = math.min(dmg, subHp)
     target.substituteHP = subHp - dealt
-    M:say(Strings("The SUBSTITUTE took damage\nfor %s!", ad:displayName(target)))
+    ad:sayText("STRINGID_SUBSTITUTEDAMAGED", { def = target })
     if target.substituteHP <= 0 then
       target.substituteHP = 0
       ad:playAnim("general", "SUBSTITUTE_FADE", target, target)
-      M:say(Strings("%s's\nSUBSTITUTE faded!", ad:displayName(target)))
+      ad:sayText("STRINGID_PKMNSUBSTITUTEFADED", { def = target })
     end
     M.hitSubstitute = true
-    if (M.firstDmg or 0) == 0 then M.firstDmg = dmg end
+    if (M.firstDmg or 0) == 0 then
+      M.firstDmg = BattleProfile.rule(M.st, "multiHitMoveEnd") and dealt or dmg
+    end
     M.hpDealt = dealt
     M.hitsLanded = (M.hitsLanded or 0) + 1
     dealt_event(M, target, dealt, info, true)
@@ -98,13 +109,15 @@ function Hit.dealDamage(M, dmg, info)
   dealt_event(M, target, dealt, info, false)
   -- pokefirered/src/battle_controller_opponent.c:304
   if Oak.active(M.st) and dealt > 0 and (target.side == "enemy") and user.side == "player" then
-    Oak.sayOnce(M.st, Oak.FLAG_INFLICT_DMG, "inflictingDamage", function(t) M:say(t) end)
+    Oak.sayOnce(M.st, Oak.FLAG_INFLICT_DMG, "inflictingDamage", function(t, key) M:say(t, key) end)
   end
   return dealt
 end
 
 -- pokefirered/src/battle_script_commands.c:1577
-function Hit.adjustDamage(M, target, dmg)
+function Hit.adjustDamage(M, target, dmg, site)
+  local policy = adjustment_policy(M)
+  if policy and site then return policy.adjust(M, target, dmg, site) end
   local ad = M.adapter
   local banded = HeldItems.rollFocusBand(ad, target)
   target.expFocusBanded = nil
@@ -115,26 +128,26 @@ function Hit.adjustDamage(M, target, dmg)
 end
 
 -- pokefirered/src/battle_script_commands.c:5602
-function Hit.applySetDamage(M, dmg, flags)
+function Hit.applySetDamage(M, dmg, flags, opts)
   local ad, target = M.adapter, M.target
-  local hung
-  dmg, hung = Hit.adjustDamage(M, target, dmg)
+  local hung = opts and opts.hung
+  if not (opts and opts.adjusted) then dmg, hung = Hit.adjustDamage(M, target, dmg, "set") end
   M:attackAnimation()
   Hit.dealDamage(M, dmg)
   if hung == "endured" then
-    M:say(Strings("%s ENDURED\nthe hit!", ad:displayName(target)))
+    ad:sayText("STRINGID_PKMNENDUREDHIT", { def = target })
   elseif hung == "hung" then
     HeldItems.focusBandMessage(ad, target)
   elseif flags then
     local line = Hit.effectivenessLine(flags)
-    if line then M:say(line) end
+    if line then ad:sayText(line) end
   end
 end
 
 function Hit.effectivenessLine(flags)
   if not flags then return nil end
-  if flags.super then return Strings("It's super effective!") end
-  if flags.notVery then return Strings("It's not very effective…") end
+  if flags.super then return "STRINGID_SUPEREFFECTIVE" end
+  if flags.notVery then return "STRINGID_NOTVERYEFFECTIVE" end
   return nil
 end
 
@@ -186,12 +199,12 @@ local function dream_eater_blocked(M)
   return (target.substituteHP or 0) > 0 or ad:status(target) ~= "SLP"
 end
 
-local function fail(M, text)
+local function fail(M, id, fill)
   M:attackString()
   M:ppReduce()
   M.failed = true
   M.anim.missed = true
-  if text then M:say(text) else M.adapter:sayFail() end
+  if id then M.adapter:sayText(id, fill) else M.adapter:sayFail() end
 end
 
 local function pre_checks(M)
@@ -202,7 +215,7 @@ local function pre_checks(M)
   end
   if eff == E.DREAM_EATER and dream_eater_blocked(M) then
     -- pokefirered/data/battle_scripts_1.s:427
-    fail(M, Strings("%s\nwasn't affected!", M.tname))
+    fail(M, "STRINGID_PKMNWASNTAFFECTED", { def = target })
     return true
   end
   if eff == E.COUNTER or eff == E.MIRROR_COAT then
@@ -235,7 +248,7 @@ local function pre_checks(M)
       return true
     end
     if not (M.opts.called and M.opts.calledBy and Moves.get(M.opts.calledBy).effect == E.SLEEP_TALK) then
-      M:say(Strings("%s is fast\nasleep.", M.uname))
+      ad:sayText("STRINGID_PKMNFASTASLEEP", { atk = user })
       ad:statusAnim(user, "SLP")
     end
   end
@@ -247,10 +260,10 @@ local function pre_checks(M)
     M:attackString()
     M:ppReduce()
     if (user.expStockpile or 0) <= 0 then
-      M:say(Strings("But it failed to SPIT UP\na thing!"))
+      ad:sayText("STRINGID_FAILEDTOSPITUP")
     else
       user.expStockpile = 0
-      M:say(Strings("%s\nprotected itself!", M.tname))
+      ad:sayText("STRINGID_PKMNPROTECTEDITSELF", { def = M.target })
     end
     M.anim.missed = true
     return true
@@ -261,7 +274,9 @@ local function pre_checks(M)
         M.stopTargets = true
         M:attackString()
         M:ppReduce()
-        M:say(Strings("%s's DAMP\nprevents %s\nfrom using %s!", ad:displayName(b), M.uname, M.moveName))
+        ad:sayText("STRINGID_PKMNPREVENTSUSAGE", {
+          def = b, defAbility = H.abilityId("DAMP"), atk = user, currentMove = M.mnum,
+        })
         M.failed = true
         return true
       end
@@ -292,8 +307,13 @@ local function crash_damage(M)
   local ad, user, target = M.adapter, M.user, M.target
   local _, flags = Types.typeCalc(M.move.type, target.type1, target.type2, nil, target.expIdentified)
   if flags.immune and M.missReason ~= "protected" then return end
-  M:say(Strings("%s kept going\nand crashed!", M.uname))
-  local dmg = Damage.calc(user, target, M.move, calc_opts(M, { forceCrit = false }))
+  ad:sayText("STRINGID_PKMNCRASHED", { atk = user })
+  local adjustment = adjustment_policy(M)
+  local dmg = Damage.calc(user, target, M.move,
+    calc_opts(M, { forceCrit = false, deferAdjustment = adjustment and true or nil }))
+  if adjustment then
+    dmg = adjustment.adjust(M, target, dmg, "normal")
+  end
   dmg = math.floor(dmg / 2)
   if dmg == 0 then dmg = 1 end
   local cap = math.floor(ad:maxHp(target) / 2)
@@ -319,30 +339,34 @@ local function on_miss(M)
   end
 end
 
-local function flags_immune(M, info)
+local function flags_immune(M, info, beforeMessage)
   local ad, target = M.adapter, M.target
   local mt = tonumber(info and info.moveType) or tonumber(M.moveType or M.move.type)
   if ad:abilityOf(target) == "LEVITATE" and mt == Types.ID.GROUND then
-    M:say(Strings("%s makes GROUND\nmoves miss with LEVITATE!", M.tname))
+    if beforeMessage then beforeMessage() end
+    ad:sayText("STRINGID_PKMNMAKESGROUNDMISS", { def = target, defAbility = H.abilityId("LEVITATE") })
     return true
   end
   if info and info.effectiveness == 0 then
-    M:say(Strings("It doesn't affect\n%s…", M.tname))
+    if beforeMessage then beforeMessage() end
+    ad:sayText("STRINGID_ITDOESNTAFFECT", { def = target })
     return true
   end
   return false
 end
 
-local function wonder_guard(M, info)
+local function wonder_guard(M, info, beforeMessage)
   local ad = M.adapter
   if ad:abilityOf(M.target) ~= "WONDER_GUARD" then return false end
   local f = info and info.typeFlags or {}
   if f.super and not f.notVery then return false end
-  M:say(Strings("%s avoided\ndamage with WONDER GUARD!", M.tname))
+  if beforeMessage then beforeMessage() end
+  ad:sayText("STRINGID_AVOIDEDDAMAGE", { def = M.target, defAbility = H.abilityId("WONDER_GUARD") })
   return true
 end
 
-local function secondary_after(M)
+local function secondary_after(M, policy, descriptor)
+  if policy and policy.finish(M, descriptor) then return end
   local eff = M.effect
   if M.noEffect then return end
   local spec = E.SECONDARY[eff]
@@ -372,15 +396,15 @@ local function drain(M)
   if heal == 0 then heal = 1 end
   if M.effect == E.ABSORB and ad:abilityOf(target) == "LIQUID_OOZE" then
     ad:applyHpLoss(user, heal)
-    M:say(Strings("It sucked up the\nLIQUID OOZE!"))
+    ad:sayText("STRINGID_ITSUCKEDLIQUIDOOZE")
     M:tryFaintUser()
     return
   end
   ad:heal(user, heal)
   if M.effect == E.DREAM_EATER then
-    M:say(Strings("%s's\ndream was eaten!", M.tname))
+    ad:sayText("STRINGID_PKMNDREAMEATEN", { def = target })
   else
-    M:say(Strings("%s had its\nenergy drained!", M.tname))
+    ad:sayText("STRINGID_PKMNENERGYDRAINED", { def = target })
   end
 end
 
@@ -392,13 +416,13 @@ local function present(M)
   if r < 178 then return 80 end
   if r < 204 then return 120 end
   if ad:hp(target) >= ad:maxHp(target) then
-    M:say(Strings("%s's\nHP is full!", M.tname))
+    ad:sayText("STRINGID_PKMNHPFULL", { def = target })
     return nil
   end
   M:attackAnimation()
   local heal = math.max(1, math.floor(ad:maxHp(target) / 4))
   ad:heal(target, heal)
-  M:say(Strings("%s regained\nhealth!", M.tname))
+  ad:sayText("STRINGID_PKMNREGAINEDHEALTH", { def = target })
   return nil
 end
 
@@ -460,31 +484,51 @@ end
 local function hit_once(M, opts)
   local ad, user, target = M.adapter, M.user, M.target
   opts = opts or {}
-  local dmg, info = damage_calc(M, target, calc_opts(M, opts.calc))
+  local adjustment = adjustment_policy(M)
+  local calcOpts = calc_opts(M, opts.calc)
+  if adjustment then
+    calcOpts.deferAdjustment = true
+    if M.effect == E.PSYWAVE then calcOpts.psywaveRoll = adjustment.psywave(ad) end
+  end
+  local dmg, info = damage_calc(M, target, calcOpts)
   M.moveType = info.moveType or M.moveType
   if info.failed then
     M.failed = true
     ad:sayFail()
     return nil, info, "fail"
   end
-  if flags_immune(M, info) then
-    M.noEffect = true
-    M.anim.missed = true
-    return nil, info, "immune"
-  end
-  if wonder_guard(M, info) then
-    M.noEffect = true
-    M.anim.missed = true
-    return nil, info, "immune"
-  end
   local hung
-  dmg, hung = Hit.adjustDamage(M, target, dmg)
+  if adjustment then
+    local site = adjustment.hitSite(M)
+    if adjustment.reached(M, info, site) then
+      dmg, hung = adjustment.adjust(M, target, dmg, site)
+    end
+  end
+  local beforeImmuneMessage
+  if M.brokeWall and chance_policy(M) then
+    beforeImmuneMessage = function()
+      M._animDmg, M._animPower = 0, info.power
+      M:attackAnimation(nil, opts.multihitLeft)
+      if opts.onAfterAnim then opts.onAfterAnim() end
+    end
+  end
+  if flags_immune(M, info, beforeImmuneMessage) then
+    M.noEffect = true
+    M.anim.missed = true
+    return nil, info, "immune"
+  end
+  if wonder_guard(M, info, beforeImmuneMessage) then
+    M.noEffect = true
+    M.anim.missed = true
+    return nil, info, "immune"
+  end
+  if not adjustment then dmg, hung = Hit.adjustDamage(M, target, dmg) end
   if opts.onBeforeAnim then opts.onBeforeAnim() end
   M._animDmg, M._animPower = dmg, info.power
   M:attackAnimation(nil, opts.multihitLeft)
   if opts.onAfterAnim then opts.onAfterAnim() end
   Hit.dealDamage(M, dmg, info)
-  if info.critical then M:say(Strings("A critical hit!")) end
+  if info.critical then ad:sayText("STRINGID_CRITICALHIT") end
   if M.anim.effectiveness == nil then M.anim.effectiveness = info.effectiveness or 1 end
   return dmg, info, hung or "ok"
 end
@@ -502,6 +546,8 @@ function Hit.run(M)
     M.noPP = true
   end
   if eff == E.RAMPAGE and (user.expRampageTurns or 0) <= 0 then M.startRampage = true end
+  local policy = chance_policy(M)
+  local descriptor = policy and policy.prepare(M)
 
   if eff == E.EXPLOSION then
     -- pokefirered/data/battle_scripts_1.s:376
@@ -509,30 +555,34 @@ function Hit.run(M)
     M:ppReduce()
     M.explosionStarted = true
     ad:setHp(user, 0)
-    local dmg, info = damage_calc(M, M.target, calc_opts(M))
+    local adjustment = adjustment_policy(M)
+    local calcOpts = calc_opts(M)
+    if adjustment then calcOpts.deferAdjustment = true end
+    local dmg, info = damage_calc(M, M.target, calcOpts)
+    local hung
+    if adjustment then dmg, hung = adjustment.adjust(M, M.target, dmg, "normal") end
     if not M:accuracyCheck("normal", true) then
       M.anim.missed = true
       M.noEffect = true
       if not M.deferUserFaint then M:tryFaintUser() end
       return
     end
-    if flags_immune(M, info) then
+    if flags_immune(M, info) or (adjustment and wonder_guard(M, info)) then
       M.noEffect = true
       if not M.deferUserFaint then M:tryFaintUser() end
       return
     end
     local target = M.target
-    local hung
-    dmg, hung = Hit.adjustDamage(M, target, dmg)
+    if not adjustment then dmg, hung = Hit.adjustDamage(M, target, dmg) end
     M:attackAnimation()
     Hit.dealDamage(M, dmg, info)
-    if info.critical then M:say(Strings("A critical hit!")) end
+    if info.critical then ad:sayText("STRINGID_CRITICALHIT") end
     M.anim.effectiveness = info.effectiveness
-    if hung == "endured" then M:say(Strings("%s ENDURED\nthe hit!", M.tname))
+    if hung == "endured" then ad:sayText("STRINGID_PKMNENDUREDHIT", { def = target })
     elseif hung == "hung" then HeldItems.focusBandMessage(ad, target)
     else
       local line = Hit.effectivenessLine(info.typeFlags)
-      if line then M:say(line) end
+      if line then ad:sayText(line) end
     end
     M:tryFaintTarget()
     if not M.deferUserFaint then M:tryFaintUser() end
@@ -548,7 +598,7 @@ function Hit.run(M)
     local _, info = Damage.calc(user, M.target, M.move, calc_opts(M, { magnitudeRoll = r, forceCrit = false, noRandom = true }))
     magnitude = { power = info.power, value = info.magnitude }
     M.magnitude = magnitude
-    M:say(Strings("MAGNITUDE %d!", magnitude.value or 4))
+    ad:sayText("STRINGID_MAGNITUDESTRENGTH", { buff1 = tostring(magnitude.value) })
   end
 
   if eff == E.TRIPLE_KICK then return Hit.tripleKick(M) end
@@ -575,7 +625,7 @@ function Hit.run(M)
     if f.immune then
       local Engine = require("src.core.game3.battle.engine")
       Engine.cancelMultiTurnMoves(user)
-      M:say(Strings("It doesn't affect\n%s…", M.tname))
+      ad:sayText("STRINGID_ITDOESNTAFFECT", { def = target })
       M.noEffect = true
       return
     end
@@ -590,7 +640,7 @@ function Hit.run(M)
     -- pokefirered/src/battle_script_commands.c:6586
     local n = user.expStockpile or 0
     if n <= 0 then
-      M:say(Strings("But it failed to SPIT UP\na thing!"))
+      ad:sayText("STRINGID_FAILEDTOSPITUP")
       M.failed = true
       return
     end
@@ -607,16 +657,21 @@ function Hit.run(M)
     local aT1, aT2 = user.type1, user.type2
     if aT1 == tonumber(M.move.type) or aT2 == tonumber(M.move.type) then base = math.floor(base * 15 / 10) end
     local dmg, flags = Types.typeCalc(M.move.type, target.type1, target.type2, base, target.expIdentified)
+    local adjustment = adjustment_policy(M)
+    local hung
+    if adjustment then dmg, hung = Hit.adjustDamage(M, target, dmg, "set") end
     if flags.immune then
-      M:say(Strings("It doesn't affect\n%s…", M.tname))
+      ad:sayText("STRINGID_ITDOESNTAFFECT", { def = target })
       M.noEffect = true
+      if policy then policy.finish(M, descriptor, true) end
       return
     end
-    Hit.applySetDamage(M, dmg, flags)
+    Hit.applySetDamage(M, dmg, flags, adjustment and {adjusted = true, hung = hung} or nil)
+    if policy then policy.finish(M, descriptor) end
     M:tryFaintTarget()
     return
   elseif eff == E.BRICK_BREAK then
-    local side = ad:ownSide(target)
+    local side = policy and ad:foeSide(user) or ad:ownSide(target)
     if side and ((side.expReflectTurns or 0) > 0 or (side.expLightScreenTurns or 0) > 0) then
       side.expReflectTurns = nil
       side.expLightScreenTurns = nil
@@ -637,19 +692,22 @@ function Hit.run(M)
 
   local landed = 0
   local lastInfo, lastStatus
+  local perHit = isMulti and BattleProfile.rule(M.st, "multiHitMoveEnd")
   for i = 1, nHits do
     if ad:isFainted(user) or ad:isFainted(target) then break end
     if isMulti and i > 1 and ad:status(user) == "SLP" and not (M.opts.calledBy and move_is_sleep_talk(M.opts.calledBy)) then break end
+    if perHit then perHit.beginHit(M, descriptor, "multiHitEnd") end
     local _, info, status = hit_once(M, {
       calc = calcExtra,
       multihitLeft = isMulti and (nHits - i + 1) or 0,
-      onAfterAnim = (i == 1 and M.brokeWall) and function() M:say(Strings("The wall shattered!")) end or nil,
+      onAfterAnim = (i == 1 and M.brokeWall) and function() ad:sayText("STRINGID_THEWALLSHATTERED") end or nil,
     })
     lastInfo, lastStatus = info, status
     if status ~= "ok" and status ~= "endured" and status ~= "hung" then break end
     landed = landed + 1
+    if perHit then perHit.afterHit(M) end
     if status == "endured" then
-      M:say(Strings("%s ENDURED\nthe hit!", M.tname))
+      ad:sayText("STRINGID_PKMNENDUREDHIT", { def = target })
       break
     end
     if status == "hung" then
@@ -658,18 +716,24 @@ function Hit.run(M)
       local f = info.typeFlags
       if setDmg and not (eff == E.COUNTER or eff == E.MIRROR_COAT) then f = nil end
       local line = Hit.effectivenessLine(f)
-      if line then M:say(line) end
+      if line then ad:sayText(line) end
     end
   end
+  M._nativeMoveEffect = nil
   if isMulti and landed > 0 then
     if lastStatus ~= "endured" and lastStatus ~= "hung" then
       local line = Hit.effectivenessLine(lastInfo and lastInfo.typeFlags)
-      if line then M:say(line) end
+      if line then ad:sayText(line) end
     end
-    M:say(Strings("Hit %d time(s)!", landed))
+    ad:sayText("STRINGID_HITXTIMES", { buff1 = tostring(landed) })
   end
   if landed == 0 then
     M.noEffect = true
+    if policy and descriptor and lastStatus ~= "fail"
+        and (descriptor.site == "multiHitEnd" or lastStatus == "immune")
+        and eff ~= E.ROLLOUT and eff ~= E.FURY_CUTTER then
+      policy.finish(M, descriptor, true)
+    end
     if eff == E.ROLLOUT then
       local Engine = require("src.core.game3.battle.engine")
       Engine.cancelMultiTurnMoves(user)
@@ -678,7 +742,7 @@ function Hit.run(M)
   end
 
   if eff == E.ABSORB or eff == E.DREAM_EATER then drain(M) end
-  secondary_after(M)
+  secondary_after(M, policy, descriptor)
   M:tryFaintTarget()
   if M.checkUserFaint then M:tryFaintUser() end
 end
@@ -686,6 +750,10 @@ end
 -- pokefirered/data/battle_scripts_1.s:1380
 function Hit.tripleKick(M)
   local ad, user, target = M.adapter, M.user, M.target
+  local policy = chance_policy(M)
+  local descriptor = policy and policy.prepare(M)
+  local perHit = BattleProfile.rule(M.st, "multiHitMoveEnd")
+  local nativeNoEffect = false
   local power = 0
   local landed = 0
   local lastInfo
@@ -693,27 +761,44 @@ function Hit.tripleKick(M)
     if ad:isFainted(user) then break end
     if ad:isFainted(target) then break end
     if ad:status(user) == "SLP" and not (M.opts.calledBy and move_is_sleep_talk(M.opts.calledBy)) then break end
+    if perHit then perHit.beginHit(M, descriptor, "tripleKickEnd") end
     if not M:accuracyCheck("normal", landed == 0) then
       if landed == 0 then on_miss(M) end
+      nativeNoEffect = true
       break
     end
     power = power + 10
     local _, info, status = hit_once(M, { calc = { power = power }, multihitLeft = 4 - i })
     lastInfo = info
-    if status ~= "ok" and status ~= "endured" and status ~= "hung" then break end
+    if status ~= "ok" and status ~= "endured" and status ~= "hung" then nativeNoEffect = true; break end
     landed = landed + 1
+    if perHit then perHit.afterHit(M) end
     if status == "endured" then
-      M:say(Strings("%s ENDURED\nthe hit!", M.tname))
+      ad:sayText("STRINGID_PKMNENDUREDHIT", { def = target })
       break
     end
     if status == "hung" then HeldItems.focusBandMessage(ad, target) end
   end
+  M._nativeMoveEffect = nil
   if landed > 0 then
     local line = Hit.effectivenessLine(lastInfo and lastInfo.typeFlags)
-    if line then M:say(line) end
-    M:say(Strings("Hit %d time(s)!", landed))
-    M:tryFaintTarget()
+    if line then ad:sayText(line) end
+    ad:sayText("STRINGID_HITXTIMES", { buff1 = tostring(landed) })
   end
+  if perHit then
+    if M.missReason == "absorbed" then M._rsMultiHit = nil
+    elseif nativeNoEffect then M.noEffect = true end
+  end
+  if policy and M.missReason ~= "absorbed" then policy.finish(M, descriptor, nativeNoEffect or M.noEffect) end
+  if landed > 0 then M:tryFaintTarget() end
+end
+
+-- pokefirered/src/battle_script_commands.c:8601
+local function speciesInfoStats(Pokemon, sp)
+  local meta = Pokemon.speciesMeta and Pokemon.speciesMeta(sp)
+  local row = meta and meta.linkStats
+  if type(row) == "table" and #row >= 6 then return { atk = row[2], def = row[3] } end
+  return Pokemon.stats(sp)
 end
 
 -- pokefirered/src/battle_script_commands.c:8571
@@ -737,8 +822,8 @@ function Hit.beatUp(M)
     if mon and hp > 0 and (mon.species or 0) ~= 0 and not mon.isEgg and (status == nil or status == 0) then
       any = true
       local sp = tonumber(mon.species) or 0
-      local aBase = Pokemon.stats(sp)
-      local dBase = Pokemon.stats(tonumber(target.species) or 0)
+      local aBase = speciesInfoStats(Pokemon, sp)
+      local dBase = speciesInfoStats(Pokemon, tonumber(target.species) or 0)
       local atk = aBase and aBase.atk or 50
       local def = dBase and dBase.def or 50
       local lvl = tonumber(mon.level) or 1
@@ -748,18 +833,24 @@ function Hit.beatUp(M)
       -- pokefirered/src/battle_script_commands.c:8606
       if user.expHelpingHand then dmg = math.floor(dmg * 15 / 10) end
       local name = (mon.nickname and mon.nickname ~= "") and mon.nickname or Pokemon.name(sp)
-      M:say(Strings("%s's attack!", tostring(name)))
+      -- src/battle_script_commands.c:8597
+      ad:sayText("STRINGID_PKMNATTACK", { buff1 = require("src.core.game3.battle.state").prefixedName(M.st, user, name) })
       local crit = Rules.crit.roll(user, M.move, nil, ad:rng(), M.st)
       if crit then dmg = dmg * 2 end
-      local r = roll(ad, 85, 100)
-      dmg = math.floor(dmg * r / 100)
-      if dmg == 0 then dmg = 1 end
       local hung
-      dmg, hung = Hit.adjustDamage(M, target, dmg)
+      local adjustment = adjustment_policy(M)
+      if adjustment then
+        dmg, hung = adjustment.adjust(M, target, dmg, "normal")
+      else
+        local r = roll(ad, 85, 100)
+        dmg = math.floor(dmg * r / 100)
+        if dmg == 0 then dmg = 1 end
+        dmg, hung = Hit.adjustDamage(M, target, dmg)
+      end
       M:attackAnimation()
       Hit.dealDamage(M, dmg, { physical = false })
-      if crit then M:say(Strings("A critical hit!")) end
-      if hung == "endured" then M:say(Strings("%s ENDURED\nthe hit!", M.tname))
+      if crit then ad:sayText("STRINGID_CRITICALHIT") end
+      if hung == "endured" then ad:sayText("STRINGID_PKMNENDUREDHIT", { def = target })
       elseif hung == "hung" then HeldItems.focusBandMessage(ad, target) end
       M:tryFaintTarget()
     end

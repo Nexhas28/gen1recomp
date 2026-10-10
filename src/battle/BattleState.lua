@@ -247,6 +247,14 @@ local imagePadLeft = setmetatable({}, WEAK_KEYS)
 -- image -> { path, pal } so palette-fade variants (see fadeImage) can be
 -- rebuilt for any battle pic, whatever code loaded it
 local imageMeta = setmetatable({}, WEAK_KEYS)
+-- image -> memoized fadeImage / blackImage variants (the per-frame picImage
+-- lookups).  They cache what getImage returned, so invalidate() drops them
+-- together with imageCache.
+local function newDerivedMemo()
+  return { fade = setmetatable({}, WEAK_KEYS),
+           black = setmetatable({}, WEAK_KEYS) }
+end
+local derivedMemo = newDerivedMemo()
 local function mattedPic(path)
   return path:sub(1, 17) == "assets/generated/"
       or path:sub(1, 17) == "save/mod-derived/"
@@ -326,6 +334,7 @@ end
 -- are collected on their own rather than leaking.
 function BattleState.invalidate()
   imageCache = {}
+  derivedMemo = newDerivedMemo()
 end
 
 Assets.register(BattleState.invalidate)
@@ -346,7 +355,7 @@ end
 local function objPicPalette()
   local PaletteFX = require("src.render.PaletteFX")
   if not PaletteFX.usesSpriteObp() then return nil end
-  local colors, group = PaletteFX.ogObj()
+  local colors, group = PaletteFX.ogObjLit()
   if not colors then return nil end
   return { name = "obp1:" .. tostring(group), colors = colors }
 end
@@ -434,12 +443,28 @@ local function fadeImage(img, bgp)
   if not meta then return img end
   -- a full-color pic has no DMG shades to remap
   if meta.trueColor then return img end
+  -- picImage asks for this every drawn frame of a fade: memoize per
+  -- (pic, shade map) instead of rebuilding the name string + palette table
+  -- (meta is fixed per image; the map's four 0..3 shades are the rest of
+  -- getImage's key, packed into one number)
+  local mkey = bgp[0] * 64 + bgp[1] * 16 + bgp[2] * 4 + bgp[3]
+  local row = derivedMemo.fade[img]
+  local hit = row and row[mkey]
+  if hit then return hit end
   local PaletteFX = require("src.render.PaletteFX")
   local base = meta.pal and meta.pal.colors or PaletteFX.GRAYS
   local name = (meta.pal and meta.pal.name or "GB")
                .. "&" .. bgp[0] .. bgp[1] .. bgp[2] .. bgp[3]
-  return getImage(meta.path,
-                  { name = name, colors = PaletteFX.permute(base, bgp) })
+  local out = getImage(meta.path,
+                       { name = name, colors = PaletteFX.permute(base, bgp) })
+  if out then
+    if not row then
+      row = {}
+      derivedMemo.fade[img] = row
+    end
+    row[mkey] = out
+  end
+  return out
 end
 
 -- the raw DMG-gray build of a colored pic (SE_WAVY_SCREEN bakes the
@@ -463,7 +488,15 @@ local function blackImage(data, img)
   local colors = PaletteFX.usesYellowCgb() and pals.BLACK
                  or PaletteFX.pal(data, "BLACK") or pals.BLACK
   local name = PaletteFX.usesGbcPack() and "redpp:BLACK" or "BLACK"
-  return getImage(meta.path, { name = name, colors = colors }) or img
+  -- drawn every frame of the intro slide / blackout text: reuse the last
+  -- bake while the resolved palette and cache name are unchanged
+  local memo = derivedMemo.black[img]
+  if memo and memo.colors == colors and memo.name == name then
+    return memo.out
+  end
+  local out = getImage(meta.path, { name = name, colors = colors }) or img
+  derivedMemo.black[img] = { colors = colors, name = name, out = out }
+  return out
 end
 
 -- the asset path a loaded battle image came from (nil for the headless
@@ -615,6 +648,7 @@ local function makeBattler(data, mon, isPlayer, save)
     -- while the tilemap still shows the prior condition until the next
     -- post-action HUD refresh (core.asm after Execute*Move)
     shownStatus = mon.status,
+    sleepTurns = mon.status == "SLP" and mon.sleepTurns or nil, -- engine/battle/core.asm:3331
     stages = {},
     -- volatile state; Transform/Conversion/Mimic override the cur* fields
     curStats = mon.stats,
@@ -663,7 +697,7 @@ end
 
 -- newly obtained mons carry the player's OT name/ID (status screen)
 local function stampOT(save, mon)
-  save.player.id = save.player.id or math.random(0, 65535)
+  save.player.id = save.player.id or require("src.core.SaveData").rollTrainerId()
   mon.ot = mon.ot or save.player.name
   -- engine/battle/experience.asm:69
   if not mon.traded then mon.otId = mon.otId or save.player.id end
@@ -780,6 +814,17 @@ local function prefetchBattleAudio(self, enemyMons)
   end)
 end
 
+-- Queue the battle's first two cries on the chip audio worker while the
+-- transition runs, so the entrance cries don't render on the frame they
+-- play.  A no-op without a worker; playCry renders as before on a miss.
+local function prewarmCries(self)
+  local Sound = package.loaded["src.core.Sound"]
+  if not (Sound and Sound.prewarmCry) then return end
+  for _, battler in ipairs({ self.enemy, self.player }) do
+    local mon = battler and battler.mon
+    if mon and mon.species then pcall(Sound.prewarmCry, self.data, mon.species) end
+  end
+end
 -- opts.hooked: rod encounter, announced with _HookedMonAttackedText
 function BattleState.newWild(game, species, level, opts)
   local self = newBattle(game)
@@ -799,6 +844,7 @@ function BattleState.newWild(game, species, level, opts)
     self.introText = self:romText("_WildMonAppearedText", "Wild %s\nappeared!", self.enemy.name)
   end
   prefetchBattleAudio(self, { self.enemy.mon })
+  prewarmCries(self)
   return self
 end
 
@@ -933,6 +979,7 @@ function BattleState.newTrainer(game, oppClass, partyIndex, opts)
     game.data, self.trainer, oppClass, partyIndex)
   self.introText = Strings("%s wants\nto fight!", self.trainer.name)
   prefetchBattleAudio(self, self.enemyParty)
+  prewarmCries(self)
   return self
 end
 
@@ -1006,8 +1053,7 @@ end
 -- scripted cursor hovers FIGHT, hops to ITEM and forces the item menu
 -- (one POKé BALL x50).  Nothing is kept.
 -- Yellow's Pallet intro (BATTLE_TYPE_PIKACHU) is the same simulated
--- script under "PROF.OAK" (pokeyellow core.asm .profOakName), so the
--- displayed thrower name is a parameter.
+-- script under .profOakName (pokeyellow core.asm:2117).
 -- The throw catches everywhere except Yellow's FIRST Viridian training.
 -- ItemUseBall's .oldManBattle branch checks EVENT_INITIAL_CATCH_TRAINING
 -- and, when it is set, stores anim data $63 in place of the $43 capture
@@ -1017,16 +1063,13 @@ end
 -- closely!" demo resets the event before its battle
 -- (ViridianCityOldManStartCatchTrainingScript), so only the initial
 -- tutorial passes failThrow -- it stands in for that event (#636).
-function BattleState:makeOldManDemo(name, failThrow)
+function BattleState:makeOldManDemo(kind, failThrow)
   self.demo = true
-  self.demoName = name or Strings("OLD MAN")
+  -- pokeyellow engine/battle/core.asm:2109-2121
+  self.oakDemo = kind == "oak"
+  self.demoName = self.data.text[self.oakDemo and "DisplayBattleMenu.profOakName"
+    or "DisplayBattleMenu.oldManName"]
   self.demoFails = failThrow and true or false
-  -- LoadPlayerBackPic and DisplayBattleMenu split on the same wBattleType:
-  -- BATTLE_TYPE_OLD_MAN gets .oldManName + OldManPicBack, BATTLE_TYPE_PIKACHU
-  -- gets .profOakName + ProfOakPicBack (pokeyellow core.asm).  The thrower
-  -- name the caller passes IS that distinction here, so it picks the pic too
-  -- -- data/scripts/story2.lua is the only site that names PROF.OAK (#557).
-  self.oakDemo = name == "PROF.OAK"
   -- Yellow's Pallet intro runs this before the player owns any mon
   -- (BATTLE_TYPE_PIKACHU precedes the lab gift), so newWild flagged the
   -- battle dead for lack of a party.  The demo never sends out, draws, or
@@ -1219,25 +1262,24 @@ function BattleState:waitNext(frames)
   table.insert(self.queue, self.nextInsert, { wait = frames })
 end
 
--- One frame of the HP-bar drain (engine/gfx/hp_bar.asm UpdateHPBar).
---
--- The original walks the bar ONE HP POINT per loop iteration (:81-120), and
--- what each iteration costs depends on the side:
---   * UpdateHPBar_PrintHPNumber spends a DelayFrame (:234) reprinting the
---     number, but only when wHPBarType is nonzero (:207-209) -- the player's
---     own HUD and the party menu, never the enemy's;
---   * UpdateHPBar_AnimateHPBar spends 2 frames for each pixel the bar
---     actually moved (:147-148), and most single-HP steps move none.
--- So the player's bar drains at 1 HP per frame plus 2 frames per pixel,
--- while the enemy's costs nothing until it crosses a pixel boundary.  The
--- old flat maxHP/96 rate was the enemy-side formula applied to both, which
--- ran a 150 HP mon's full drain in 96 frames against hardware's 249.
---
--- Returns true while animating.
+-- engine/gfx/hp_bar.asm:121-135
+function BattleState:hpDrainClose(b, goal)
+  local cycles = b.drainCycles or 0
+  local roundUp = b.drainRoundUp
+  b.drainCycles = nil
+  b.drainRoundUp = nil
+  if goal ~= 0 then cycles = cycles + Timing.HP_BAR_STEP_CYCLES end
+  -- engine/gfx/hp_bar.asm:133-134
+  b.shownPx = Timing.hpBarPixels(goal, math.max(1, b.mon.stats.hp))
+  return Timing.hpDrainClosingFrames(b == self.player, cycles, roundUp)
+end
+
+-- engine/gfx/hp_bar.asm:81-120
 function BattleState:stepHPDrain()
   local busy = false
+  local only = self.drainOnly
   for _, b in ipairs({ self.player, self.enemy }) do
-    if b and b.shownHP then
+    if b and b.shownHP and (not only or b == only) then
       -- drainFloor is the stop the running row carries (see drainNext)
       local goal = b.mon.hp
       if b.drainFloor and b.drainFloor > goal
@@ -1246,7 +1288,8 @@ function BattleState:stepHPDrain()
       end
       local maxHP = math.max(1, b.mon.stats.hp)
       local playerSide = (b == self.player)
-      local targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+      local barPx = b.draining and Timing.hpBarLength or Timing.hpBarPixels
+      local targetPx = barPx(b.shownHP, maxHP)
       if not b.shownPx then b.shownPx = targetPx end
       if (b.drainHold or 0) > 0 then
         b.drainHold = b.drainHold - 1
@@ -1273,26 +1316,33 @@ function BattleState:stepHPDrain()
         -- enemy HUD several free steps can land in the same frame
         repeat
           b.shownHP = b.shownHP + ((b.shownHP > goal) and -1 or 1)
-          spent = spent + (playerSide and Timing.HP_BAR_HP_STEP or 0)
-          targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+          if playerSide then
+            spent = spent + Timing.HP_BAR_HP_STEP
+          else
+            -- engine/gfx/hp_bar.asm:96
+            b.drainCycles = (b.drainCycles or 0) + Timing.HP_BAR_STEP_CYCLES
+          end
+          targetPx = Timing.hpBarLength(b.shownHP, maxHP)
         until b.shownHP == goal or targetPx ~= b.shownPx or spent >= 1
+        b.draining = true
         if spent > 0 then
           b.drainHold = spent - 1
         elseif targetPx ~= b.shownPx then
-          -- the enemy HUD printed no number, so this frame is already the
-          -- first of the pixel step the crossing just asked for
+          -- engine/gfx/hp_bar.asm:140-148
           b.shownPx = b.shownPx + ((b.shownPx > targetPx) and -1 or 1)
-          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1
+          local lag, tie = Timing.hpBarCpuLag(b.drainCycles, b.drainRoundUp)
+          if tie then b.drainRoundUp = (b.drainRoundUp == false) end
+          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1 + lag
+          b.drainCycles = 0
         else
-          b.drainHold = 0
+          b.draining = nil
+          b.drainHold = self:hpDrainClose(b, goal) - 1
         end
-        b.draining = true
         busy = true
       elseif b.draining then
-        -- .animateHPBarDone's final number print, one more pixel step and
-        -- Delay3 (hp_bar.asm:132-135); this frame is the first of them
+        -- engine/gfx/hp_bar.asm:121-135
         b.draining = nil
-        b.drainHold = Timing.hpDrainClosingFrames(b == self.player) - 1
+        b.drainHold = self:hpDrainClose(b, goal) - 1
         busy = true
       end
     end
@@ -1361,6 +1411,19 @@ function BattleState:beginMsgLine()
   self.shown[#self.shown + 1] = {}
 end
 
+-- home/text.asm:264
+function BattleState:arrowOwnsCell()
+  local save = self.game and self.game.save
+  if save and (save.generation == 2 or save.version == "gold") then return false end
+  return not self:wideLayout()
+end
+
+-- home/text.asm:270
+function BattleState:blankArrowCell()
+  local line = self.shown and self.shown[2]
+  if line and line[18] and self:arrowOwnsCell() then line[18] = 0x7F end
+end
+
 function BattleState:visibleText()
   if self.phase ~= "messages" or not (self.current or self.animPlaying) then
     return nil
@@ -1404,7 +1467,7 @@ function BattleState:updateQueue()
   -- an HP-bar drain holds the queue until the bar catches up
   if self.draining then
     if self:stepHPDrain() then return true end
-    self.draining = nil
+    self.draining, self.drainOnly = nil, nil
     if self.player then self.player.drainFloor = nil end
     if self.enemy then self.enemy.drainFloor = nil end
   end
@@ -1446,7 +1509,7 @@ function BattleState:updateQueue()
       return true
     end
     if item.drain then
-      self.draining = true
+      self.draining, self.drainOnly = true, item.battler
       if item.battler then item.battler.drainFloor = item.stopAt end
       return true
     end
@@ -1513,13 +1576,21 @@ function BattleState:updateQueue()
       -- (engine/battle/animations.asm:415)
       if item.anim and (self:animationsOn() or BALL_ANIMS[item.anim]) then
         if self.animPlayer then
-          local ok = pcall(self.animPlayer.start, self.animPlayer,
+          local ok, err = pcall(self.animPlayer.start, self.animPlayer,
                            item.anim, item.attackerIsPlayer,
                            (item.shakes or item.ball)
                              and { shakes = item.shakes, ball = item.ball,
                                    ballFlicker = item.ball
                                      and self:ballFlicker(item.ball) or nil }
                              or nil)
+          if not ok then
+            self.animStartWarned = self.animStartWarned or {}
+            if not self.animStartWarned[item.anim] then
+              self.animStartWarned[item.anim] = true
+              Logger.warn("battle animation %s failed to start: %s",
+                tostring(item.anim), tostring(err))
+            end
+          end
           self.animPlaying = ok
         end
         self.fx = self.fx or {}
@@ -1578,6 +1649,7 @@ function BattleState:updateQueue()
     end
     if input:wasPressed("a") or input:wasPressed("b") then
       self.msgWaiting = nil
+      self:blankArrowCell()
       self:beginMsgLine()
       -- then the two ScrollTextUpOneLine calls block for 5 frames each
       -- (home/text.asm:280-305) before the next line starts typing
@@ -1674,6 +1746,7 @@ function BattleState:updateQueue()
       elseif input:wasPressed("a") or input:wasPressed("b") then
         -- home/text.asm:218
         self.msgPrompt = nil
+        self:blankArrowCell()
         self.msgHold = true
         self.current = nil
       end
@@ -1901,7 +1974,7 @@ function BattleState:enter()
   -- battle's DrawEnemyHUDAndHPBar only runs after the text (#317).  The
   -- draw is still gated on the slide having landed, so nothing shows while
   -- the silhouettes are still coming in.
-  self.introBalls = true
+  self.introBalls = "pending"
   -- SGB: the player-side battle palette while the back pic is up is
   -- MonsterPalettes[0] = PAL_MEWMON (wBattleMonSpecies is still 0 when
   -- the intro's SET_PAL_BATTLE runs -- SetPal_Battle,
@@ -1957,16 +2030,27 @@ function BattleState:enter()
     table.insert(self.queue, { waitSound = function() return self.introSfx end })
     table.insert(self.queue, { wait = Timing.TRAINER_INTRO_SFX_GAP })
   end
+  -- engine/battle/common_text.asm:25
+  if not self.ghost and not self.scopeReveal
+     and not (require("src.core.GameVersion").isYellow()
+              and (self.safari or self.demo)) then
+    self:act(function() self.introBalls = true end)
+  end
   self:say(self.introText)
+  -- engine/battle/common_text.asm:46
+  if self.ghost then
+    self:say(self:romText("_GhostCantBeIDdText", "Darn! The GHOST\ncan't be ID'd!"))
+  end
   -- the unveil rides on that same box, before _InitBattleCommon clears the
   -- intro chrome below (#492)
   if self.scopeReveal then self:queueScopeReveal() end
-  -- _InitBattleCommon (core.asm:6755-6762): the instant the intro text is
-  -- dismissed both HUD blocks are cleared and ClearSprites drops the
-  -- pokeball OAM, so the intro chrome never returns for the rest of the
-  -- battle -- not on a switch, and not when the beaten trainer's pic
-  -- scrolls back in (#317, #282)
-  self:act(function() self.introBalls = nil end)
+  -- engine/battle/core.asm:6753-6759
+  self:act(function()
+    self.introBalls = nil
+    -- engine/battle/core.asm:6741-6742
+    self.msgHold = nil
+    self.shown = nil
+  end)
   if self.kind == "trainer" or self.kind == "link" then
     local foeName = self.trainer and self.trainer.name
                     or self.opponentName or Strings("FOE")
@@ -2109,9 +2193,17 @@ end
 --     flag survived into the next turn, ate a move the real players saw
 --     land, and from there the replay was watching a different battle.
 --     LinkBattle.newSpectator calls this at the head of every turn.
+local function clearFlinch(b)
+  if not (b.mustRecharge or b.rageMove) then b.flinched = false end
+end
+
 function BattleState:clearTurnFlinches()
-  for _, b in ipairs({ self.player, self.enemy }) do
-    if b and not (b.mustRecharge or b.rageMove) then b.flinched = false end
+  -- ipairs({ self.player, self.enemy }) without the per-call table: the
+  -- enemy is only visited when the player slot is set, like ipairs did
+  local p = self.player
+  if p then
+    clearFlinch(p)
+    if self.enemy then clearFlinch(self.enemy) end
   end
 end
 
@@ -2313,16 +2405,37 @@ function BattleState:tickFx()
   self:updateFx()
 end
 
+-- ScrollTextUpOneLine's pixel scroll (beginMsgLine sets scrollPx = 8):
+-- 2px per logic step while the message box shows the rolling window.  It
+-- used to count down inside drawTextArea / WideBattle's drawMessageBox, so
+-- a 144Hz display scrolled 2.4x too fast; update() now runs this once per
+-- step AFTER the queue typed, which is the order the draw-side decrement
+-- saw it (8 is set and the box already draws at 6 on that frame).
+function BattleState:tickTextScroll()
+  local px = self.scrollPx
+  if px and px > 0 and self.phase == "messages"
+     and (self.current or self.animPlaying or self.msgHold) then
+    px = px - 2
+    self.scrollPx = px > 0 and px or nil
+  end
+end
+
+local function snapIdleBar(b)
+  if b.shownHP then
+    b.shownHP = b.mon.hp
+    b.shownPx = Timing.hpBarPixels(b.mon.hp, math.max(1, b.mon.stats.hp))
+  end
+  b.drainFloor = nil
+  b.shownStatus = b.mon.status
+end
+
+-- runs every menu-phase step: no per-call { player, enemy } table (the
+-- enemy is only visited when the player slot is set, like ipairs did)
 function BattleState:snapIdleBars()
-  for _, b in ipairs({ self.player, self.enemy }) do
-    if b then
-      if b.shownHP then
-        b.shownHP = b.mon.hp
-        b.shownPx = Timing.hpBarPixels(b.mon.hp, math.max(1, b.mon.stats.hp))
-      end
-      b.drainFloor = nil
-      b.shownStatus = b.mon.status
-    end
+  local p = self.player
+  if p then
+    snapIdleBar(p)
+    if self.enemy then snapIdleBar(self.enemy) end
   end
 end
 
@@ -2365,20 +2478,15 @@ function BattleState:update(dt)
         self:finish()
       end
     end
+    self:tickTextScroll()
     return
   end
 
   if self.phase == "menu" and self.demo then
-    -- DisplayBattleMenu's old-man branch (core.asm:2018-2050): input is
-    -- never read.  The player name is swapped to OLD MAN, then the
-    -- keystrokes are simulated on screen -- the '▶' cursor sits next to
-    -- FIGHT (9,14) for 80 frames, hops down to ITEM (9,16) for 50, goes
-    -- hollow ('▷') and the ITEM menu is forced (a = $2 ->
-    -- .upperLeftMenuItemWasNotSelected).  The old man never attacks;
-    -- backing out of the ball menu re-enters DisplayBattleMenu, which
-    -- replays the whole script.
+    -- engine/battle/core.asm:2038-2049
+    local fight, item = self:demoDelays()
     self.demoTimer = (self.demoTimer or 0) + 1
-    if self.demoTimer > 130 then
+    if self.demoTimer > fight + item then
       self.demoTimer = nil
       self:openOldManBag()
     end
@@ -2627,15 +2735,19 @@ function BattleState:restoreMimicked(battler)
   self.mimicRestores = #keep > 0 and keep or nil
 end
 
--- BagWasSelected's old-man fork (core.asm:2193-2210): the list menu is
--- fed OldManItemList -- one POKé BALL x50 -- instead of the player's
--- bag.  The list is as scripted as the battle menu (DisplayListMenuID's
--- old-man branch, home/list_menu.asm:65-80): no input is ever read --
--- backing out is impossible -- the '▶' sits in front of POKé BALL for
--- 80 frames, then A is auto-pressed and .buttonAPressed's
--- PlaceUnfilledArrowMenuCursor leaves the hollow '▷' on the row for the
--- handful of frames UseBagItem takes to reach ItemUseBall's screen
--- restore (item_effects.asm:145) and the throw text.
+-- engine/battle/core.asm:2041
+-- engine/battle/core.asm:2046
+-- home/list_menu.asm:71
+function BattleState:demoDelays()
+  if require("src.core.GameVersion").isYellow() then
+    -- pokeyellow engine/battle/core.asm:2125
+    -- pokeyellow engine/battle/core.asm:2130
+    return 20, 20, 20
+  end
+  return 80, 50, 80
+end
+
+-- home/list_menu.asm:65-80
 function BattleState:openOldManBag()
   local ListMenu = require("src.ui.ListMenu")
   local game = self.game
@@ -2652,15 +2764,17 @@ function BattleState:openOldManBag()
     -- screen (engine/battle/core.asm:2210)
     list = ListMenu.new(game, "ITEMS", {
       { value = "POKE_BALL", label = Strings("POKé BALL"), count = qty },
+      -- home/list_menu.asm:523-524
+      { cancel = true, label = Strings("CANCEL") },
     }, {
       itemBox = true,
       script = function(l)
+        local _, _, bag = self:demoDelays()
         l.scriptTimer = (l.scriptTimer or 0) + 1
-        if l.scriptTimer == 81 then
-          -- the auto A-press: the cursor goes hollow on the chosen row
+        if l.scriptTimer == bag + 1 then
+          -- home/list_menu.asm:91
           l.hollowIndex = l.index
-        elseif l.scriptTimer > 88 then
-          -- ItemUseBall takes over: list down, OLD MAN throws
+        elseif l.scriptTimer > bag + 8 then
           l:close()
           self:oldManThrow()
         end
@@ -2685,9 +2799,10 @@ function BattleState:oldManThrow()
   self.phase = "messages"
   self.afterQueue = "finish"
   self.result = "run" -- nothing is kept; wBattleResult only ends the demo
-  self:sayAuto(Strings("%s used\nPOKé BALL!", self.demoName or Strings("OLD MAN")))
+  -- engine/items/item_effects.asm:148
+  self:sayAuto(self:romText("_ItemUseText001", "%s used\n%s!",
+    self.demoName, self.data.items.POKE_BALL.name))
   self:act(function()
-    require("src.core.Sound").play(self.data, "Ball_Toss")
     -- ItemUseBall's beat before the toss chain (like throwBall)
     self.nextInsert = (self.nextInsert or 0) + 1
     table.insert(self.queue, self.nextInsert, { wait = 20 })
@@ -2925,19 +3040,26 @@ function BattleState:residualFor(b, opp)
   -- engine/battle/core.asm:435-473
   if b.residualDone then return end
   b.residualDone = true
-  local msgs = Status.residual(b, opp, self)
+  local msgs = Status.residualStatus(b, opp, self)
   local rec = Status.recordFor(self.data and self.data.statuses, b.mon.status)
   for _, m in ipairs(msgs) do self:sayNext(prefixEnemy(m, b)) end
   -- engine/battle/core.asm:490-493
   if rec and rec.residual then
     self:animNext("BURN_PSN_ANIM", b.isPlayer)
   end
-  if b.leechSeeded and b.mon.hp > 0 then
-    -- the drain plays the ABSORB animation from the healing side
-    -- (core.asm:506-517 flips hWhoseTurn before PlayMoveAnimation)
+  if #msgs > 0 then self:drainNext() end
+  self:actNext(function() self:residualSeedFor(b, opp) end)
+end
+
+-- engine/battle/core.asm:497-530
+function BattleState:residualSeedFor(b, opp)
+  local msgs = Status.residualSeed(b, opp, self)
+  if #msgs > 0 then
     self:animNext("ABSORB", opp.isPlayer)
+    self:drainNext()
+    for _, m in ipairs(msgs) do self:sayNext(prefixEnemy(m, b)) end
   end
-  if #msgs > 0 then self:drainNext() end -- poison/burn/seed HP moved
+  if b.mon.hp <= 0 then self:waitNext(20) end
   self.sideToxic = self.sideToxic or {}
   if b.toxicCounter then
     self.sideToxic[b.isPlayer and "player" or "enemy"] = b.toxicCounter
@@ -3348,7 +3470,10 @@ function BattleState:applyAnimEffect(ev)
   local e = ev.effect
   if not e then return end
 
-  if e == "SFX_TINK" then
+  if e == "SFX_BALL_TOSS" then
+    -- pokered/engine/battle/animations.asm:694
+    require("src.core.Sound").play(self.data, "Ball_Toss")
+  elseif e == "SFX_TINK" then
     -- each ball shake opens with a tink (DoBallShakeSpecialEffects)
     require("src.core.Sound").play(self.data, "Tink")
 
@@ -4010,7 +4135,9 @@ function BattleState:executeAction(user, target, action)
         end
       end
       self:drainNext()
-      require("src.core.Sound").play(self.data, "Heal_Ailment")
+      if TrainerAI.playsRestoringSfx(action.item) then
+        require("src.core.Sound").play(self.data, "Heal_Ailment")
+      end
       return
     end
     if action.special == "aiSwitch" then
@@ -4143,6 +4270,7 @@ function BattleState:preRechargeChecks(user, target)
   local mon = user.mon
   if mon.status == "SLP" then
     user.sleepTurns = (user.sleepTurns or 1) - 1
+    mon.sleepTurns = user.sleepTurns > 0 and user.sleepTurns or nil
     if user.sleepTurns <= 0 then
       mon.status = nil
       self:sayNext(self:romText("_WokeUpText", "%s\nwoke up!", displayName(user)))
@@ -4296,6 +4424,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
   end
 
   self.moveAnimRow = nil
+  local moveAnnouncement
   local thrashing = user.thrashTurns and moveInst == user.thrashMove
     and user.thrashAnnounced or false
   if thrashing then
@@ -4309,6 +4438,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
     end
   else
     self:sayNextAuto(self:romText("_ItemUseText001", "%s\nused %s!", displayName(user), move.name))
+    moveAnnouncement = self.queue[self.nextInsert]
   end
   -- PlayCurrentMoveAnimation follows the announcement; Mimic (announceAnim
   -- = false) queues it from applyMimic after a successful copy
@@ -4360,6 +4490,15 @@ function BattleState:performMove(user, target, moveInst, isCalled)
     chargeRequired = required ~= false
   end
   if chargeRequired then
+    for i, item in ipairs(self.queue) do
+      if item == moveAnnouncement then
+        table.remove(self.queue, i)
+        if self.nextInsert and i <= self.nextInsert then
+          self.nextInsert = self.nextInsert - 1
+        end
+        break
+      end
+    end
     self:cancelMoveAnim()
     user.charging = moveInst
     user.chargeReady = true
@@ -4460,15 +4599,14 @@ function BattleState:continueTrapping(user, target)
   -- through the attacker's final hit (endOfTurn nils it)
   user.trappingTurns = user.trappingTurns - 1
   self:applyDamage(target, user.trapDamage or 1)
+  self:handleBuildingRage(target)
   if target.mon.hp <= 0 then self:onFaint(target) end
 end
 
 function BattleState:continueBide(user, target)
   user.bideTurns = user.bideTurns - 1
-  if user.bideTurns > 0 then
-    self:sayNext(Strings("%s\nis storing energy!", displayName(user)))
-    return
-  end
+  -- engine/battle/core.asm:3499
+  if user.bideTurns > 0 then return end
   self:sayNext(self:romText("_UnleashedEnergyText", "%s\nunleashed energy!", displayName(user)))
   local dmg = (user.bideDamage or 0) * 2
   user.bideTurns, user.bideDamage = nil, nil
@@ -4482,6 +4620,7 @@ function BattleState:continueBide(user, target)
   -- here, after UnleashedEnergyText and before the damage (#375)
   self:animNext("BIDE", user.isPlayer)
   self:applyDamage(target, dmg)
+  self:handleBuildingRage(target)
   if target.mon.hp <= 0 then self:onFaint(target) end
 end
 
@@ -4490,7 +4629,7 @@ function BattleState:selfDestruct(user)
   self:onFaint(user)
 end
 
--- Applies damage honoring Substitute, Bide storage and Rage; returns the
+-- Applies damage honoring Substitute and Bide storage; returns the
 -- amount that counts as dealt (for recoil/drain).
 function BattleState:applyDamage(target, dmg)
   if target.substituteHP then
@@ -4510,11 +4649,26 @@ function BattleState:applyDamage(target, dmg)
   if target.bideTurns then
     target.bideDamage = (target.bideDamage or 0) + dealt
   end
-  if target.rageMove and dealt > 0 then
-    target.stages.attack = math.min(6, (target.stages.attack or 0) + 1)
-    self:sayNext(self:romText("_BuildingRageText", "%s's\nRAGE is building!", displayName(target)))
-  end
   return dealt
+end
+
+-- engine/battle/move_effects/recoil.asm:28
+function BattleState:applyRecoil(user, recoil)
+  local mon = user.mon
+  local before = mon.hp
+  mon.hp = math.max(0, mon.hp - recoil)
+  if mon.hp ~= before then self:drainNext(user, mon.hp) end
+  self:sayNext(self:romText("_HitWithRecoilText", "%s's\nhit with recoil!", displayName(user)))
+end
+
+-- engine/battle/core.asm:4913
+function BattleState:handleBuildingRage(target)
+  if not target.rageMove or target.mon.hp <= 0 then return end
+  if (target.stages.attack or 0) >= 6 then return end
+  self:sayNext(self:romText("_BuildingRageText", "%s's\nRAGE is building!", displayName(target)))
+  for _, m in ipairs(MoveEffects.changeStage(self, target, "attack", 1, false)) do
+    self:sayNext(m)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -4971,6 +5125,8 @@ function BattleState:learnMove(mon, moveId)
   end
   if #mon.moves < 4 then
     table.insert(mon.moves, { id = moveId, pp = mdef.pp })
+    require("src.world.PikachuFollower")
+      .onMoveLearned(self.game.save, mon, moveId)
     Runtime.emit("pokemon.move_learned", { mon = mon, moveId = moveId })
     self:sayNextWaitSfx(self:romText("_MimicLearnedMoveText", "%s learned\n%s!", mon.nickname or self.data.pokemon[mon.species].name,
                                             mdef.name), function()
@@ -4982,8 +5138,24 @@ function BattleState:learnMove(mon, moveId)
   -- ordered insert so multi-level gains keep each level's checks
   -- between its own stat box and the next "grew to level" text
   self:uiNext(function()
-    return self:buildScreen("MoveLearnMenu", mon, moveId, nil, "Level_Up")
+    return self:buildScreen("MoveLearnMenu", mon, moveId, function(learned)
+      local name = mon.nickname or self.data.pokemon[mon.species].name
+      self:holdPage(learned
+        and self:romText("_LearnedMove1Text", "%s learned\n%s!", name, mdef.name)
+        or self:romText("_DidNotLearnText", "%s\ndid not learn\v%s!", name, mdef.name))
+    end, "Level_Up")
   end)
+end
+
+-- engine/pokemon/learn_move.asm:87-95
+function BattleState:holdPage(text)
+  local lines = {}
+  for chunk in (require("src.render.TextBox").strip(text) .. "\n"):gmatch("([^\n\v]*)[\n\v]") do
+    lines[#lines + 1] = Font.encode(chunk)
+  end
+  self.shown = {}
+  for i = math.max(1, #lines - 1), #lines do self.shown[#self.shown + 1] = lines[i] end
+  self.current, self.msgHold, self.msgPrompt, self.msgWaiting = nil, true, nil, nil
 end
 
 -- Map the battle was fought on (overworld wins; save.player.map is fallback).
@@ -5056,22 +5228,21 @@ function BattleState:playerMonFainted()
   -- battles go straight to the party menu (the menu-phase guard).
   if self.kind ~= "wild" then return end
   local game = self.game
-  self:say(self.data.text._UseNextMonText or Strings("Use next POKéMON?"))
-  self:ui(function()
-    local ChoiceBox = require("src.ui.ChoiceBox")
-    return ChoiceBox.new(game, function(yes)
+  -- engine/battle/core.asm:1052-1078
+  self:sayChoice(self.data.text._UseNextMonText or Strings("Use next POKéMON?"),
+    function(yes)
       if yes then return end -- the menu-phase guard opens the party menu
       local pSpd = (game.save.party[1].stats or { speed = 0 }).speed or 0
       if self:runRoll(pSpd, TurnOrder.effectiveSpeed(self.enemy)) then
         require("src.core.Sound").play(self.data, "Run")
         self:say(self:romText("_GotAwayText", "Got away safely!"))
         self.result = "run"
+        self.playerRan = true
         self.afterQueue = "finish"
       else
         self:say(self:romText("_CantEscapeText", "Can't escape!"))
       end
-    end)
-  end)
+    end, { box = require("src.ui.Theme").useNextMonBox })
 end
 
 -- ChooseNextMon (core.asm:1086-1128): the battle party menu; a fainted
@@ -5138,6 +5309,7 @@ function BattleState:safariAction(choice)
     require("src.core.Sound").play(self.data, "Run")
     self:say(self:romText("_GotAwayText", "Got away safely!"))
     self.result = "run"
+    self.playerRan = true
     self.afterQueue = "finish"
     return
   end
@@ -5146,7 +5318,6 @@ function BattleState:safariAction(choice)
     st.balls = st.balls - 1
     self:sayAuto(Strings("%s used\nSAFARI BALL!", playerName))
     self:act(function()
-      require("src.core.Sound").play(self.data, "Ball_Toss")
       self.lastBall = "SAFARI_BALL"
       local caught, shakes = self:catchAttempt("SAFARI_BALL", self.safariCatchRate)
       Runtime.emit("battle.ball_thrown", {
@@ -5284,6 +5455,7 @@ function BattleState:tryRun()
     require("src.core.Sound").play(self.data, "Run")
     self:say(self:romText("_GotAwayText", "Got away safely!"))
     self.result = "run"
+    self.playerRan = true
     self.afterQueue = "finish"
   else
     self:say(self:romText("_CantEscapeText", "Can't escape!"))
@@ -5486,6 +5658,11 @@ function BattleState:storeCaughtMon()
     -- engine/menus/pokedex.asm:581-582
     self:actNext(function() self.fieldCleared = true end)
   end
+  -- engine/items/item_effects.asm:564
+  if require("src.core.GameVersion").isYellow() then
+    game.save.pikachuEmotionModifier = 1
+    game.save.pikachuMood = 0x85
+  end
   local function askCaughtNickname()
     self:offerNickname(self.enemy.mon, self.enemy.name)
   end
@@ -5570,7 +5747,6 @@ function BattleState:throwBall(ball)
                                      self.data.items[ball].name))
   end
   self:act(function()
-    require("src.core.Sound").play(self.data, "Ball_Toss")
     if self.kind ~= "wild" then
       -- ThrowBallAtTrainerMon (item_effects.asm:2292-2303) still animates the
       -- toss: MoveAnimation routes TOSS_ANIM to TossBallAnimation, which takes
@@ -5696,14 +5872,20 @@ end
 -- PlayBattleVictoryMusic (core.asm:959-967) + EndLowHealthAlarm
 -- (core.asm:864-872): winning stops the low-health alarm and disables
 -- it for the rest of the battle (wLowHealthAlarmDisabled), then starts
--- the victory theme once; gym leaders, Lance and the final rival share
+-- the victory theme once; gym leaders and the final rival share
 -- MUSIC_DEFEATED_GYM_LEADER (core.asm:917-926).
 function BattleState:playVictoryMusic()
   require("src.core.Sound").stopLoop("Low_Health_Alarm")
   self.lowHealthAlarmDisabled = true
   if self.victoryMusicPlayed then return end
   self.victoryMusicPlayed = true
-  local kind = self.musicKind == "final" and "gym" or (self.musicKind or "wild")
+  local kind = self.musicKind or "wild"
+  -- engine/battle/core.asm:917
+  if kind == "final" or self.isGymLeader then
+    kind = "gym"
+  elseif kind == "gym" then
+    kind = "trainer"
+  end
   require("src.core.Music").playVictory(self.data, kind)
 end
 
@@ -5723,6 +5905,14 @@ function BattleState:finish()
     require("src.pokemon.Evolution").checkParty(self.game,
       function() self:finish() end, self.leveledUp)
     return
+  end
+  -- engine/battle/end_of_battle.asm:49
+  if not self.pikachuMoodChecked then
+    self.pikachuMoodChecked = true
+    if self.kind == "link" or (not self.demo and (self.result == "win"
+       or (self.result == "run" and not self.playerRan))) then
+      require("src.world.PikachuFollower").moodAfterBattle(self.game.save)
+    end
   end
   -- Invariant: a battle can never hand the overworld a party with nothing
   -- healthy in it -- except the Oak's Lab starter rival, where pret skips
@@ -5752,7 +5942,10 @@ function BattleState:finish()
   -- the battle screen closes; leaving battle brings back the map theme,
   -- like the overworld reload's PlayDefaultMusicFadeOutCurrent
   -- (home/overworld.asm:2343-2348)
-  require("src.core.Music").restoreMap(self.data)
+  -- engine/battle/core.asm:928
+  if not (self.result == "win" and self.musicKind == "final") then
+    require("src.core.Music").restoreMap(self.data)
+  end
   self.game.stack:pop()
   Runtime.emit("battle.ended", { battle = self, result = self.result or "run" })
   -- Coming back from the battle screen is a fade, not a cut: EnterMap sees
@@ -5789,6 +5982,26 @@ local HudTiles = require("src.render.HudTiles")
 local hudTile = HudTiles.tile
 local drawHPBar = HudTiles.drawHPBar
 
+-- One reusable row-clip quad per battler for the faint / slide pic effects
+-- (drawn every frame they run): re-aimed with setViewport instead of a new
+-- Quad per frame.  A quad without setViewport (headless stubs) is simply
+-- rebuilt, which is what every frame used to do.
+function BattleState:picQuad(battler, x, y, w, h, sw, sh)
+  local quads = self.picQuads
+  if not quads then
+    quads = setmetatable({}, WEAK_KEYS)
+    self.picQuads = quads
+  end
+  local q = quads[battler]
+  if q and q.setViewport then
+    q:setViewport(x, y, w, h, sw, sh)
+    return q
+  end
+  q = love.graphics.newQuad(x, y, w, h, sw, sh)
+  quads[battler] = q
+  return q
+end
+
 -- CenterMonName: 1-2 letter names print two tiles right, 3-4 one tile.
 -- Counted in glyphs, not bytes: a nickname carrying "é" or "♂" is one
 -- charmap sequence per glyph, and byte length would push it a tile left.
@@ -5819,7 +6032,7 @@ end
 local function ballObpSheet()
   local PaletteFX = require("src.render.PaletteFX")
   if not PaletteFX.usesSpriteObp() then return nil end
-  local colors, group = PaletteFX.ogObj()
+  local colors, group = PaletteFX.ogObjLit()
   if not colors then return nil end
   local SpriteRenderer = require("src.render.SpriteRenderer")
   local ok, img = pcall(SpriteRenderer.obpImage,
@@ -6053,8 +6266,8 @@ function BattleState:drawBattlerPic(battler, x, y, scale, shakeX, shakeY)
     end
     local visible = img:getHeight() - math.floor(off / scale)
     if visible > 0 then
-      local quad = love.graphics.newQuad(0, 0, img:getWidth(), visible,
-                                         img:getWidth(), img:getHeight())
+      local quad = self:picQuad(battler, 0, 0, img:getWidth(), visible,
+                                img:getWidth(), img:getHeight())
       love.graphics.draw(img, quad, x, y + off, 0, scale, scale)
     end
     return
@@ -6139,7 +6352,7 @@ function BattleState:drawBattlerPic(battler, x, y, scale, shakeX, shakeY)
     -- sink below the baseline (AnimationSlideMonDown-style row clip)
     local visible = h - math.floor(oy / scale)
     if visible > 0 then
-      local quad = love.graphics.newQuad(0, 0, w, visible, w, h)
+      local quad = self:picQuad(battler, 0, 0, w, visible, w, h)
       love.graphics.draw(img, quad, x + ox, y + oy, 0, scale, scale)
     end
   elseif k == "slideUp" then
@@ -6150,7 +6363,7 @@ function BattleState:drawBattlerPic(battler, x, y, scale, shakeX, shakeY)
     local step = math.min(7, math.floor((t - 1) / 2) + 1)
     local visible = math.floor(h * step / 7)
     if visible > 0 then
-      local quad = love.graphics.newQuad(0, h - visible, w, visible, w, h)
+      local quad = self:picQuad(battler, 0, h - visible, w, visible, w, h)
       love.graphics.draw(img, quad, x + ox,
                          y + (h - visible) * scale, 0, scale, scale)
     end
@@ -6260,9 +6473,10 @@ function BattleState:sgbBattlePals()
   return out
 end
 
--- the SGB palette covering a screen pixel (BlkPacket_Battle regions)
-function BattleState:zoneColorsAt(x, y)
-  local pals = self:sgbBattlePals()
+-- the SGB palette covering a screen pixel (BlkPacket_Battle regions).
+-- pals: an sgbBattlePals() result the caller already resolved this frame.
+function BattleState:zoneColorsAt(x, y, pals)
+  pals = pals or self:sgbBattlePals()
   if not pals then return nil end
   local tx = math.floor(x / 8)
   local ty = math.floor(y / 8)
@@ -6327,13 +6541,32 @@ function BattleState:drawZonePass(src, sx, sy)
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setShader(shader)
   local shaking = sx ~= 0 or sy ~= 0
+  -- the six zones share four palettes (one gray ramp in mono): permute each
+  -- once per pass instead of once per zone
+  local permuted = self.zonePermuted
+  if not permuted then
+    permuted = {}
+    self.zonePermuted = permuted
+  end
+  permuted[0], permuted[1], permuted[2], permuted[3], permuted.gray =
+    nil, nil, nil, nil, nil
   for _, z in ipairs(BATTLE_ZONES) do
     if mono then
       -- the BGP fade still runs, just in gray: the frame-level pass colors
       -- whatever DMG shade this leaves behind
-      PaletteFX.sendShades(shader, PaletteFX.permute(PaletteFX.GRAYS, bgp))
+      local shades = permuted.gray
+      if not shades then
+        shades = PaletteFX.permute(PaletteFX.GRAYS, bgp)
+        permuted.gray = shades
+      end
+      PaletteFX.sendShades(shader, shades)
     else
-      PaletteFX.sendColors(shader, PaletteFX.permute(pals[z.pal], bgp))
+      local colors = permuted[z.pal]
+      if not colors then
+        colors = PaletteFX.permute(pals[z.pal], bgp)
+        permuted[z.pal] = colors
+      end
+      PaletteFX.sendColors(shader, colors)
     end
     local zx, zy = z[1] * 8, z[2] * 8
     local zw, zh = (z[3] - z[1] + 1) * 8, (z[4] - z[2] + 1) * 8
@@ -6359,26 +6592,52 @@ local OBJ_SHADES = {
   e4x = { 2, 1, 3 },  -- $e4 xor %00111100 = $d8
   obp1 = { 3, 2, 1 }, -- $6c
 }
-function BattleState:animSpriteColors(s, px, py)
+local function shadeTriple(P, shade)
+  local col = P[shade + 1]
+  return { col[1] / 255, col[2] / 255, col[3] / 255 }
+end
+
+-- memo (optional): a per-frame table from drawAnimLayer.  It holds the
+-- frame's sgbBattlePals() (memo.pals, false when there are none) so the
+-- palette set is resolved once per frame instead of once per attribute
+-- cell of every OAM tile, and the finished triples per (palette, obp key)
+-- so tiles in the same zone share one table (AnimPlayer then sees equal
+-- colors by identity).
+function BattleState:animSpriteColors(s, px, py, memo)
   local PaletteFX = require("src.render.PaletteFX")
   local key = s.obp or "f0"
   local P
   -- engine/battle/animations.asm:551 (.notSGB)
   if PaletteFX.usesSpriteObp() then
     -- engine/battle/init_battle_variables.asm:18
-    P = require("src.core.GameVersion").isBlue() and PaletteFX.GBC_OBJ_BLUE
-        or PaletteFX.GBC_OBJ
+    P = PaletteFX.ogObjBase()
     if key == "f0" then key = "e4" elseif key == "f0x" then key = "e4x" end
+  elseif memo then
+    local pals = memo.pals
+    if pals == nil then
+      pals = self:sgbBattlePals() or false
+      memo.pals = pals
+    end
+    P = pals and self:zoneColorsAt(px or (s.x - 8 + 4), py or (s.y - 16 + 4),
+                                   pals) or nil
   else
     P = self:zoneColorsAt(px or (s.x - 8 + 4), py or (s.y - 16 + 4))
   end
   if not P then return nil end
+  local byKey = memo and memo[P]
+  local hit = byKey and byKey[key]
+  if hit then return hit end
   local m = OBJ_SHADES[key] or OBJ_SHADES.f0
-  local function c(shade)
-    local col = P[shade + 1]
-    return { col[1] / 255, col[2] / 255, col[3] / 255 }
+  local out = { shadeTriple(P, m[1]), shadeTriple(P, m[2]),
+                shadeTriple(P, m[3]) }
+  if memo then
+    if not byKey then
+      byKey = {}
+      memo[P] = byKey
+    end
+    byKey[key] = out
   end
-  return { c(m[1]), c(m[2]), c(m[3]) }
+  return out
 end
 
 -- the OAM anim layer (subanimation sprites / the resting caught ball)
@@ -6387,7 +6646,16 @@ function BattleState:drawAnimLayer(colorized)
   if self.fieldCleared then return end
   local colorFn
   if colorized then
-    colorFn = function(s, px, py) return self:animSpriteColors(s, px, py) end
+    -- fresh per-frame memo (palette set + color triples), one long-lived
+    -- closure: colorFn runs up to four times per OAM tile
+    self.animColorMemo = {}
+    colorFn = self.animColorFn
+    if not colorFn then
+      colorFn = function(s, px, py)
+        return self:animSpriteColors(s, px, py, self.animColorMemo)
+      end
+      self.animColorFn = colorFn
+    end
   end
   if self.animPlaying and self.animPlayer then
     love.graphics.setColor(1, 1, 1, 1)
@@ -6689,7 +6957,7 @@ function BattleState:drawHUDs(slide)
   -- rows coming back when the beaten trainer scrolls in (#282):
   -- _ScrollTrainerPicAfterBattle redraws tilemap columns and never touches
   -- OAM, which ClearSprites emptied when the intro text was dismissed.
-  local showIntroBalls = self.introBalls and slide == 0
+  local showIntroBalls = self.introBalls == true and slide == 0
   if showIntroBalls then
     if self.enemyParty and (self.kind == "trainer" or self.kind == "link") then
       -- PlaceEnemyHUDTiles (hlcoord 1,2): $73, then $74 + 8x $76 + $78
@@ -6777,16 +7045,19 @@ function BattleState:drawTextArea()
     -- text uses every other tile row, hlcoord *,14 / *,16).  scrollPx animates
     -- the lines up one row (ScrollTextUpOneLine) so a 3rd line scrolls into
     -- view instead of drawing off-screen at y=144 (#216).
-    if self.scrollPx and self.scrollPx > 0 then
-      self.scrollPx = self.scrollPx - 2
-      if self.scrollPx <= 0 then self.scrollPx = nil end
-    end
     local off = self.scrollPx or 0
     local ys = { 112, 128 }
+    -- home/text.asm:264
+    local arrowCell = (self.msgWaiting or self.msgPrompt) and off == 0
+      and self:arrowOwnsCell()
     for li, line in ipairs(self.shown or {}) do
       local y = (ys[li] or 128) + off
+      local pen = 8
       for i = 1, #line do
-        drawGlyph(line[i], 8 + (i - 1) * 8, y)
+        if not (arrowCell and li == 2 and i == 18) then
+          drawGlyph(line[i], pen, y)
+        end
+        pen = pen + Font.advanceOf(line[i])
       end
     end
     -- the blinking down arrow ('▼', glyph $EE) while a \v CONT wait
@@ -6796,14 +7067,12 @@ function BattleState:drawTextArea()
       drawGlyph(0xEE, (0 + 20 - 2) * 8, (12 + 6 - 1) * 8 - 4)
     end
   elseif self.phase == "menu" and self.demo then
-    -- the old-man script (DisplayBattleMenu, core.asm:2038-2049): the
-    -- standard menu, with the '▶' hand drawn by the scripted keystrokes
-    -- -- next to FIGHT (9,14) for the first 80 frames, then ITEM (9,16)
+    -- engine/battle/core.asm:2038-2049
     box(8, 12, 12, 6)
     text(Strings("FIGHT", "battle"), 80, 112)
     drawGlyph(0xE1, 128, 112); drawGlyph(0xE2, 136, 112)
     text(Strings("ITEM", "battle"), 80, 128); text(Strings("RUN", "battle"), 128, 128)
-    drawGlyph(0xED, 72, (self.demoTimer or 0) <= 80 and 112 or 128)
+    drawGlyph(0xED, 72, (self.demoTimer or 0) <= self:demoDelays() and 112 or 128)
   elseif self.phase == "menu" then
     local col = (self.menuIndex - 1) % 2
     local row = math.floor((self.menuIndex - 1) / 2)

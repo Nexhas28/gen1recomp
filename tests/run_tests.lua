@@ -1665,6 +1665,38 @@ while not ap:isDone() and frames < 600 do
   ap:update()
 end
 check(ap:isDone(), "THUNDERBOLT plays mirrored for the enemy")
+do
+local animFailures = {}
+for id in pairs(Data.battle_anims.moveAnims) do
+  for _, side in ipairs({ true, false }) do
+    local ok, err = pcall(ap.start, ap, id, side)
+    if not ok or (#ap.steps == 0 and #ap.events == 0) then
+      animFailures[#animFailures + 1] = id .. "(" .. tostring(side) .. "): "
+        .. tostring(err or "no steps")
+    end
+  end
+end
+table.sort(animFailures)
+eq(table.concat(animFailures, "; "), "", "every battle anim compiles from both sides")
+-- engine/battle/animations.asm:2418
+local fallingDX = Data.battle_anims.fallingDeltaXs
+check(fallingDX ~= nil and fallingDX[63] ~= nil, "falling-object delta-X bytes extracted")
+if fallingDX then
+  local head = {}
+  for i = 0, 8 do head[#head + 1] = fallingDX[i] end
+  eq(table.concat(head, ","), "0,1,3,5,7,9,11,13,15", "delta-X table head")
+  ap:start("PETAL_DANCE", true)
+  local petals
+  for _, st in ipairs(ap.steps) do
+    if #st.sprites == 20 then petals = st; break end
+  end
+  check(petals ~= nil, "PETAL_DANCE drops twenty petals")
+  if petals then
+    eq(petals.sprites[10].x, (0x4A - fallingDX[10]) % 256,
+       "petal 10 reads past the delta-X table on its first tick")
+  end
+end
+end
 
 -- ---------------------------------------------------------------- tile-pair collisions
 check(Data.field.tilePairs and #Data.field.tilePairs.land > 0,
@@ -2277,7 +2309,7 @@ end
 -- plays a tink + 40-frame pause per shake, rewinding the same subanim.
 do
   local AnimPlayer = require("src.battle.AnimPlayer")
-  local ap = AnimPlayer.new(require("data.generated.battle_anims"))
+  local ap = AnimPlayer.new(Data.battle_anims)
   ap:start("SHAKE_ANIM", true, { shakes = 3 })
   local tinks = 0
   for _, e in ipairs(ap.events) do
@@ -2416,10 +2448,25 @@ do
     StateStack:update(1 / 60)
     Input.pressed = {}
   end
+  local function waitTop(pred)
+    for _ = 1, 600 do
+      if pred(StateStack:top()) then return true end
+      StateStack:update(1 / 60)
+    end
+    return pred(StateStack:top())
+  end
+  check(StateStack:top() ~= shop and StateStack:top().isTextBox,
+        "the greeting types before BUY/SELL/QUIT (text_script.asm:141-150)")
+  check(waitTop(function(t) return t == shop end), "the greeting hands over to the mart menu")
   press("a") -- BUY
   check(StateStack:top() ~= shop, "BUY opens the buy list")
+  eq(shop.hollowIndex, 1, "BUY leaves a hollow cursor (text_box.asm:176)")
+  check(waitTop(function(t) return t ~= nil and t.onChoose ~= nil end),
+        "the buy list follows Take your time.")
   press("b") -- close the list
-  eq(StateStack:top(), shop, "closing the list returns to the mart menu")
+  check(waitTop(function(t) return t == shop end), "closing the list returns to the mart menu")
+  eq(shop.index, 1, "the mart menu cursor is back on BUY (pokemart.asm:10)")
+  eq(shop.hollowIndex, nil, "and filled again")
   press("down")
   press("down")
   press("a") -- QUIT
@@ -2427,6 +2474,8 @@ do
   local goodbye = StateStack:top()
   check(goodbye ~= shop and goodbye.isTextBox,
         "QUIT prints _PokemartThankYouText")
+  eq(StateStack.states[#StateStack.states - 1], shop,
+     "the mart menu stays under the goodbye (pokemart.asm:220)")
   for _ = 1, 600 do
     if quitCalled then break end
     press("a")
@@ -2455,8 +2504,16 @@ end
   Game.save.inventory = { GREAT_BALL = 5, HYPER_POTION = 99 }
   local sellShop = require("src.ui.ShopMenu").new(Game, { "POTION" }, function() end)
   StateStack:push(sellShop)
+  for _ = 1, 600 do
+    if StateStack:top() == sellShop then break end
+    StateStack:update(1 / 60)
+  end
   Input.pressed = { down = true }; StateStack:update(1 / 60); Input.pressed = {}
   Input.pressed = { a = true }; StateStack:update(1 / 60); Input.pressed = {}
+  for _ = 1, 600 do
+    if StateStack:top() ~= sellShop and StateStack:top().items then break end
+    StateStack:update(1 / 60)
+  end
   local sellList = StateStack:top()
   local foundHyper
   for _, it in ipairs(sellList.items or {}) do
@@ -2915,8 +2972,6 @@ do
   check(seek("vsync"), "cursor reaches VSYNC")
   press("a")
   eq(og.save.options.vsync, "off", "A cycles VSYNC to OFF")
-  -- RFC 0007: the single GAME SPEED row is now three independent rows,
-  -- one per GameSpeed.CATEGORIES entry.
   check(seek("speedOverworld"), "cursor reaches OVERWORLD SPEED")
   press("a")
   eq(og.save.options.speedOverworld, 2, "A cycles OVERWORLD SPEED to 2X")
@@ -3358,20 +3413,17 @@ end
 -- == issue #4: tile anim tick accumulates wall-clock into 60Hz steps ==
 do
   local TileRenderer = require("src.render.TileRenderer")
-  TileRenderer.setSpinning(true)
-  local before = TileRenderer.spinBlurActive()
-  -- the blur alternates once per simulated-joypad step, 16 frames (#1831)
+  local before = TileRenderer.animClock()
   for _ = 1, 16 do TileRenderer.tick(1 / 60) end
-  check(before ~= TileRenderer.spinBlurActive(),
-        "tick(1/60) advances water/spinner clock at fixed 60Hz")
-  local mid = TileRenderer.spinBlurActive()
+  eq(TileRenderer.animClock() - before, 16,
+     "tick(1/60) advances water/spinner clock at fixed 60Hz")
+  local mid = TileRenderer.animClock()
   TileRenderer.tick(1 / 120)
-  eq(TileRenderer.spinBlurActive(), mid,
+  eq(TileRenderer.animClock(), mid,
      "sub-frame dt does not advance the tile anim clock")
   TileRenderer.tick(1 / 120)
-  -- second half-frame completes one step; phase may or may not flip
-  -- (8-tick blur period), but the clock must have accepted the step
-  TileRenderer.setSpinning(false)
+  eq(TileRenderer.animClock(), mid + 1,
+     "the second half-frame completes one step")
 end
 end
 
@@ -3587,11 +3639,15 @@ local function restoreLove(snap)
 end
 
 local function runSuites(paths)
+  local LEAKED_KEYS = { "src.render.TextBox", "src.core.Music" }
   for _, path in ipairs(paths) do
     local label = path:match("([^/]+)%.lua$") or path
     local snap = snapshotLove()
+    local msnap = {}
+    for _, k in ipairs(LEAKED_KEYS) do msnap[k] = package.loaded[k] end
     local ok, err = pcall(dofile, path)
     restoreLove(snap)
+    for _, k in ipairs(LEAKED_KEYS) do package.loaded[k] = msnap[k] end
     check(ok, label .. (ok and " suite" or (": " .. tostring(err))))
   end
 end
@@ -3736,6 +3792,7 @@ runSuites(orderedGlob(
   "tests/gen2_repel_test.lua",
   "tests/gen2_swarm_test.lua",
   "tests/gen2_fishing_swarm_test.lua",
+  "tests/gen2_facing_edge_2352_test.lua",
   "tests/gen2_rock_smash_test.lua",
   "tests/gen2_currents_test.lua",
   "tests/gen2_big_object_test.lua",
@@ -3799,6 +3856,10 @@ runSuites({ "tests/rom_importer_android_mod_pick_test.lua" })
 -- ---------------------------------------------- import with no picker (#482)
 runSuites({ "tests/rom_importer_no_picker_test.lua" })
 runSuites({ "tests/rom_importer_double_pick_test.lua" })
+-- ---------------------------------------------- ROM from a .zip / .7z archive
+runSuites({ "tests/rom_archive_import_test.lua" })
+-- ---------------------------------------------- RZIP-compressed .srm saves
+runSuites({ "tests/save_rzip_test.lua" })
 -- the same pickerless scan, asked for one version in particular (#1274)
 runSuites({ "tests/rom_importer_choose_version_test.lua" })
 -- ---------------------------------------------- Switch platform capabilities

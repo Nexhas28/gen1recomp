@@ -21,11 +21,17 @@ table.insert(package.searchers or package.loaders, 1, function(modname)
   end
 end)
 
+require("src.import.ImportGc").tune()
+
 local task_name, prefix, romData, sha1, ch_name = ...
 
 local ch = love and love.thread and love.thread.getChannel and love.thread.getChannel(ch_name)
 
 local ok, err = pcall(function()
+  local GameVersion = require("src.core.GameVersion")
+  local version = GameVersion.forSha1(sha1)
+  assert(version and GameVersion.generation(version) == 3, "unknown gen 3 ROM sha1 " .. tostring(sha1))
+  GameVersion.set(version)
   local CacheFs = require("src.import.CacheFs")
   CacheFs.prefix = prefix or ""
 
@@ -44,19 +50,13 @@ local ok, err = pcall(function()
     end
   end, sha1)
 
-  local res
-  if task_name == "gba" then
-    res = ext:runGbaExtract(sha1)
-  elseif task_name == "pokemon" then
-    res = ext:runPokemonExtract(sha1)
-  elseif task_name == "aux" then
-    res = ext:runAuxExtracts(sha1)
-  elseif task_name == "intro_audio" then
-    res = ext:runIntroAudio(sha1)
-  else
-    error("unknown extract task: " .. tostring(task_name))
-  end
+  local t0 = (love and love.timer and love.timer.getTime()) or os.clock()
+  local res, detail = ext:runTask(task_name, sha1)
 
+  local dt = ((love and love.timer and love.timer.getTime()) or os.clock()) - t0
+  print(string.format("[worker %s] completed in %.3fs (res=%s)", task_name, dt, tostring(res)))
+
+  assert(res ~= false, detail or (task_name .. " extraction failed"))
   collectgarbage("collect")
   return res
 end)

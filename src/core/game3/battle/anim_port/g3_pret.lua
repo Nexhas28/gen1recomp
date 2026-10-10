@@ -1,28 +1,13 @@
 local P = {}
 
 local bit = require("bit")
+local Trig = require("src.core.game3.trig")
 local AnimPal = require("src.core.game3.battle.anim_pal")
 local AnimCoords = require("src.core.game3.battle.anim_coords")
+local PixelCanvas = require("src.render.PixelCanvas")
 P.band, P.bor, P.bxor, P.lshift, P.rshift = bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift
 
-local SINE = {
-  0, 6, 12, 18, 25, 31, 37, 43, 49, 56, 62, 68, 74, 80, 86, 92,
-  97, 103, 109, 115, 120, 126, 131, 136, 142, 147, 152, 157, 162, 167, 171, 176,
-  181, 185, 189, 193, 197, 201, 205, 209, 212, 216, 219, 222, 225, 228, 231, 234,
-  236, 238, 241, 243, 244, 246, 248, 249, 251, 252, 253, 254, 255, 255, 256, 256,
-  256, 256, 256, 255, 255, 254, 253, 252, 251, 249, 248, 246, 244, 243, 241, 238,
-  236, 234, 231, 228, 225, 222, 219, 216, 212, 209, 205, 201, 197, 193, 189, 185,
-  181, 176, 171, 167, 162, 157, 152, 147, 142, 136, 131, 126, 120, 115, 109, 103,
-  97, 92, 86, 80, 74, 68, 62, 56, 49, 43, 37, 31, 25, 18, 12, 6,
-  0, -6, -12, -18, -25, -31, -37, -43, -49, -56, -62, -68, -74, -80, -86, -92,
-  -97, -103, -109, -115, -120, -126, -131, -136, -142, -147, -152, -157, -162, -167, -171, -176,
-  -181, -185, -189, -193, -197, -201, -205, -209, -212, -216, -219, -222, -225, -228, -231, -234,
-  -236, -238, -241, -243, -244, -246, -248, -249, -251, -252, -253, -254, -255, -255, -256, -256,
-  -256, -256, -256, -255, -255, -254, -253, -252, -251, -249, -248, -246, -244, -243, -241, -238,
-  -236, -234, -231, -228, -225, -222, -219, -216, -212, -209, -205, -201, -197, -193, -189, -185,
-  -181, -176, -171, -167, -162, -157, -152, -147, -142, -136, -131, -126, -120, -115, -109, -103,
-  -97, -92, -86, -80, -74, -68, -62, -56, -49, -43, -37, -31, -25, -18, -12, -6,
-}
+local SINE = Trig.SINE
 P.SINE = SINE
 
 local floor = math.floor
@@ -68,12 +53,10 @@ function P.Sin2(angle)
   if floor(angle / 180) % 2 == 1 then return -v end
   return v
 end
-function P.Cos2(deg) return P.Sin2(floor(deg) + 90) end
+-- pokefirered/src/trig.c:539-541
 
 function P.ArcTan2(x, y)
-  local a = math.atan2(y, x)
-  if a < 0 then a = a + 2 * math.pi end
-  return floor(a / (2 * math.pi) * 65536 + 0.5) % 65536
+  return Trig.arcTan2(x, y)
 end
 -- pokefirered/src/battle_anim_mons.c:1281
 function P.ArcTan2Neg(x, y)
@@ -213,15 +196,11 @@ function P.monCenter(vm, side)
 end
 
 function P.monImage(vm, side)
-  local ok, Pokemon = pcall(require, "src.core.game3.pokemon")
-  if not ok then return nil end
   local sp = P.species(vm, side)
   if not sp then return nil end
   local e
   local okU, Ui = pcall(require, "src.core.game3.battle.ui")
   if okU and Ui.battlerPic then e = Ui.battlerPic(side, nil, sp) end
-  if not e and side == "player" and Pokemon.backPic then e = Pokemon.backPic(sp) end
-  if not e and Pokemon.frontPic then e = Pokemon.frontPic(sp) end
   return e and e.image
 end
 
@@ -340,7 +319,7 @@ function P.sheet(vm, tag, w, h)
   local cw = math.max(1, floor(w / 8))
   local perFrame = cw * math.max(1, floor(h / 8))
   local nframes = math.max(1, floor(total / perFrame))
-  local ok, canvas = pcall(love.graphics.newCanvas, w, h * nframes)
+  local ok, canvas = pcall(PixelCanvas.new, w, h * nframes)
   if not ok or not canvas then
     per[key] = { image = img, frames = 1 }
     return img, 1
@@ -367,7 +346,7 @@ function P.sheet(vm, tag, w, h)
   relay(img, canvas)
   local idxImg, idxTag = AnimPal.indexImage(img)
   if idxImg then
-    local okc, ic = pcall(love.graphics.newCanvas, w, h * nframes)
+    local okc, ic = pcall(PixelCanvas.new, w, h * nframes)
     if okc and ic then
       ic:setFilter("nearest", "nearest")
       relay(idxImg, ic)
@@ -696,6 +675,11 @@ local function setup(s, vm, tmplName)
   s.affineAnimPaused = false
   s._mat = nil
   local tag = T.tag or s.tag
+  local opTag = s._op and s._op.tag
+  if type(T.tag) == "string" and opTag and vm and vm._pack and vm._pack.tags and not vm._pack.tags[T.tag]
+      and vm._pack.tags[opTag] then
+    tag = opTag
+  end
   if tag and vm then
     local img, frames = P.sheet(vm, tag, w, h)
     if img then s.image = img end
@@ -703,6 +687,7 @@ local function setup(s, vm, tmplName)
     s.quad = nil
   end
   s.pri = 2
+  s._pz = nil
   s.callbackData = nil
 end
 
@@ -806,6 +791,7 @@ function P.CreateSprite(vm, tmplName, x, y, sub, fn, opts)
   s._op = nil
   s._vm = vm
   s._baseW, s._baseH = T.w or 32, T.h or 32
+  if opts.counted then s._g4counted = true end
   setup(s, vm, tmplName)
   s.x, s.y = x, y
   s.sub = sub or 2
@@ -1341,7 +1327,7 @@ local PicSize
 -- pokefirered/src/battle_anim_mons.c:1999
 function P.coordAttr(vm, side, attr)
   if PicSize == nil then
-    local ok, m = pcall(require, "src.core.game3.battle.anim_port.g3_pic_size")
+    local ok, m = pcall(require, "src.core.game3.battle.anim_port.g1_pic_sizes")
     PicSize = ok and m or false
   end
   local sp = P.species(vm, side) or 0
@@ -1420,7 +1406,7 @@ local function overlayResources()
     overlayRes = false
     return nil
   end
-  local ok1, canvas = pcall(love.graphics.newCanvas, 240, 160)
+  local ok1, canvas = pcall(PixelCanvas.new, 240, 160)
   local ok2, mask = pcall(love.graphics.newShader, MASK_SHADER_SRC)
   local ok3, over = pcall(love.graphics.newShader, OVERLAY_SHADER_SRC)
   if not (ok1 and ok2 and ok3) then
@@ -1432,13 +1418,22 @@ local function overlayResources()
   return overlayRes
 end
 
+-- One quad re-pointed per draw (draw reads the viewport immediately).
+local windowSpriteQuad = nil
+
 local function drawWindowSprite(sp)
   local img = sp.image
   if not img or sp.invisible or not sp.active then return end
   local bw = sp._baseW or sp.w or 32
   local bh = sp._baseH or sp.h or 32
   local iw, ih = img:getDimensions()
-  local q = love.graphics.newQuad(sp.quadX or 0, sp.quadY or 0, bw, bh, iw, ih)
+  local q = windowSpriteQuad
+  if q then
+    q:setViewport(sp.quadX or 0, sp.quadY or 0, bw, bh, iw, ih)
+  else
+    q = love.graphics.newQuad(sp.quadX or 0, sp.quadY or 0, bw, bh, iw, ih)
+    windowSpriteQuad = q
+  end
   local sx = (sp.scaleX or 1) * (sp.hFlip and -1 or 1)
   local sy = (sp.scaleY or 1) * (sp.vFlip and -1 or 1)
   love.graphics.draw(img, q, math.floor(sp.x + (sp.ox or 0) + 0.5), math.floor(sp.y + (sp.oy or 0) + 0.5),

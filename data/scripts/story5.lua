@@ -18,8 +18,8 @@ end
 
 -- One-time item gift, following the original text_asm flow:
 -- pre text (optional) -> GiveItem (bag-full refusal keeps the flag
--- unset, talk again after making room) -> received text -> optional
--- explanation; repeat visits get the already text.
+-- unset, talk again after making room) -> received text; repeat visits
+-- get the already (or explain) text.
 local function gift(opts)
   return function(game, ow, npc, done)
     local t = text(game)
@@ -41,14 +41,9 @@ local function gift(opts)
       local idef = game.data.items[opts.item]
       -- the received texts carry sound_get_item_1 / sound_get_key_item, so
       -- the jingle only fires once that box has typed out
-      say(opts.received, "{PLAYER} received\n{RAM:}!", function()
-        if opts.explain then
-          say(opts.explain, "", done)
-        else
-          done()
-        end
-      end, require("src.render.TextBox").soundOpts(game,
-        (idef and idef.keyItem) and "Get_Key_Item" or "Get_Item1"))
+      say(opts.received, "{PLAYER} received\n{RAM:}!", done,
+        require("src.render.TextBox").soundOpts(game, opts.sound
+          or ((idef and idef.keyItem) and "Get_Key_Item" or "Get_Item1")))
     end
     if opts.pre then say(opts.pre, opts.preFallback or "", give) else give() end
   end
@@ -134,6 +129,7 @@ M.VIRIDIAN_CITY = {
         .. "\vWhat's this?\vWhere did this TM\vcome from?"
         .. "\fThis is spooky!\nHere, you can\vhave this TM.",
       received = "_ViridianCityFisherReceivedTM42Text",
+      sound = "Get_Item2", -- scripts/ViridianCity.asm:263
       explain = "_ViridianCityFisherTM42ExplanationText",
       noRoom = "_ViridianCityFisherTM42NoRoomText",
     }),
@@ -236,7 +232,6 @@ local function stepGate(opts)
   return function(game, ow, x, y)
     if not inCoords(opts.coords, x, y) then return false end
     if not opts.blocked(game) then return false end
-    require("src.core.Sound").play(game.data, "Denied")
     push(game, text(game)[opts.text] or opts.fallback, function()
       ow.player.facing = opts.push
       if not ow:checkLedgeHop(opts.push) then
@@ -571,6 +566,7 @@ local function route22Scene(n, objIndex, objName, oppClass, baseParty, beatFlag,
   return {
     { "show_object", "ROUTE_22", objName },                    -- 1
     { "move_npc_to", objIndex, rx, 5 },                        -- 2
+    { "face_player_dir", (py == 4) and "down" or "left" },
     { "face_object", objIndex, rivalFacing },                  -- 3
     { "show_text", "_Route22RivalBeforeBattleText" .. n },     -- 4
     -- scripts/Route22.asm:132-134, 288-290
@@ -596,7 +592,7 @@ M.ROUTE_22 = {
   onStep = function(game, ow, x, y)
     if not inCoords({ { 29, 4 }, { 29, 5 } }, x, y) then return false end
     local f = game.save.flags
-    local playerFacing = (y == 4) and "down" or "left"
+    local playerFacing = "left"
     if f.EVENT_GOT_POKEDEX and not f.EVENT_BEAT_BROCK
        and not f.EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE then
       return runAmbush(game, ow,
@@ -768,7 +764,12 @@ local function jigglypuffDance(game, npc, ow)
   return {
     sound = function()
       Music.stop() -- SFX_STOP_ALL_MUSIC
-      return { isPlaying = function() return phase ~= "done" end }
+      local budget = (JIGGLYPUFF_SILENCE + Music.ONE_SHOT_CEILING
+        + JIGGLYPUFF_STEP + JIGGLYPUFF_TAIL) / 60 + 1
+      return {
+        isPlaying = function() return phase ~= "done" end,
+        getDuration = function() return budget end,
+      }
     end,
     tick = function()
       frames = frames + 1
@@ -802,8 +803,17 @@ local function jigglypuffDance(game, npc, ow)
       end
       if frames >= JIGGLYPUFF_TAIL then
         phase = "done"
+        local PikachuFollower = require("src.world.PikachuFollower")
+        local starter
+        for _, mon in ipairs(game.save.party or {}) do
+          if PikachuFollower.isStarterPikachu(game.save, mon) then
+            starter = mon
+            break
+          end
+        end
+        -- scripts/PewterPokecenter_2.asm:65
         if require("src.core.GameVersion").isYellow()
-            and require("src.world.PikachuFollower").starterInParty(game.save) then
+            and starter and not starter.status then
           ow.pikachuPewterSleepScene = true
         end
       end

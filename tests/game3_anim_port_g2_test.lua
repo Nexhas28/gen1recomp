@@ -45,8 +45,10 @@ local TASK_SCOPE = {
   "DrillPeckHitSplats", "DragonDanceWaver",
 }
 
+local RS_DISPATCH = require("src.core.game3.battle.anim_port.rs_callbacks")
 for _, n in ipairs(CB_SCOPE) do
-  check(G2.cb[n] ~= nil and AnimCallbacks[n] == G2.cb[n], "callback ported and hooked: " .. n)
+  local hooked = AnimCallbacks[n] == G2.cb[n] or (RS_DISPATCH[n] ~= nil and AnimCallbacks[n] == RS_DISPATCH[n])
+  check(G2.cb[n] ~= nil and hooked, "callback ported and hooked: " .. n)
 end
 for _, n in ipairs(TASK_SCOPE) do
   check(G2.tasks[n] ~= nil and AnimTasks.REGISTRY[n] == G2.tasks[n], "task ported and hooked: " .. n)
@@ -54,13 +56,12 @@ end
 
 local function find_pack()
   local env = os.getenv("POKEPORT_ANIM_PACK")
-  local home = os.getenv("HOME") or ""
+  local root = require("tests.game3_cache").root("pokemon/battle_anims/pack.lua")
   local cands = {
     env,
-    home .. "/Library/Application Support/LOVE/firered-sep18fx/firered/data/generated/gba/pokemon/battle_anims/pack.lua",
-    home .. "/.local/share/love/firered-sep18fx/firered/data/generated/gba/pokemon/battle_anims/pack.lua",
+    root and (root .. "/pokemon/battle_anims/pack.lua"),
   }
-  for ci = 1, 3 do
+  for ci = 1, 2 do
     local p = cands[ci]
     if p then
       local f = io.open(p, "r")

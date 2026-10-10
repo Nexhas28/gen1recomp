@@ -18,21 +18,9 @@ function Vm.new(opts)
   self.text = opts.text or {}
   self.movements = opts.movements or {}
   self.adapters = opts.adapters or Adapters.stub(opts)
-  local std = opts.stdscripts or require("src.core.game3.scripting.stdscripts")
-  self.stdscripts = std
-  local stdScripts = (std and std.SCRIPTS) or std
-  if type(stdScripts) == "table" then
-    for k, rows in pairs(stdScripts) do
-      if not self.scripts[k] then
-        self.scripts[k] = rows
-      end
-    end
-  end
-  if std and type(std.TEXT) == "table" then
-    for k, v in pairs(std.TEXT) do
-      if not self.text[k] then
-        self.text[k] = v
-      end
+  for k, rows in pairs(opts.stdscripts or {}) do
+    if not self.scripts[k] then
+      self.scripts[k] = rows
     end
   end
   return self
@@ -67,7 +55,13 @@ function Vm:halt(aborted)
       a.unfreezeLocal(lid, snap)
     end
   end
+  local wasLocked = (ctx.lockKind ~= nil or ctx.fieldControlsLocked) and not aborted
   Ctx.haltCleanup(self.ctx)
+  if wasLocked then
+    -- pokeruby/src/script.c:203
+    local Field = package.loaded["src.core.game3.field"]
+    if Field and Field.unlock then Field.unlock() end
+  end
   self:_scriptEnded(not aborted)
 end
 
@@ -97,6 +91,10 @@ function Vm:start(scriptKey, facing)
   self.ctx.status = "running"
   self.ctx.stack = {}
   self.ctx.stringVars = { [1] = "", [2] = "", [3] = "" }
+  if self._presetStrings then
+    for i, v in pairs(self._presetStrings) do self.ctx.stringVars[i] = v end
+    self._presetStrings = nil
+  end
   -- specialVars wiped at halt; fresh talk starts clean for RESULT etc. but
   -- LAST_TALKED already stamped by startTalk, and VAR_FACING passed or read from adapters.
   local keptLast = self.ctx.specialVars[Ctx.VAR_LAST_TALKED]
@@ -109,6 +107,10 @@ function Vm:start(scriptKey, facing)
     end
   end
   Ctx.wipeSpecial(self.ctx)
+  if self._presetSpecial then
+    for id, v in pairs(self._presetSpecial) do self.ctx.specialVars[id] = v end
+    self._presetSpecial = nil
+  end
   if keptLast then
     self.ctx.specialVars[Ctx.VAR_LAST_TALKED] = keptLast
   end

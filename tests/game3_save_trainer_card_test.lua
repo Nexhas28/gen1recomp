@@ -20,7 +20,7 @@ local session = {
   dex = { caught = { [1] = true, [4] = true, [7] = true } },
   playTimeHours = 2,
   playTimeMinutes = 45,
-  badges = { true, true, false, false, false, false, false, false },
+  flags = { [0x820] = true, [0x821] = true },
   -- sessions carry the engine's map id; the save screen resolves the place name
   -- from it (see tests/engine/save_menu_location_bug2328.lua)
   map = "FR_PALLET_TOWN",
@@ -83,6 +83,9 @@ end)
 print("[test] 2. SaveMenu lifecycle and state machine")
 local SaveMenu = require("src.ui.game3.save_menu")
 
+local Runtime = require("src.core.game3.runtime")
+Runtime._game = { saveGame = function() return true end }
+
 local saveClosed = false
 SaveMenu.show({
   session = session,
@@ -93,6 +96,11 @@ test("SaveMenu starts in confirm phase", function()
   assert(SaveMenu.isOpen() == true, "SaveMenu should be open")
   assert(SaveMenu._phase == "confirm", "Initial phase should be confirm")
   assert(SaveMenu.cursor == 1, "Cursor should start on YES (1)")
+end)
+
+test("SaveMenu and TrainerCard agree on the badge flags", function()
+  assert(SaveMenu.countBadges(session) == 2, "save stats reads 2 badges from session.flags")
+  assert(TrainerCard.countBadges(session) == 2, "trainer card reads 2 badges from session.flags")
 end)
 
 test("SaveMenu cursor movement", function()
@@ -221,6 +229,11 @@ test("Runtime.pumpRtc increments and synchronizes playtime", function()
   assert(game.save.playTimeMinutes == 0, "Save minutes should synchronize to 0")
 end)
 
+if not require("tests.game3_cache").mount() then
+  print("[skip] test 7 reads ROM map section names: " .. tostring(require("tests.game3_cache").reason))
+  print("[test] all passed")
+  os.exit(0)
+end
 print("[test] 7. SaveMenu location header resolution from ROM mapsec")
 test("SaveMenu location resolution does not print engine internal map IDs", function()
   local MapSectionsExtract = require("src.import.gba.map_sections_extract")

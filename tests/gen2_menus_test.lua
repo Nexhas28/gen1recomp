@@ -366,7 +366,7 @@ local options = OptionsMenu.new(optionsGame, {
 })
 -- The cart's seven rows, then the port's: CONTROLS, audio, PERFORMANCE,
 -- speed, display, SHADER FX + SHADER FX 2 (the second slot added alongside
-check("thirty-four rows", #OptionsMenu.ROWS, 34)
+check("thirty-seven row descriptors", #OptionsMenu.ROWS, 37)
 check("the cart's rows come first", OptionsMenu.ROWS[7].key, "frame")
 check("then the rebind screen", OptionsMenu.ROWS[8].id, "controls")
 check("then the port's audio group", OptionsMenu.ROWS[9].key, "musicVol")
@@ -377,6 +377,17 @@ check("last row is BACK", OptionsMenu.ROWS[#OptionsMenu.ROWS].cancel, true)
 local function hasRow(rows, key)
   for _, row in ipairs(rows) do if row.key == key then return true end end
   return false
+end
+check("ORIENTATION is a descriptor", hasRow(OptionsMenu.ROWS, "orientation"), true)
+do
+  local oldSystem = love.system
+  for _, osName in ipairs({ "Linux", "Android", "iOS" }) do
+    love.system = { getOS = function() return osName end }
+    local platformOptions = OptionsMenu.new(newGame(Save.newGame()))
+    check(osName .. " orientation row visibility",
+      hasRow(platformOptions.rows, "orientation"), osName ~= "Linux")
+  end
+  love.system = oldSystem
 end
 check("PRINT is still a descriptor", hasRow(OptionsMenu.ROWS, "print"), true)
 check("but never reaches the screen", hasRow(options.rows, "print"), false)
@@ -1049,7 +1060,8 @@ check("and TILT follows VOID FILL", OptionsMenu.ROWS[zoomIndex + 2].label,
 -- moves the whole run instead of breaking six separate index assertions.
 do
   local run = { "TILT", "COLOR", "UI LETTERBOX", "SHADER FX",
-                "SHADER FX 2", "VIDEO MODE", "SCREEN POS", "TOUCH PAD" }
+                "SHADER FX 2", "VIDEO MODE", "FAITHFUL RATIO", "SCREEN POS",
+                "TOUCH PAD" }
   for at, want in ipairs(run) do
     check("display block order: " .. want,
       OptionsMenu.ROWS[tiltIndex + at - 1].label, want)
@@ -1683,33 +1695,31 @@ check("without a phone, right pages to the radio", noPhone:card().id, "radio")
 --
 -- AnimateTuningKnob.TuningKnob winds wRadioTuningKnob up towards 80 and down
 -- towards 0 and stops dead at either end -- `ret z` at the bottom and
--- `ret nc` at the top.  It does not wrap, so neither does the port's row.
+-- engine/pokegear/pokegear.asm:1398
 local knobGear = newMapGear({ clock = { hour = 14, minute = 0, weekday = 1 } })
 for index, card in ipairs(knobGear.cards) do
   if card.id == "radio" then knobGear.cardIndex = index end
 end
 knobGear.mode = "card"
 knobGear:update(0)
-check("entering the card resolves the frequency", knobGear.radioShow,
-  "OAKS_POKEMON_TALK")
+check("entering the card resolves initial dead air", knobGear.radioShow, nil)
 mapInput:press("up")
 knobGear:update(0)
-check("up winds the knob on", knobGear.station, 2)
-check("and retunes", knobGear.radioShow, "POKEMON_MUSIC")
+check("up winds the knob by two", knobGear.tuningKnob, 2)
+check("and resolves intermediate dead air", knobGear.radioShow, nil)
 mapInput:press("down")
 knobGear:update(0)
 mapInput:press("down")
 knobGear:update(0)
-check("down stops dead at the bottom of the dial", knobGear.station, 1)
-knobGear.station = #Pokegear.RADIO_CHANNELS
+check("down stops dead at the bottom of the dial", knobGear.tuningKnob, 0)
+knobGear.tuningKnob = 80
 mapInput:press("up")
 knobGear:update(0)
-check("and up stops dead at the top", knobGear.station,
-  #Pokegear.RADIO_CHANNELS)
+check("and up stops dead at the top", knobGear.tuningKnob, 80)
 
 -- The show only advances while the card is up, and B hands the map's music
 -- back (ExitPokegearRadio_HandleMusic) and throws the machine away.
-knobGear.station = 1
+knobGear.tuningKnob = 16
 knobGear:tuneRadio()
 for _ = 1, 300 do knobGear:update(0) end
 check("the show runs while the card is up", #knobGear.radio.log >= 2, true)
@@ -2836,6 +2846,150 @@ modRowChecks()
   check("and cancels", cancelled, 1)
 
   Sound.play = realPlay
+end)()
+
+-- engine/items/pack.asm:562, engine/pokemon/mon_menu.asm:270
+;(function()
+  local Typer = require("src.ui.gen2.Typer")
+  local HeldItemMenu = require("src.ui.gen2.HeldItemMenu")
+  local ITEMS = {
+    BERRY = { id = "BERRY", name = "BERRY", pocket = "ITEM", index = 1,
+      canToss = true, fieldMenu = "ITEMMENU_NOUSE" },
+    POTION = { id = "POTION", name = "POTION", pocket = "ITEM", index = 2,
+      canToss = true, fieldMenu = "ITEMMENU_PARTY" },
+  }
+
+  local function drain(game, input, state)
+    for _ = 1, 50 do
+      if game.stack:top() ~= state then return end
+      if not (state.message or state.confirm) then return end
+      input.pressed = {}
+      for _ = 1, 400 do
+        state:update(0)
+        if not Typer.typing(state) then break end
+      end
+      input:press("a")
+      state:update(0)
+    end
+  end
+
+  local function setup(inventory, party)
+    local save = Save.newGame({ playerName = "GOLD" })
+    save.inventory = inventory
+    save.bagOrder = nil
+    save.party = party
+    local game, input = newGame(save)
+    game.data.items = ITEMS
+    game.world = { useFieldItem = function() return nil end }
+    local pack = PackMenu.new(game, { pocket = "ITEM" })
+    game.stack:push(pack)
+    return save, game, input, pack
+  end
+
+  local function rowOf(pack, id)
+    for _, row in ipairs(pack.rows) do
+      if row.id == id then return row end
+    end
+  end
+
+  local function mon(nick, item, egg)
+    return { species = "CYNDAQUIL", nickname = nick, hp = 20, maxHp = 20,
+      level = 5, moves = {}, item = item, isEgg = egg }
+  end
+
+  do
+    local save, game, input, pack = setup({ BERRY = 1 },
+      { mon("ONE"), mon("TWO") })
+    pack:giveItem(rowOf(pack, "BERRY"))
+    local party = game.stack:top()
+    check("2378 GIVE opens the party list", party.prompt, "To which <PK><MN>?")
+    input:press("a")
+    party:update(0)
+    drain(game, input, game.stack:top())
+    check("2378 a give to an empty hand ends at the PACK",
+      game.stack:top(), pack)
+    check("2378 with the party list gone", #game.stack._items, 1)
+    check("2378 the mon holds the berry", save.party[1].item, "BERRY")
+    check("2378 and the bag has none", save.inventory.BERRY, nil)
+    check("2378 and the PACK dropped the row", rowOf(pack, "BERRY"), nil)
+  end
+
+  do
+    local save, game, input, pack = setup({ BERRY = 1 },
+      { mon("ONE", "BERRY"), mon("TWO") })
+    pack:giveItem(rowOf(pack, "BERRY"))
+    local party = game.stack:top()
+    input:press("a")
+    party:update(0)
+    drain(game, input, game.stack:top())
+    check("2378 a swap ends at the PACK", game.stack:top(), pack)
+    check("2378 the mon still holds one berry", save.party[1].item, "BERRY")
+    check("2378 and the bag got the old one back", save.inventory.BERRY, 1)
+    check("2378 and the second mon got nothing", save.party[2].item, nil)
+  end
+
+  do
+    local save, game, input, pack = setup({ POTION = 1 },
+      { mon("ONE", "BERRY"), mon("TWO") })
+    pack:giveItem(rowOf(pack, "POTION"))
+    local party = game.stack:top()
+    input:press("a")
+    party:update(0)
+    local held = game.stack:top()
+    input.pressed = {}
+    for _ = 1, 400 do
+      held:update(0)
+      if not Typer.typing(held) then break end
+    end
+    input:press("a")
+    held:update(0)
+    for _ = 1, 400 do
+      held:update(0)
+      if not Typer.typing(held) then break end
+    end
+    input:press("down")
+    held:update(0)
+    input:press("a")
+    held:update(0)
+    check("2378 swap NO ends at the PACK", game.stack:top(), pack)
+    check("2378 and nothing moved", save.party[1].item, "BERRY")
+    check("2378 with the potion still in the bag", save.inventory.POTION, 1)
+  end
+
+  do
+    local save, game, input, pack = setup({ BERRY = 1 },
+      { mon("EGG", nil, true), mon("TWO") })
+    pack:giveItem(rowOf(pack, "BERRY"))
+    local party = game.stack:top()
+    input:press("a")
+    party:update(0)
+    drain(game, input, game.stack:top())
+    check("2378 an EGG refusal keeps the party list up", game.stack:top(),
+      party)
+    check("2378 and the egg holds nothing", save.party[1].item, nil)
+    input:press("b")
+    party:update(0)
+    check("2378 B from the list returns to the PACK", game.stack:top(), pack)
+    check("2378 with the berry still in the bag", save.inventory.BERRY, 1)
+  end
+
+  do
+    local save = Save.newGame({ playerName = "GOLD" })
+    save.inventory = {}
+    save.party = { mon("ONE", "BERRY") }
+    local game, input = newGame(save)
+    game.data.items = ITEMS
+    local closed = 0
+    local held = HeldItemMenu.new(game, { save = save, slot = 1,
+      items = ITEMS, onClose = function() closed = closed + 1 end })
+    game.stack:push(held)
+    held:giveItem("POTION")
+    drain(game, input, held)
+    check("2378 giving an item the bag lacks closes", closed, 1)
+    check("2378 without touching the mon", save.party[1].item, "BERRY")
+    check("2378 or minting its old item", save.inventory.BERRY, nil)
+    check("2378 or a potion", save.inventory.POTION, nil)
+  end
 end)()
 
 print(("gen2 menus: %d checks, %d failures"):format(checks, failures))

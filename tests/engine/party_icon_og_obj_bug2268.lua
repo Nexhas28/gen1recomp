@@ -64,9 +64,9 @@ end
 do
   GameVersion.set("red")
   local c, g = PaletteFX.ogObjNormal()
-  check(same(c and c[2], PaletteFX.GBC_OBJ[1]), "red: OBJ color 1 -> boot OBJ shade 0")
-  check(same(c and c[3], PaletteFX.GBC_OBJ[2]), "red: OBJ color 2 -> boot OBJ shade 1 (light green)")
-  check(same(c and c[4], PaletteFX.GBC_OBJ[4]), "red: OBJ color 3 -> boot OBJ shade 3")
+  check(same(c and c[2], PaletteFX.OG_RED_SOFT_OBJ[1]), "red: OBJ color 1 -> softened OBJ shade 0")
+  check(same(c and c[3], PaletteFX.OG_RED_SOFT_OBJ[2]), "red: OBJ color 2 -> softened OBJ shade 1 (light green)")
+  check(same(c and c[4], PaletteFX.OG_RED_SOFT_OBJ[4]), "red: OBJ color 3 -> OBJ shade 3")
   GameVersion.set("blue")
   local cb, gb = PaletteFX.ogObjNormal()
   check(same(cb and cb[3], PaletteFX.GBC_OBJ_BLUE[2]), "blue: OBJ color 2 -> pink OBJ shade 1")
@@ -160,6 +160,21 @@ do
   eq(q.clip and q.clip[4], 80, "opts.clip keeps its size")
   eq(q.color and q.color[4], 0.5, "opts.color is stored")
   PaletteFX.clearSpriteRedraws()
+end
+
+local EvolutionState = require("src.ui.EvolutionState")
+for _, version in ipairs({ "red", "blue" }) do
+  for _, phase in ipairs({ "loading", "flashing", "done" }) do
+    for frame = 1, 2 do
+      local redraws = drawIn("NIDOKING", "ogred", version)
+      eq(#redraws, 2, version .. " " .. phase .. " underlying party queues icons frame " .. frame)
+      local state = setmetatable({ loading = phase == "loading" and 84 or nil,
+        t = 81, done = phase == "done", canceled = false }, EvolutionState)
+      state:draw()
+      eq(#PaletteFX.uiSpriteRedraws(), 0,
+        version .. " " .. phase .. " evolution clears party icons frame " .. frame)
+    end
+  end
 end
 
 SpriteRenderer.obpImage = realObp
