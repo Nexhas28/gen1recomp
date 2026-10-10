@@ -32,7 +32,7 @@ end
 
 print("[test] 1. CheckPartyPokerus reads the low nibble only")
 do
-  -- pokefirered/src/pokemon.c:5618 GetMonData(..., MON_DATA_POKERUS) & 0xF
+  -- pokefirered/src/pokemon.c:5630
   eq(SummaryData.statusAilment({ pokerus = 0 }), AILMENT_NONE, "never infected is no ailment")
   eq(SummaryData.statusAilment({ pokerus = 0x41 }), AILMENT_PKRS, "strain 4 with 1 day left is PKRS")
   eq(SummaryData.statusAilment({ pokerus = 0x04 }), AILMENT_PKRS, "4 days left is PKRS")
@@ -67,6 +67,12 @@ do
     "poison wins")
   eq(SummaryData.statusAilment({ pokerus = 0x10, hp = 10, status = 0x08 }), AILMENT_PSN,
     "and a cured mon shows only the poison")
+end
+
+if not require("tests.game3_cache").mount() then
+  print("[skip] tests 4-9 read ROM map section names: " .. tostring(require("tests.game3_cache").reason))
+  print(string.format("[test] %d passed, %d failed", passed, failed))
+  os.exit(failed > 0 and 1 or 0)
 end
 
 print("[test] 4. The met location comes from the map section, not a PALLET TOWN default")
@@ -200,11 +206,11 @@ do
     dex = { seen = {}, owned = {} }, flags = {}, vars = {},
   }
   local fixed = Schema.fromSaveTable(secretSave)
-  eq(fixed.party[1].otSecretId, rolled.secretId,
-    "a stale per-boot secret id on an own mon is repaired")
+  eq(fixed.party[1].otSecretId, ((rolled.secretId or 0) + 1) % 0x10000,
+    "a same-name same-TID mon with a different secret id keeps it on load")
   local ownLine = memoLine(fixed.party[1], fixed)
-  check(ownLine:find("a trade", 1, true) == nil,
-    "so it stops reading as a trade (" .. ownLine:gsub("\n", " ") .. ")")
+  check(ownLine:find("Apparently", 1, true) ~= nil,
+    "so it still reads as another trainer's mon (" .. ownLine:gsub("\n", " ") .. ")")
   eq(fixed.party[2].otSecretId, 4242, "a foreign mon keeps its own secret half")
 end
 

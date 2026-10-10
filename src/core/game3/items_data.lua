@@ -1,52 +1,76 @@
 -- FRLG item metadata loaded from extracted pack (pret items.json).
--- Falls back to minimal hardcoded rows when pack is missing.
 
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 local ItemsData = {}
 
-ItemsData.POCKET = {
-  ITEMS = "ITEMS",
-  KEY_ITEMS = "KEY_ITEMS",
-  POKE_BALLS = "POKE_BALLS",
-  TM_CASE = "TM_CASE",
-  BERRY_POUCH = "BERRY_POUCH",
-}
+ItemsData.POCKET = {}
+ItemsData.POCKET_ORDER = {}
+ItemsData.BAG_POCKET_ORDER = {}
+local LABEL_KEYS = {}
+ItemsData.POCKET_LABEL = RomText.lazy(LABEL_KEYS)
+ItemsData.POCKET_RESULT = {}
+ItemsData.CAPACITY = {}
+ItemsData.PACK_POCKET = {}
+ItemsData.CONTAINERS = {}
+ItemsData.BAG_MODEL = { slotMax = {}, splitSlots = {}, sortHmsFirst = {}, sortById = {} }
+ItemsData._bagModel = nil
 
-ItemsData.POCKET_ORDER = {
-  "ITEMS", "KEY_ITEMS", "POKE_BALLS", "TM_CASE", "BERRY_POUCH",
-}
+local function refill(dst, src)
+  for k in pairs(dst) do dst[k] = nil end
+  for k, v in pairs(src or {}) do dst[k] = v end
+  return dst
+end
 
--- Visible pockets in the main Bag UI (pret BAG_POCKETS_COUNT = 3).
--- TM Case and Berry Pouch are sub-containers accessed via Key Items.
-ItemsData.BAG_POCKET_ORDER = {
-  "ITEMS", "KEY_ITEMS", "POKE_BALLS",
-}
+function ItemsData.applyProfile(version)
+  local row = require("src.core.game3.profile").of(version)
+  local bag = row.bag
+  if type(bag) ~= "table" then
+    error("game3 profile '" .. tostring(row.id) .. "' has no bag block", 0)
+  end
+  refill(ItemsData.POCKET, {})
+  refill(ItemsData.POCKET_RESULT, {})
+  for i, name in ipairs(bag.pockets) do
+    ItemsData.POCKET[name] = name
+    ItemsData.POCKET_RESULT[name] = i
+  end
+  refill(ItemsData.POCKET_ORDER, bag.pockets)
+  refill(ItemsData.BAG_POCKET_ORDER, bag.visible)
+  refill(LABEL_KEYS, bag.labels)
+  refill(ItemsData.CAPACITY, bag.capacity)
+  refill(ItemsData.PACK_POCKET, bag.packPockets)
+  local C = require("src.core.game3.constants").of(row.id)
+  local containers = {}
+  for pocket, c in pairs(bag.containers or {}) do
+    containers[pocket] = { item = C:require("items", c.item), flag = c.flag }
+  end
+  refill(ItemsData.CONTAINERS, containers)
+  refill(ItemsData.BAG_MODEL.slotMax, bag.slotMax)
+  refill(ItemsData.BAG_MODEL.splitSlots, bag.splitSlots)
+  refill(ItemsData.BAG_MODEL.sortHmsFirst, bag.sortHmsFirst)
+  refill(ItemsData.BAG_MODEL.sortById, bag.sortById)
+  ItemsData.BAG_MODEL.pcSlotMax = bag.pcSlotMax
+  ItemsData.BAG_MODEL.pcItems = bag.pcItems
+  ItemsData._bagModel = bag
+  return bag
+end
 
--- English sources; callers translate with Strings() when they draw them.
-ItemsData.POCKET_LABEL = {
-  ITEMS = Strings.source("ITEMS"),
-  KEY_ITEMS = Strings.source("KEY ITEMS"),
-  POKE_BALLS = Strings.source("POKé BALLS"),
-  TM_CASE = Strings.source("TM CASE"),
-  BERRY_POUCH = Strings.source("BERRY POUCH"),
-}
+function ItemsData.ensureModel(sessionOrVersion)
+  local row = sessionOrVersion and require("src.core.game3.profile").forSession(sessionOrVersion)
+      or require("src.core.game3.profile").active()
+  local bag = row.bag
+  if bag ~= ItemsData._bagModel then
+    ItemsData._pack = nil
+    ItemsData._byId = nil
+    ItemsData._byName = nil
+    ItemsData._logged = false
+    ItemsData.applyProfile(row.id)
+  end
+end
 
--- pret GetPocketByItemId returns 1..5
-ItemsData.POCKET_RESULT = {
-  ITEMS = 1,
-  KEY_ITEMS = 2,
-  POKE_BALLS = 3,
-  TM_CASE = 4,
-  BERRY_POUCH = 5,
-}
-
-ItemsData.CAPACITY = {
-  ITEMS = 42,
-  KEY_ITEMS = 30,
-  POKE_BALLS = 13,
-  TM_CASE = 58,
-  BERRY_POUCH = 43,
-}
+function ItemsData.slotMax(pocket)
+  local m = ItemsData.BAG_MODEL.slotMax
+  return m[pocket] or m.default
+end
 
 -- pokefirered/include/constants/items.h:272
 ItemsData.ITEM_ITEMFINDER = 261
@@ -62,68 +86,59 @@ ItemsData.LAST_HM = 346
 ItemsData._pack = nil
 ItemsData._byId = nil
 ItemsData._logged = false
+ItemsData.applyProfile(nil)
 
 -- Host string id → display / pocket (Sevii ferry).
 ItemsData.BY_HOST = {
-  MASTER_BALL = { name = "MASTER BALL", pocket = "POKE_BALLS", fieldUse = "battle", frlg = 1 },
-  ULTRA_BALL = { name = "ULTRA BALL", pocket = "POKE_BALLS", fieldUse = "battle", frlg = 2 },
-  GREAT_BALL = { name = "GREAT BALL", pocket = "POKE_BALLS", fieldUse = "battle", frlg = 3 },
-  POKE_BALL = { name = "POKé BALL", pocket = "POKE_BALLS", fieldUse = "battle", frlg = 4 },
-  POTION = { name = "POTION", pocket = "ITEMS", fieldUse = "heal", frlg = 13 },
-  ANTIDOTE = { name = "ANTIDOTE", pocket = "ITEMS", fieldUse = "status", frlg = 14 },
-  BURN_HEAL = { name = "BURN HEAL", pocket = "ITEMS", fieldUse = "status", frlg = 15 },
-  ICE_HEAL = { name = "ICE HEAL", pocket = "ITEMS", fieldUse = "status", frlg = 16 },
-  AWAKENING = { name = "AWAKENING", pocket = "ITEMS", fieldUse = "status", frlg = 17 },
-  PARLYZ_HEAL = { name = "PARLYZ HEAL", pocket = "ITEMS", fieldUse = "status", frlg = 18 },
-  FULL_RESTORE = { name = "FULL RESTORE", pocket = "ITEMS", fieldUse = "heal", frlg = 19 },
-  MAX_POTION = { name = "MAX POTION", pocket = "ITEMS", fieldUse = "heal", frlg = 20 },
-  HYPER_POTION = { name = "HYPER POTION", pocket = "ITEMS", fieldUse = "heal", frlg = 21 },
-  SUPER_POTION = { name = "SUPER POTION", pocket = "ITEMS", fieldUse = "heal", frlg = 22 },
-  FULL_HEAL = { name = "FULL HEAL", pocket = "ITEMS", fieldUse = "status", frlg = 23 },
-  REVIVE = { name = "REVIVE", pocket = "ITEMS", fieldUse = "revive", frlg = 24 },
-  MAX_REVIVE = { name = "MAX REVIVE", pocket = "ITEMS", fieldUse = "revive", frlg = 25 },
-  FRESH_WATER = { name = "FRESH WATER", pocket = "ITEMS", fieldUse = "heal", frlg = 26 },
-  SODA_POP = { name = "SODA POP", pocket = "ITEMS", fieldUse = "heal", frlg = 27 },
-  LEMONADE = { name = "LEMONADE", pocket = "ITEMS", fieldUse = "heal", frlg = 28 },
-  SUPER_REPEL = { name = "SUPER REPEL", pocket = "ITEMS", fieldUse = "repel", frlg = 83 },
-  MAX_REPEL = { name = "MAX REPEL", pocket = "ITEMS", fieldUse = "repel", frlg = 84 },
-  ESCAPE_ROPE = { name = "ESCAPE ROPE", pocket = "ITEMS", fieldUse = "escape", frlg = 85 },
-  REPEL = { name = "REPEL", pocket = "ITEMS", fieldUse = "repel", frlg = 86 },
-  X_ATTACK = { name = "X ATTACK", pocket = "ITEMS", fieldUse = "battle", frlg = 75 },
-  X_DEFEND = { name = "X DEFEND", pocket = "ITEMS", fieldUse = "battle", frlg = 76 },
-  X_SPEED = { name = "X SPEED", pocket = "ITEMS", fieldUse = "battle", frlg = 77 },
-  X_ACCURACY = { name = "X ACCURACY", pocket = "ITEMS", fieldUse = "battle", frlg = 78 },
-  X_SPECIAL = { name = "X SPECIAL", pocket = "ITEMS", fieldUse = "battle", frlg = 79 },
-  POKE_DOLL = { name = "POKé DOLL", pocket = "ITEMS", fieldUse = "battle", frlg = 80 },
-  RARE_CANDY = { name = "RARE CANDY", pocket = "ITEMS", fieldUse = "level", frlg = 68 },
-  SUN_STONE = { name = "SUN STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 93 },
-  MOON_STONE = { name = "MOON STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 94 },
-  FIRE_STONE = { name = "FIRE STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 95 },
-  THUNDER_STONE = { name = "THUNDER STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 96 },
-  WATER_STONE = { name = "WATER STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 97 },
-  LEAF_STONE = { name = "LEAF STONE", pocket = "ITEMS", fieldUse = "evo", frlg = 98 },
-  ORAN_BERRY = { name = "ORAN BERRY", pocket = "BERRY_POUCH", fieldUse = "heal", frlg = 139 },
-  SITRUS_BERRY = { name = "SITRUS BERRY", pocket = "BERRY_POUCH", fieldUse = "heal", frlg = 142 },
-  LUM_BERRY = { name = "LUM BERRY", pocket = "BERRY_POUCH", fieldUse = "status", frlg = 141 },
-  LEPPA_BERRY = { name = "LEPPA BERRY", pocket = "BERRY_POUCH", fieldUse = "pp", frlg = 138 },
-  NUGGET = { name = "NUGGET", pocket = "ITEMS", fieldUse = "none", frlg = 110 },
-  METEORITE = { name = "METEORITE", pocket = "KEY_ITEMS", fieldUse = "key", frlg = 280 },
-  ITEMFINDER = { name = "ITEMFINDER", pocket = "KEY_ITEMS", fieldUse = "itemfinder", frlg = 261 },
-  TOWN_MAP = { name = "TOWN MAP", pocket = "KEY_ITEMS", fieldUse = "map", frlg = 361 },
-  BICYCLE = { name = "BICYCLE", pocket = "KEY_ITEMS", fieldUse = "bike", frlg = 360 },
-  TRI_PASS = { name = "TRI-PASS", pocket = "KEY_ITEMS", fieldUse = "key", frlg = 367 },
-  RAINBOW_PASS = { name = "RAINBOW PASS", pocket = "KEY_ITEMS", fieldUse = "key", frlg = 368 },
-  VS_SEEKER = { name = "VS SEEKER", pocket = "KEY_ITEMS", fieldUse = "vs_seeker", frlg = 362 },
-}
-
-local FALLBACK = {
-  [1] = { name = "MASTER BALL", pocket = "POKE_BALLS", fieldUse = "battle" },
-  [4] = { name = "POKé BALL", pocket = "POKE_BALLS", fieldUse = "battle" },
-  [13] = { name = "POTION", pocket = "ITEMS", fieldUse = "heal" },
-  [261] = { name = "ITEMFINDER", pocket = "KEY_ITEMS", fieldUse = "itemfinder" },
-  [362] = { name = "VS SEEKER", pocket = "KEY_ITEMS", fieldUse = "vs_seeker" },
-  [364] = { name = "TM CASE", pocket = "KEY_ITEMS", fieldUse = "key" },
-  [365] = { name = "BERRY POUCH", pocket = "KEY_ITEMS", fieldUse = "key" },
+  MASTER_BALL = { pocket = "POKE_BALLS", fieldUse = "battle", frlg = 1 },
+  ULTRA_BALL = { pocket = "POKE_BALLS", fieldUse = "battle", frlg = 2 },
+  GREAT_BALL = { pocket = "POKE_BALLS", fieldUse = "battle", frlg = 3 },
+  POKE_BALL = { pocket = "POKE_BALLS", fieldUse = "battle", frlg = 4 },
+  POTION = { pocket = "ITEMS", fieldUse = "heal", frlg = 13 },
+  ANTIDOTE = { pocket = "ITEMS", fieldUse = "status", frlg = 14 },
+  BURN_HEAL = { pocket = "ITEMS", fieldUse = "status", frlg = 15 },
+  ICE_HEAL = { pocket = "ITEMS", fieldUse = "status", frlg = 16 },
+  AWAKENING = { pocket = "ITEMS", fieldUse = "status", frlg = 17 },
+  PARLYZ_HEAL = { pocket = "ITEMS", fieldUse = "status", frlg = 18 },
+  FULL_RESTORE = { pocket = "ITEMS", fieldUse = "heal", frlg = 19 },
+  MAX_POTION = { pocket = "ITEMS", fieldUse = "heal", frlg = 20 },
+  HYPER_POTION = { pocket = "ITEMS", fieldUse = "heal", frlg = 21 },
+  SUPER_POTION = { pocket = "ITEMS", fieldUse = "heal", frlg = 22 },
+  FULL_HEAL = { pocket = "ITEMS", fieldUse = "status", frlg = 23 },
+  REVIVE = { pocket = "ITEMS", fieldUse = "revive", frlg = 24 },
+  MAX_REVIVE = { pocket = "ITEMS", fieldUse = "revive", frlg = 25 },
+  FRESH_WATER = { pocket = "ITEMS", fieldUse = "heal", frlg = 26 },
+  SODA_POP = { pocket = "ITEMS", fieldUse = "heal", frlg = 27 },
+  LEMONADE = { pocket = "ITEMS", fieldUse = "heal", frlg = 28 },
+  SUPER_REPEL = { pocket = "ITEMS", fieldUse = "repel", frlg = 83 },
+  MAX_REPEL = { pocket = "ITEMS", fieldUse = "repel", frlg = 84 },
+  ESCAPE_ROPE = { pocket = "ITEMS", fieldUse = "escape", frlg = 85 },
+  REPEL = { pocket = "ITEMS", fieldUse = "repel", frlg = 86 },
+  X_ATTACK = { pocket = "ITEMS", fieldUse = "battle", frlg = 75 },
+  X_DEFEND = { pocket = "ITEMS", fieldUse = "battle", frlg = 76 },
+  X_SPEED = { pocket = "ITEMS", fieldUse = "battle", frlg = 77 },
+  X_ACCURACY = { pocket = "ITEMS", fieldUse = "battle", frlg = 78 },
+  X_SPECIAL = { pocket = "ITEMS", fieldUse = "battle", frlg = 79 },
+  POKE_DOLL = { pocket = "ITEMS", fieldUse = "battle", frlg = 80 },
+  RARE_CANDY = { pocket = "ITEMS", fieldUse = "level", frlg = 68 },
+  SUN_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 93 },
+  MOON_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 94 },
+  FIRE_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 95 },
+  THUNDER_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 96 },
+  WATER_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 97 },
+  LEAF_STONE = { pocket = "ITEMS", fieldUse = "evo", frlg = 98 },
+  ORAN_BERRY = { pocket = "BERRY_POUCH", fieldUse = "heal", frlg = 139 },
+  SITRUS_BERRY = { pocket = "BERRY_POUCH", fieldUse = "heal", frlg = 142 },
+  LUM_BERRY = { pocket = "BERRY_POUCH", fieldUse = "status", frlg = 141 },
+  LEPPA_BERRY = { pocket = "BERRY_POUCH", fieldUse = "pp", frlg = 138 },
+  NUGGET = { pocket = "ITEMS", fieldUse = "none", frlg = 110 },
+  METEORITE = { pocket = "KEY_ITEMS", fieldUse = "key", frlg = 280 },
+  ITEMFINDER = { pocket = "KEY_ITEMS", fieldUse = "itemfinder", frlg = 261 },
+  TOWN_MAP = { pocket = "KEY_ITEMS", fieldUse = "map", frlg = 361 },
+  BICYCLE = { pocket = "KEY_ITEMS", fieldUse = "bike", frlg = 360 },
+  TRI_PASS = { pocket = "KEY_ITEMS", fieldUse = "key", frlg = 367 },
+  RAINBOW_PASS = { pocket = "KEY_ITEMS", fieldUse = "key", frlg = 368 },
+  VS_SEEKER = { pocket = "KEY_ITEMS", fieldUse = "vs_seeker", frlg = 362 },
 }
 
 ItemsData.HEAL_AMOUNT = {
@@ -142,32 +157,10 @@ ItemsData.REPEL_STEPS = {
 }
 
 local function read_bytes(rel)
-  local okD, Dataset = pcall(require, "src.core.game3.dataset")
-  if okD and Dataset and Dataset.mountExtractRoots then
-    Dataset.mountExtractRoots()
-  end
-  if okD and Dataset and Dataset.cache then
-    local d = Dataset.cache():read(rel)
-    if type(d) == "string" and #d > 0 then return d end
-  end
-  local ok, CacheFs = pcall(require, "src.import.CacheFs")
-  if ok and CacheFs and CacheFs.readActive then
-    local d = CacheFs.readActive(rel)
-    if type(d) == "string" and #d > 0 then return d end
-  end
-  local candidates = {
-    rel,
-    "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")),
-    (os.getenv("HOME") or "") .. "/.local/share/love/pokemon-love2d/firered/" .. rel,
-  }
-  for _, p in ipairs(candidates) do
-    local f = io.open(p, "rb")
-    if f then
-      local d = f:read("*a")
-      f:close()
-      if d and #d > 0 then return d end
-    end
-  end
+  local Dataset = require("src.core.game3.dataset")
+  Dataset.mountExtractRoots()
+  local d = Dataset.cache():read(rel)
+  if type(d) == "string" and #d > 0 then return d end
   return nil
 end
 
@@ -217,7 +210,15 @@ local function build_by_name(packItems)
   return map
 end
 
+function ItemsData.installPack(pack)
+  ItemsData._pack = pack
+  ItemsData._byId = pack.items
+  ItemsData._byName = build_by_name(pack.items)
+  return ItemsData._byId
+end
+
 local function load_pack()
+  if not ItemsData._bagModel then ItemsData.ensureModel() end
   if ItemsData._byId then return ItemsData._byId end
   local src = read_bytes("data/generated/gba/items/pack.lua")
   if src then
@@ -225,24 +226,17 @@ local function load_pack()
     if chunk then
       local ok, pack = pcall(chunk)
       if ok and type(pack) == "table" and type(pack.items) == "table" then
-        ItemsData._pack = pack
-        ItemsData._byId = pack.items
-        ItemsData._byName = build_by_name(pack.items)
+        ItemsData.installPack(pack)
         if not ItemsData._logged then
           ItemsData._logged = true
           print("[game3/items] pack ready (" .. tostring(pack.count) .. ")")
         end
         return ItemsData._byId
       end
+      error("items/pack.lua did not load: " .. tostring(pack), 0)
     end
   end
-  ItemsData._byId = FALLBACK
-  ItemsData._byName = build_by_name(FALLBACK)
-  if not ItemsData._logged then
-    ItemsData._logged = true
-    print("[game3/items] pack missing — using fallback rows")
-  end
-  return ItemsData._byId
+  error("items/pack.lua is not in the cache", 0)
 end
 
 function ItemsData.ensureLoaded()
@@ -254,6 +248,7 @@ function ItemsData.install(_cache)
   ItemsData._byId = nil
   ItemsData._byName = nil
   ItemsData._logged = false
+  ItemsData.applyProfile(nil)
   load_pack()
 end
 
@@ -295,7 +290,7 @@ function ItemsData.info(id)
     return {
       id = num,
       name = e.name,
-      pocket = e.pocket,
+      pocket = ItemsData.PACK_POCKET[e.pocket] or e.pocket,
       fieldUse = e.fieldUse or "none",
       price = e.price,
       holdEffect = e.holdEffect,
@@ -307,6 +302,10 @@ function ItemsData.info(id)
       registrability = e.registrability,
       importance = e.importance,
       secondaryId = e.secondaryId,
+      effect = e.effect,
+      pocketId = e.pocketId,
+      fieldUseName = e.fieldUseName,
+      battleUseName = e.battleUseName,
     }
   end
   local s = tostring(id)
@@ -314,23 +313,13 @@ function ItemsData.info(id)
   if h then
     return {
       id = s,
-      name = h.name,
+      name = byId[h.frlg] and byId[h.frlg].name or s:gsub("_", " "),
       pocket = h.pocket,
       fieldUse = h.fieldUse,
       frlg = h.frlg,
     }
   end
-  if num then
-    if num >= 289 and num <= 346 then
-      local label = (num >= 339) and string.format("HM%02d", num - 338)
-        or string.format("TM%02d", num - 288)
-      return { id = num, name = label, pocket = "TM_CASE", fieldUse = "tm" }
-    end
-    if num >= 133 and num <= 175 then
-      return { id = num, name = "BERRY", pocket = "BERRY_POUCH", fieldUse = "heal" }
-    end
-    return { id = num, name = Strings("ITEM %s", num), pocket = "ITEMS", fieldUse = "none" }
-  end
+  if num then return nil end
   local sUpper = s:upper()
   if sUpper:find("BERRY", 1, true) then
     return { id = s, name = s:gsub("_", " "), pocket = "BERRY_POUCH", fieldUse = "heal" }
@@ -389,7 +378,8 @@ function ItemsData.isEvolutionStone(id)
     local s = tostring(id or ""):upper()
     return s:find("STONE", 1, true) ~= nil
   end
-  return num >= 95 and num <= 100
+  -- include/constants/items.h:97-102
+  return num >= 93 and num <= 98
 end
 
 function ItemsData.isHm(id)
@@ -421,7 +411,7 @@ function ItemsData.berryNumber(id)
   if num and num >= ItemsData.FIRST_BERRY and num <= ItemsData.LAST_BERRY then
     return num - ItemsData.FIRST_BERRY + 1
   end
-  return 1
+  return nil
 end
 
 --- Get 1-based TM (1..50) or HM (1..8) index from item ID.
@@ -491,14 +481,14 @@ function ItemsData.medicineKind(id)
   local info = ItemsData.info(id)
   if info and info.fieldUse == "revive" then return "revive" end
   if info and info.fieldUse == "status" then return "status" end
-  if info and (info.fieldUse == "heal" or info.fieldUse == "pp") then return "heal" end
+  if info and info.fieldUse == "heal" then return "heal" end
   return info and info.fieldUse or "none"
 end
 
+-- include/constants/items.h:97-102
 local LEVEL_IDS = { [68] = true }
-local EVO_IDS = { [93] = true, [94] = true, [95] = true, [96] = true, [97] = true, [98] = true, [340] = true, [341] = true }
+local EVO_IDS = { [93] = true, [94] = true, [95] = true, [96] = true, [97] = true, [98] = true }
 local VITAMIN_IDS = { [63] = true, [64] = true, [65] = true, [66] = true, [67] = true, [70] = true }
-local PP_IDS = { [34] = true, [35] = true, [36] = true, [37] = true, [69] = true, [71] = true }
 local ESCAPE_IDS = { [85] = true }
 local REPEL_IDS = { [83] = true, [84] = true, [86] = true }
 -- pokefirered/src/data/items.h:3962 FieldUseFunc_Bike
@@ -523,10 +513,6 @@ function ItemsData.fieldUseKind(id)
   if VITAMIN_IDS[num] or host == "HP_UP" or host == "PROTEIN" or host == "IRON"
       or host == "CARBOS" or host == "CALCIUM" or host == "ZINC" then
     return "vitamin"
-  end
-  if PP_IDS[num] or host:find("ETHER", 1, true) or host:find("ELIXIR", 1, true)
-      or host == "PP_UP" or host == "PP_MAX" then
-    return "pp"
   end
   if (num and num >= 289 and num <= 346) or host:find("^TM%d") or host:find("^HM%d")
       or host:find("TM_") or host:find("HM_") then

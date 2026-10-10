@@ -2,6 +2,7 @@
 
 local Extract = require("src.import.gba.extract_island1")
 local BagChromeExtract = require("src.import.gba.bag_chrome_extract")
+local CacheBlob = require("src.import.CacheBlob")
 
 local BagChrome = {}
 
@@ -48,10 +49,10 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if type(d) == "string" and #d > 0 then return d end
   end
   local candidates = {
@@ -61,7 +62,7 @@ local function read_bytes(rel)
   for _, p in ipairs(candidates) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -127,13 +128,16 @@ function BagChrome.install(cache)
   BagChrome._images = {}
   BagChrome._icons = {}
   BagChrome._manifest = nil
+  BagChrome._ready = nil
   BagChrome._logged = false
 end
 
 function BagChrome.ready()
+  if BagChrome._ready ~= nil then return BagChrome._ready end
   local man = BagChrome._manifest or load_lua(bag_root() .. "/manifest.lua")
   BagChrome._manifest = man
-  return man ~= nil and read_bytes(bag_root() .. "/bg.rgba") ~= nil
+  BagChrome._ready = man ~= nil and read_bytes(bag_root() .. "/bg.rgba") ~= nil
+  return BagChrome._ready
 end
 
 local function ensure_bg()
@@ -192,7 +196,13 @@ local function named_image(name, w, h)
 end
 
 function BagChrome.drawBg(x, y, opts)
-  local img = (opts and opts.female) and named_image("bg_female", 240, 160) or nil
+  local img
+  if opts and opts.itemPc then
+    -- src/item_menu.c:569
+    img = named_image(opts.female and "bg_itempc_female" or "bg_itempc", 240, 160)
+    if not img then error("BagChrome: bg_itempc.rgba is not in the cache", 0) end
+  end
+  img = img or ((opts and opts.female) and named_image("bg_female", 240, 160) or nil)
   img = img or ensure_bg()
   if not img then return false end
   love.graphics.setColor(1, 1, 1, 1)
@@ -227,6 +237,31 @@ function BagChrome.drawDescSelected()
   if not img then return false end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(img, 0, 112)
+  return true
+end
+
+-- src/item_menu_icons.c:249 CreateSwapLine, :282 UpdateSwapLinePos
+function BagChrome.drawSwapLine(firstCenterX, centerY)
+  local img = named_image("swap_line", 32, 16)
+  if not img then error("BagChrome: swap_line.rgba is not in the cache", 0) end
+  local start = BagChrome._bagQuads.swap_start
+  if not start then
+    start = love.graphics.newQuad(0, 0, 16, 16, 32, 16)
+    BagChrome._bagQuads.swap_start = start
+    BagChrome._bagQuads.swap_mid = love.graphics.newQuad(16, 0, 16, 16, 32, 16)
+  end
+  local mid = BagChrome._bagQuads.swap_mid
+  love.graphics.setColor(1, 1, 1, 1)
+  for i = 0, 8 do
+    local x, y = firstCenterX + i * 16 - 8, centerY - 8
+    if i == 0 then
+      love.graphics.draw(img, start, x, y)
+    elseif i == 8 then
+      love.graphics.draw(img, start, x + 16, y, 0, -1, 1)
+    else
+      love.graphics.draw(img, mid, x, y)
+    end
+  end
   return true
 end
 

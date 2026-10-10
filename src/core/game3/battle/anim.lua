@@ -7,6 +7,11 @@ local AnimSprites = require("src.core.game3.battle.anim_sprites")
 local BallOpen = require("src.core.game3.battle.ball_open")
 local AnimPal = require("src.core.game3.battle.anim_pal")
 local AnimCoords = require("src.core.game3.battle.anim_coords")
+local SE = require("src.core.game3.se_ids")
+
+local function fallback_prefix()
+  return require("src.core.game3.battle.profile").get().animCacheFallback or nil
+end
 
 local Anim = {}
 
@@ -133,6 +138,7 @@ local function default_present(id)
     displayMaxHp = nil,
     displayExp = nil,
     displayLevel = nil,
+    displayStatus = nil,
     flash = 0,
   }
 end
@@ -190,12 +196,39 @@ function Anim.setDouble(v)
   AnimCoords.setDouble(v)
 end
 
+-- pokeruby/src/contest.c:339
+function Anim.beginContestPresentation(opts)
+  opts = opts or {}
+  if not Anim._vm then
+    local headless = opts.headless
+    if headless == nil then headless = Anim._headless end
+    Anim.reset({ headless = headless })
+  end
+  assert(not Anim._contestPresentation, "contest presentation already active")
+  local token = { previous2 = rawget(Anim._present, 2), previous3 = rawget(Anim._present, 3) }
+  Anim._contestPresentation = token
+  for id = 2, 3 do
+    local p = default_present(id)
+    p.visible = false
+    rawset(Anim._present, id, p)
+  end
+  return token
+end
+
+function Anim.endContestPresentation(token)
+  if token == nil or Anim._contestPresentation ~= token then return false end
+  rawset(Anim._present, 2, token.previous2)
+  rawset(Anim._present, 3, token.previous3)
+  Anim._contestPresentation = nil
+  return true
+end
+
 function Anim.present(key)
   local id = Anim.idOf(key)
   if id == nil then return nil end
   local p = rawget(Anim._present, id)
   if not p then
-    if id >= 2 and not AnimCoords.isDouble() then return nil end
+    if id >= 2 and not AnimCoords.isDouble() and not Anim._contestPresentation then return nil end
     p = default_present(id)
     if id >= 2 and not Anim._headless then p.visible = false end
     rawset(Anim._present, id, p)
@@ -240,11 +273,14 @@ end
 
 function Anim.reset(opts)
   opts = opts or {}
+  Anim._contestPresentation = nil
   for id in pairs(Anim._stageTasks) do Task.cancel(id) end
   Anim._stageTasks = {}
   Anim._headless = opts.headless and true or false
   Anim._hpTweening = false
+  Anim._hpTweenTask = nil
   Anim._expTweening = false
+  Anim._expTweenTask = nil
   Anim._introTweening = 0
   Anim._seqBusy = false
   Anim._statusQueue = {}
@@ -285,10 +321,16 @@ function Anim.ballOpen(key, x, y)
   return BallOpen.start(id, x, y, b and b.mon and b.mon.pokeball)
 end
 
-local function play_se(name, pan)
+-- pokefirered/src/pokeball.c:373
+function Anim.ballIdOf(key)
+  local b = AnimCoords.battler(nil, Anim.idOf(key) or 1)
+  return BallOpen.ballIdForItem(b and b.mon and b.mon.pokeball)
+end
+
+local function play_se(name)
   pcall(function()
     local SE = require("src.core.game3.se_ids")
-    require("src.core.game3.audio").playSe(SE[name], { pan = pan })
+    require("src.core.game3.audio").playSe(SE[name])
   end)
 end
 
@@ -310,13 +352,14 @@ function Anim.sendOutMon(key, opts)
   local base = Anim.coords(nil, id) or Anim.ENEMY_MON
   local stage = Anim.stage()
   stage.balls = stage.balls or {}
-  local ball = { visible = true, frame = 0, rot = 0, side = side, battler = id, x = 0, y = 0 }
+  local ball = { visible = true, frame = 0, rot = 0, side = side, battler = id, x = 0, y = 0,
+    ballId = Anim.ballIdOf(id) }
   stage.balls[id] = ball
-  local pan = (side == "player") and -64 or 63
   local function reveal()
     ball.frame = 1
     ball.rot = 0
-    play_se("SE_BALL_OPEN", pan)
+    -- pokefirered/src/battle_anim_special.c:1427
+    play_se("SE_BALL_OPEN")
     Anim.ballOpen(id, ball.x, ball.y)
     p.visible = true
     p.ox = 0
@@ -337,10 +380,10 @@ function Anim.sendOutMon(key, opts)
   end
   if side == "player" then
     -- pokefirered/src/pokeball.c:912
-    local sx, sy = 48, 70
+    local Battle = package.loaded["src.core.game3.battle"]
+    local sx, sy = require("src.core.game3.battle.pokedude").sendOutOrigin(Battle and Battle._st)
     local tx, ty = base.x, base.y + 24
     ball.x, ball.y = sx, sy
-    play_se("SE_BALL_THROW", pan)
     Anim.tweenStage(25, function(u, t)
       local f = t and t.frames or (u * 25)
       ball.x = sx + (tx - sx) * u
@@ -489,6 +532,7 @@ function Anim.syncDisplayFromState(st)
       p.displayHp = tonumber(b.mon.hp) or 0
       p.displayMaxHp = tonumber(b.mon.maxHp) or 1
       p.displayLevel = tonumber(b.mon.level) or 1
+      p.displayStatus = b.status or (b.mon and (b.mon.status or b.mon.status1))
       local prog = Experience.progress(b.mon)
       p.displayExp = prog.progressPercent or 0
     end
@@ -526,9 +570,13 @@ function Anim.tweenHp(side, fromHp, toHp, maxHp, opts)
   end, function()
     Anim._stageTasks[t.id] = nil
     p.displayHp = toHp
-    Anim._hpTweening = false
+    if Anim._hpTweenTask == t.id then
+      Anim._hpTweening = false
+      Anim._hpTweenTask = nil
+    end
     if opts.onComplete then opts.onComplete() end
   end)
+  Anim._hpTweenTask = t.id
   Anim._stageTasks[t.id] = true
 end
 
@@ -572,9 +620,13 @@ function Anim.tweenExp(side, fromRatio, toRatio, opts)
   end, function()
     Anim._stageTasks[task.id] = nil
     p.displayExp = toRatio
-    Anim._expTweening = false
+    if Anim._expTweenTask == task.id then
+      Anim._expTweening = false
+      Anim._expTweenTask = nil
+    end
     if opts.onComplete then opts.onComplete() end
   end)
+  Anim._expTweenTask = task.id
   Anim._stageTasks[task.id] = true
 end
 
@@ -641,7 +693,7 @@ local function hydrate_tag_images(pack)
       local rel = root .. info.file
       if cache and cache.read then
         bytes = cache:read(rel)
-        if not bytes then bytes = cache:read("firered/" .. rel) end
+        if not bytes and fallback_prefix() then bytes = cache:read(fallback_prefix() .. rel) end
       end
       if type(bytes) == "string" and #bytes > 0 then
         local okFd, fileData = pcall(love.filesystem.newFileData, bytes, info.file)
@@ -656,7 +708,8 @@ local function hydrate_tag_images(pack)
               info.w = image:getWidth()
               info.h = image:getHeight()
               AnimPal.hydrateIndex(info, tag, image, function(f)
-                return cache and cache.read and (cache:read(root .. f) or cache:read("firered/" .. root .. f))
+                return cache and cache.read and (cache:read(root .. f)
+                  or (fallback_prefix() and cache:read(fallback_prefix() .. root .. f)))
               end)
             end
           end
@@ -672,10 +725,10 @@ local function load_pack()
   local chunk
   local ok, Dataset = pcall(require, "src.core.game3.dataset")
   local cache = ok and Dataset.cache and Dataset.cache() or nil
-  local rels = {
-    "data/generated/gba/pokemon/battle_anims/pack.lua",
-    "firered/data/generated/gba/pokemon/battle_anims/pack.lua",
-  }
+  local rels = { "data/generated/gba/pokemon/battle_anims/pack.lua" }
+  if fallback_prefix() then
+    rels[2] = fallback_prefix() .. "data/generated/gba/pokemon/battle_anims/pack.lua"
+  end
   if cache and cache.read then
     for _, rel in ipairs(rels) do
       local src = cache:read(rel)
@@ -693,6 +746,9 @@ local function load_pack()
         end
       end
     end
+  end
+  if not chunk and not fallback_prefix() and cache and cache.read then
+    error("battle anims: data/generated/gba/pokemon/battle_anims/pack.lua is missing from the cache")
   end
   if not chunk then
     local okR, mod = pcall(require, "src.core.game3.battle.anim_pack_fallback")
@@ -735,6 +791,86 @@ local GENERIC_MISS = {
   { op = "delay", frames = 8 },
   { op = "end" },
 }
+
+local function shiny_sprite(template, callback, w, h, imageValue, role)
+  return {
+    op = "createsprite", template = template, tag = "GOLD_STARS",
+    animBattler = role or "attacker", subpriority = 5, callback = callback, w = w, h = h,
+    -- The portable VM copies args[3] to the sprite's image value. FireRed uses
+    -- tile offsets +4 and +5 for the two mini-star frames.
+    args = { 0, 0, imageValue or 0 },
+  }
+end
+
+local function shiny_script(ids)
+  local streams = {}
+  for i, id in ipairs(ids) do
+    local role = (i == 1) and "attacker" or "target"
+    local side = AnimCoords.sideOf(id)
+    streams[#streams + 1] = { role = role, callback = "ShinySparkleOrbit", pan = side == "player"
+      and "SOUND_PAN_ATTACKER" or "SOUND_PAN_TARGET" }
+    streams[#streams + 1] = { role = role, callback = "ShinySparkle", pan = side == "player"
+      and "SOUND_PAN_ATTACKER" or "SOUND_PAN_TARGET" }
+  end
+
+  local script = {
+    { op = "loadspritegfx", tag = "GOLD_STARS" },
+    -- pokefirered/src/battle_anim_special.c:2088-2092
+    { op = "delay", frames = 60 },
+  }
+
+  -- Each FireRed task emits one wish star and four mini stars. In a double
+  -- battle, run both battlers' task pairs through the same VM so their first
+  -- stars and four-frame bursts stay synchronized.
+  for burst = 0, 4 do
+    if burst > 0 then
+      -- Each createsprite consumes one VM frame. With two streams per
+      -- battler, this preserves the four-frame task cadence between bursts.
+      script[#script + 1] = { op = "delay", frames = 2 }
+    end
+    local template = (burst == 0) and "gWishStarSpriteTemplate"
+      or "gMiniTwinklingStarSpriteTemplate"
+    local size = (burst == 0) and 16 or 8
+    local imageValue = (burst == 0) and 0 or ((burst <= 3) and 4 or 5)
+    for _, stream in ipairs(streams) do
+      script[#script + 1] = shiny_sprite(template, stream.callback, size, size, imageValue, stream.role)
+    end
+    -- pokefirered/src/battle_anim_special.c:2120-2137
+    for _, stream in ipairs(streams) do
+      if burst == 0 and stream.callback == "ShinySparkle" then
+        script[#script + 1] = { op = "playsewithpan", se = SE.SE_SHINY, pan = stream.pan }
+      end
+    end
+  end
+
+  -- pokefirered/src/battle_anim_special.c:2150-2164
+  script[#script + 1] = { op = "waitforvisualfinish" }
+  script[#script + 1] = { op = "unloadspritegfx", tag = "GOLD_STARS" }
+  script[#script + 1] = { op = "end" }
+  return script
+end
+
+function Anim.launchShiny(key, opts)
+  opts = opts or {}
+  if not Anim._vm then Anim.reset({ headless = Anim._headless }) end
+  load_pack()
+  local ids = {}
+  for _, candidate in ipairs(opts.keys or { key }) do
+    local id = Anim.idOf(candidate) or AnimCoords.fixedId(candidate)
+    if id ~= nil and #ids < 2 then ids[#ids + 1] = id end
+  end
+  if #ids == 0 then ids[1] = Anim.idOf(key) or AnimCoords.fixedId(key) or 0 end
+  local side = AnimCoords.sideOf(ids[1])
+  local targetSide = AnimCoords.sideOf(ids[2] or ids[1])
+  local o = {}
+  for k, v in pairs(opts) do o[k] = v end
+  o.attackerSide = o.attackerSide or side
+  o.targetSide = o.targetSide or targetSide
+  o.attackerId = o.attackerId or ids[1]
+  o.targetId = o.targetId or ids[2] or ids[1]
+  if o.isReversed == nil then o.isReversed = side == "enemy" end
+  return Anim._vm:launch(shiny_script(ids), o)
+end
 
 function Anim.scriptForMove(moveId)
   local pack = load_pack()
@@ -912,7 +1048,8 @@ function Anim.statMaskImage(tilemap, pal)
   local ok, Dataset = pcall(require, "src.core.game3.dataset")
   local cache = ok and Dataset.cache and Dataset.cache() or nil
   local path = "data/generated/gba/pokemon/battle_anims/" .. rel
-  local bytes = cache and cache.read and (cache:read(path) or cache:read("firered/" .. path))
+  local bytes = cache and cache.read and (cache:read(path)
+    or (fallback_prefix() and cache:read(fallback_prefix() .. path)))
   if type(bytes) ~= "string" or #bytes == 0 then return nil end
   local okD, data = pcall(function()
     return love.image.newImageData(love.filesystem.newFileData(bytes, rel))
@@ -956,6 +1093,18 @@ end
 function Anim.drawParticles(minZ, maxZ)
   if Anim._headless then return end
   if Anim._vm then Anim._vm:draw(minZ, maxZ) end
+end
+
+--- Bracket one frame's z-band drawParticles calls so the VM sorts its
+--- sprites once per frame instead of once per band.
+function Anim.beginParticleFrame()
+  local vm = Anim._vm
+  if vm and vm.beginDrawFrame then vm:beginDrawFrame() end
+end
+
+function Anim.endParticleFrame()
+  local vm = Anim._vm
+  if vm and vm.endDrawFrame then vm:endDrawFrame() end
 end
 
 return Anim

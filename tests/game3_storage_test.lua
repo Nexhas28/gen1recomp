@@ -1,4 +1,14 @@
 -- Automated Test Suite for Game 3 FRLG PC & Pokémon Storage System.
+require("tests.game3_cache").stubSpeciesNames()
+require("tests.fixture_data.game3_items").install()
+package.loaded["src.core.game3.rom_text"] = {
+  plain = function(key) return key end, box = function(key) return key end,
+  ascii = function(key) return key end, has = function() return true end,
+  key = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+  at = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+  count = function() return 0 end, list = function() return {} end,
+  lazy = function(map) return setmetatable({}, { __index = function(_, k) return map[k] end }) end,
+}
 
 local Storage = require("src.core.game3.storage")
 local Bag = require("src.core.game3.bag")
@@ -42,7 +52,7 @@ assert_eq(s.currentBox, 1, "Initial currentBox is 1")
 assert_eq(Storage.countTotalMons(s), 0, "Initial mon count is 0")
 for b = 1, 14 do
   assert_eq(s.boxes[b].name, string.format("BOX %d", b), "Box name correct")
-  assert_eq(s.boxes[b].wallpaper, ((b - 1) % 16) + 1, "Box wallpaper initialized")
+  assert_eq(s.boxes[b].wallpaper, ((b - 1) % 4) + 1, "Box wallpaper initialized")
   assert_eq(Storage.countBoxMons(s, b), 0, "Box starts empty")
 end
 assert_eq(#s.items, 1, "PC starts with 1 item (Potion)")
@@ -257,8 +267,11 @@ assert_eq(ReleaseSeq.state, "anim", "Entered upward float/shrink animation state
 
 -- Tick animation past 0.8s
 ReleaseSeq.update(1.0)
-assert_eq(ReleaseSeq.state, "bye", "Entered 'Bye-bye, SPARKY!' state")
+assert_eq(ReleaseSeq.state, "released", "Entered 'SPARKY was released.' state")
 assert_eq(relSession.storage.boxes[1].mons[1], nil, "Box slot data cleared")
+
+ReleaseSeq.handleInput(make_input({ a = true }))
+assert_eq(ReleaseSeq.state, "bye", "Entered 'Bye-bye, SPARKY!' state")
 
 -- Dismiss dialogue
 ReleaseSeq.handleInput(make_input({ a = true }))
@@ -309,6 +322,19 @@ SummaryMenu.close()
 assert_false(SummaryMenu.isOpen(), "SummaryMenu closed cleanly")
 print("[ok] Context-aware SummaryScreen in Box mode passed")
 
+local function settle_ui()
+  for _ = 1, 600 do
+    if not (BoxStorageUI.isOpen() and BoxStorageUI.isPresentationBusy()) then return end
+    BoxStorageUI.update(0)
+  end
+end
+
+local function ui_input(input)
+  settle_ui()
+  BoxStorageUI.handleInput(input)
+  settle_ui()
+end
+
 print("=== [TEST 10] BoxStorageUI Navigation & Hover Bounce ===")
 local uiSession = {
   party = { { species = 25, level = 10, hp = 30, maxHp = 30 } },
@@ -318,6 +344,7 @@ uiSession.storage.boxes[1].mons[1] = { species = 1, level = 5 }
 uiSession.storage.boxes[1].mons[2] = { species = 4, level = 5 }
 
 BoxStorageUI.show({ session = uiSession })
+settle_ui()
 assert_true(BoxStorageUI.isOpen(), "BoxStorageUI is open")
 assert_eq(BoxStorageUI.cursorSlot, 1, "Cursor on slot 1")
 assert_eq(BoxStorageUI.hoverFrame, 0, "Initial hoverFrame is 0")
@@ -329,11 +356,11 @@ BoxStorageUI.update(0.15)
 assert_eq(BoxStorageUI.hoverFrame, 0, "Hover bounce toggled back to frame 0")
 
 -- Navigate right to slot 2
-BoxStorageUI.handleInput(make_input({ right = true }))
+ui_input(make_input({ right = true }))
 assert_eq(BoxStorageUI.cursorSlot, 2, "Cursor moved to slot 2")
 
 -- Switch box with R trigger
-BoxStorageUI.handleInput(make_input({ r = true }))
+ui_input(make_input({ r = true }))
 assert_eq(uiSession.storage.currentBox, 2, "Switched to Box 2")
 
 BoxStorageUI.close()
@@ -343,7 +370,7 @@ print("[ok] BoxStorageUI navigation and hover bounce passed")
 print("=== [TEST 11] PcMenu Root Navigation & Submenu Lifecycle ===")
 local pcSession = {
   name = "RED",
-  flags = { [0x828] = true }, -- BILL'S PC unlocked
+  flags = { [0x828] = true, [0x82C] = true }, -- BILL'S PC unlocked
   party = { { species = 25, level = 10, hp = 30, maxHp = 30 } },
   storage = Storage.new(),
   bag = Bag.new(),
@@ -380,34 +407,34 @@ assert_eq(PcMenu.mode, "root", "Started in root menu")
 PcMenu.handleInput(make_input({ a = true }))
 assert_eq(PcMenu.mode, "storage_menu", "Entered storage_menu")
 assert_eq(PcMenu.cursor, 1, "Cursor on WITHDRAW POKéMON")
-assert_true(PcMenu._status:find("You can withdraw"), "Description matches WITHDRAW POKéMON")
+assert_eq(PcMenu._status, "gText_WithdrawMonDescription", "Description matches WITHDRAW POKéMON")
 
 -- Navigate down to DEPOSIT POKéMON (index 2)
 PcMenu.handleInput(make_input({ down = true }))
 assert_eq(PcMenu.cursor, 2, "Cursor on DEPOSIT POKéMON")
-assert_true(PcMenu._status:find("You can deposit"), "Description matches DEPOSIT POKéMON")
+assert_eq(PcMenu._status, "gText_DepositMonDescription", "Description matches DEPOSIT POKéMON")
 
 -- Navigate down to MOVE POKéMON (index 3)
 PcMenu.handleInput(make_input({ down = true }))
 assert_eq(PcMenu.cursor, 3, "Cursor on MOVE POKéMON")
-assert_true(PcMenu._status:find("You can move POKéMON"), "Description matches MOVE POKéMON")
+assert_eq(PcMenu._status, "gText_MoveMonDescription", "Description matches MOVE POKéMON")
 
 -- Navigate down to MOVE ITEMS (index 4)
 PcMenu.handleInput(make_input({ down = true }))
 assert_eq(PcMenu.cursor, 4, "Cursor on MOVE ITEMS")
-assert_true(PcMenu._status:find("You can move items"), "Description matches MOVE ITEMS")
+assert_eq(PcMenu._status, "gText_MoveItemsDescription", "Description matches MOVE ITEMS")
 
 -- Navigate down to SEE YA! (index 5)
 PcMenu.handleInput(make_input({ down = true }))
 assert_eq(PcMenu.cursor, 5, "Cursor on SEE YA!")
-assert_true(PcMenu._status:find("See you later"), "Description matches SEE YA!")
+assert_eq(PcMenu._status, "gText_SeeYaDescription", "Description matches SEE YA!")
 
 -- Test DEPOSIT validation when party is 1
 PcMenu.handleInput(make_input({ up = true, up = true, up = true })) -- index 2
 PcMenu.cursor = 2
 PcMenu.handleInput(make_input({ a = true }))
 assert_eq(PcMenu.mode, "msg", "Blocked deposit due to single party Pokémon")
-assert_eq(PcMenu._status, "Can't deposit the last POKéMON!", "Error status matches FRLG text")
+assert_eq(PcMenu._status, "gText_JustOnePkmn", "Error status matches FRLG text")
 PcMenu.handleInput(make_input({ a = true }))
 assert_eq(PcMenu.mode, "storage_menu", "Returned to storage_menu")
 
@@ -419,7 +446,7 @@ assert_eq(#storageSubSession.party, 6, "Party is now full (6 mons)")
 PcMenu.cursor = 1
 PcMenu.handleInput(make_input({ a = true }))
 assert_eq(PcMenu.mode, "msg", "Blocked withdraw due to full party")
-assert_eq(PcMenu._status, "Can't take any more POKéMON.", "Error status matches FRLG text")
+assert_eq(PcMenu._status, "gText_PartyFull", "Error status matches FRLG text")
 PcMenu.handleInput(make_input({ a = true }))
 assert_eq(PcMenu.mode, "storage_menu", "Returned to storage_menu")
 
@@ -460,29 +487,30 @@ local partyDrawerSession = {
   storage = Storage.new(),
 }
 BoxStorageUI.show({ session = partyDrawerSession })
+settle_ui()
 BoxStorageUI.mode = "party_drawer"
 BoxStorageUI.partyCursor = 1
 
 -- Press Right from slot 1 moves to previous vertical slot (2)
-BoxStorageUI.handleInput(make_input({ right = true }))
+ui_input(make_input({ right = true }))
 assert_eq(BoxStorageUI.partyCursor, 2, "Moved from Lead (1) to Slot 2")
 
 -- Press Left from slot 2 moves back to Lead (1)
-BoxStorageUI.handleInput(make_input({ left = true }))
+ui_input(make_input({ left = true }))
 assert_eq(BoxStorageUI.partyCursor, 1, "Moved from Slot 2 to Lead (1)")
 
 -- Press Up from slot 1 wraps to CANCEL (7)
-BoxStorageUI.handleInput(make_input({ up = true }))
+ui_input(make_input({ up = true }))
 assert_eq(BoxStorageUI.partyCursor, 7, "Wrapped Up from Slot 1 to CANCEL (7)")
 
 -- Press Down from CANCEL (7) wraps to Slot 1
-BoxStorageUI.handleInput(make_input({ down = true }))
+ui_input(make_input({ down = true }))
 assert_eq(BoxStorageUI.partyCursor, 1, "Wrapped Down from CANCEL (7) to Slot 1")
 
 -- Press Right from slot 1 -> slot 2, then Right again exits to Box
-BoxStorageUI.handleInput(make_input({ right = true }))
+ui_input(make_input({ right = true }))
 assert_eq(BoxStorageUI.partyCursor, 2, "On Slot 2")
-BoxStorageUI.handleInput(make_input({ right = true }))
+ui_input(make_input({ right = true }))
 assert_eq(BoxStorageUI.mode, "browse", "Exited party drawer to Box browse mode")
 assert_eq(BoxStorageUI.cursorSlot, 1, "Cursor reset to Box slot 1")
 
@@ -498,16 +526,17 @@ local partyActionSession = {
   storage = Storage.new(),
 }
 BoxStorageUI.show({ session = partyActionSession, subMode = "withdraw" })
+settle_ui()
 
 -- Navigate to PARTY POKéMON button (-10) and press A
 BoxStorageUI.cursorSlot = -10
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "party_drawer", "Entered party drawer")
 assert_true(BoxStorageUI.drawerOpen, "Party drawer is marked open")
 
 -- Press A on Lead Mon (1) to open action menu
 BoxStorageUI.partyCursor = 1
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "action_menu", "Action menu opened for party mon")
 assert_true(BoxStorageUI.drawerOpen, "Party drawer stays open under action menu")
 assert_eq(BoxStorageUI._actionSource, "party", "Action source is party")
@@ -516,15 +545,15 @@ assert_eq(BoxStorageUI._actionTarget.mon.nickname, "BULBASAUR", "Action target i
 
 -- Test CANCEL from action menu returns to party drawer (drawer stays open)
 BoxStorageUI.actionCursor = #BoxStorageUI._activeActions -- CANCEL
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "party_drawer", "CANCEL returned to party_drawer mode")
 assert_true(BoxStorageUI.drawerOpen, "Drawer is still open")
 
 -- Open action menu again and test STORE
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "action_menu", "Action menu re-opened")
 BoxStorageUI.actionCursor = 1 -- STORE
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "party_drawer", "STORE completed and returned to party_drawer")
 assert_eq(#partyActionSession.party, 1, "Party now has 1 mon")
 assert_eq(partyActionSession.party[1].nickname, "RATTATA", "Remaining mon is Rattata")
@@ -532,32 +561,44 @@ assert_eq(partyActionSession.storage.boxes[1].mons[1].nickname, "BULBASAUR", "Bu
 
 -- Try to STORE last mon (Rattata) -> should show error message and return to party_drawer
 BoxStorageUI.partyCursor = 1
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "action_menu", "Action menu opened on Rattata")
 BoxStorageUI.actionCursor = 1 -- STORE
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "message", "Entered message mode on last mon store attempt")
-assert_eq(BoxStorageUI._status, "Can't deposit the last POKéMON!", "Error status matches")
+assert_eq(BoxStorageUI._status, "gText_JustOnePkmn", "Error status matches")
 
 -- Dismiss message -> returns to party_drawer
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "party_drawer", "Dismissing error message returned to party_drawer")
 assert_true(BoxStorageUI.drawerOpen, "Party drawer remains open")
 
--- Test MOVE on party mon
-BoxStorageUI.handleInput(make_input({ a = true }))
+-- pokefirered/src/pokemon_storage_system_tasks.c:967
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "action_menu", "Action menu opened on Rattata")
 BoxStorageUI.actionCursor = 3 -- MOVE
-BoxStorageUI.handleInput(make_input({ a = true }))
+ui_input(make_input({ a = true }))
+assert_eq(BoxStorageUI.mode, "message", "MOVE on the last party mon is refused")
+assert_eq(BoxStorageUI._status, "gText_JustOnePkmn", "MOVE refusal status matches")
+assert_true(BoxStorageUI.holdingMon == nil, "Nothing is picked up")
+ui_input(make_input({ a = true }))
+assert_eq(BoxStorageUI.mode, "party_drawer", "Dismissing the MOVE refusal returned to party_drawer")
+assert_eq(partyActionSession.party[1].nickname, "RATTATA", "Rattata stays in slot 1")
+
+partyActionSession.party[2] = { species = 4, nickname = "CHARMANDER", level = 5, hp = 20, maxHp = 20 }
+BoxStorageUI.partyCursor = 1
+ui_input(make_input({ a = true }))
+BoxStorageUI.actionCursor = 3 -- MOVE
+ui_input(make_input({ a = true }))
 assert_eq(BoxStorageUI.mode, "party_drawer", "MOVE returned to party_drawer")
 assert_true(BoxStorageUI.holdingMon ~= nil, "Holding mon is active")
 assert_eq(BoxStorageUI.holdingMon.nickname, "RATTATA", "Holding Rattata")
 assert_eq(BoxStorageUI.holdingSource.loc, "party", "Holding source is party")
-
--- Place back down on slot 1
-BoxStorageUI.handleInput(make_input({ a = true }))
+assert_eq(partyActionSession.party[1].nickname, "CHARMANDER", "The party compacts under the picked-up mon")
+BoxStorageUI.partyCursor = 2
+ui_input(make_input({ a = true }))
 assert_true(BoxStorageUI.holdingMon == nil, "Mon placed down")
-assert_eq(partyActionSession.party[1].nickname, "RATTATA", "Rattata back in slot 1")
+assert_eq(partyActionSession.party[2].nickname, "RATTATA", "Rattata placed in slot 2")
 
 BoxStorageUI.close()
 print("[ok] Party Drawer Action Menu interaction and persistence verified")
@@ -574,7 +615,14 @@ assert_true(StorageChromeExtract.ready(nil, storageRoot), "StorageChromeExtract 
 
 local manifestChunk = assert(loadfile(chromeDir .. "/manifest.lua"))
 local manifest = manifestChunk()
-assert_eq(manifest.version, 3, "Manifest version is 3")
+assert_eq(manifest.version, StorageChromeExtract.FORMAT_VERSION, "Manifest version is current")
+assert_true(manifest.textures.markings ~= nil, "Manifest includes markings sheet")
+local scrollingBg = manifest.palettes and manifest.palettes.scrollingBg
+local palComplete = scrollingBg ~= nil
+for i = 0, 15 do
+  if not (scrollingBg and scrollingBg[i]) then palComplete = false end
+end
+assert_true(palComplete, "Manifest includes the 16-color scrolling bg palette at indices 0..15")
 assert_true(manifest.textures.cursor ~= nil, "Manifest includes cursor texture")
 assert_true(manifest.textures.party_drawer_bg ~= nil, "Manifest includes party_drawer_bg")
 assert_true(manifest.textures.scrolling_bg ~= nil, "Manifest includes scrolling_bg")
@@ -602,10 +650,25 @@ for _, wpName in ipairs(PcChrome.WALLPAPER_NAMES) do
   assert_png(chromeDir .. "/wallpapers/" .. wpName .. ".png", "Wallpaper " .. wpName .. ".png")
   assetCount = assetCount + 1
 end
-assert_eq(assetCount, 30, "14 UI textures + 16 box wallpapers (total 30 assets)")
-print("[ok] All 14 UI textures and 16 wallpapers validated in manifest and file system")
+assert_eq(assetCount, 31, "15 UI textures + 16 box wallpapers (total 31 assets)")
+print("[ok] All 15 UI textures and 16 wallpapers validated in manifest and file system")
+end
+
+print("=== [TEST 16] Party-to-Box Move Compacts a Holed Party ===")
+do
+  local function mk(n) return { species = 1, nickname = n, level = 5, hp = 10, maxHp = 10, moves = {} } end
+  local A, B, C = mk("A"), mk("B"), mk("C")
+  local holed = { party = { [1] = A, [2] = B, [4] = C }, storage = Storage.new(), bag = Bag.new() }
+  local okMove = Storage.moveMon(holed, "party", 2, "box", 1)
+  assert_true(okMove, "Party slot 2 moved into the box")
+  assert_eq(holed.party[1], A, "Slot 1 keeps A")
+  assert_eq(holed.party[2], C, "C compacts into slot 2")
+  assert_eq(holed.party[3], nil, "No third party mon")
+  assert_eq(holed.party[4], nil, "Old slot 4 cleared")
+  assert_eq(Storage.getBoxMon(holed.storage, holed.storage.currentBox, 1), B, "B landed in the box")
+  print("[ok] Holed party compacted without dropping mons")
 end
 
 print("\n========================================================")
-print("ALL 15 POKÉMON STORAGE & PC SYSTEM TESTS PASSED CLEANLY!")
+print("ALL 16 POKÉMON STORAGE & PC SYSTEM TESTS PASSED CLEANLY!")
 print("========================================================")

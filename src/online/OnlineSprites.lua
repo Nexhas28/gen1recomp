@@ -145,16 +145,71 @@ local function iconPath(cat, mon)
   return path, name
 end
 
+local function gen3Pokemon()
+  return require("src.core.game3.pokemon")
+end
+
+local function gen3PicSpecies(mon)
+  local Pokemon = gen3Pokemon()
+  if Pokemon.isEgg(mon) then return Pokemon.SPECIES_EGG end
+  return Pokemon.picSpecies(mon.species, mon.personality)
+end
+
+local function monKey(version, mon)
+  if GameVersion.generation(version) ~= 3 then
+    return OnlineSprites.key(version, mon.species, mon.shiny == true)
+  end
+  return OnlineSprites.key(version, gen3PicSpecies(mon),
+    gen3Pokemon().isShiny(mon)) .. "|" .. tostring(mon.personality or 0)
+end
+
+local function gen3Front(version, mon)
+  local Pokemon = gen3Pokemon()
+  local was = { Pokemon._cache, Pokemon._front, Pokemon._spinda,
+                Pokemon._spindaPics }
+  Pokemon._cache = { read = function(_, rel)
+    return OnlineSprites.readBytes(version, rel)
+  end }
+  Pokemon._front, Pokemon._spinda, Pokemon._spindaPics = {}, nil, {}
+  local ok, entry = pcall(Pokemon.frontPic, gen3PicSpecies(mon), nil,
+    Pokemon.isShiny(mon), mon.personality, "online")
+  Pokemon._cache, Pokemon._front, Pokemon._spinda, Pokemon._spindaPics =
+    was[1], was[2], was[3], was[4]
+  return ok and type(entry) == "table" and entry.image or false
+end
+
+-- pokefirered/src/pokemon_icon.c:1116
+local function gen3Icon(version, mon)
+  local Pokemon = gen3Pokemon()
+  local was = { Pokemon._cache, Pokemon._icons }
+  Pokemon._cache = { read = function(_, rel)
+    return OnlineSprites.readBytes(version, rel)
+  end }
+  Pokemon._icons = {}
+  local ok, entry = pcall(Pokemon.icon, gen3PicSpecies(mon))
+  Pokemon._cache, Pokemon._icons = was[1], was[2]
+  if not ok or type(entry) ~= "table" or not entry.image then return false end
+  return entry
+end
+
 function OnlineSprites.get(version, mon)
   if type(mon) ~= "table" then return nil end
-  return cache[OnlineSprites.key(version, mon.species, mon.shiny == true)]
+  return cache[monKey(version, mon)]
 end
 
 function OnlineSprites.ensure(version, mon)
   if type(mon) ~= "table" or not version then return nil end
-  local key = OnlineSprites.key(version, mon.species, mon.shiny == true)
+  local key = monKey(version, mon)
   local hit = cache[key]
   if hit then return hit end
+  if GameVersion.generation(version) == 3 then
+    local icon = gen3Icon(version, mon)
+    hit = { key = key, mirror = false, icon = icon and icon.image or false,
+            iconW = icon and icon.w or nil, iconH = icon and icon.h or nil,
+            front = gen3Front(version, mon) }
+    cache[key] = hit
+    return hit
+  end
   local cat = catalog(version)
   local def = cat.pokemon and cat.pokemon[mon.species]
   local palette = paletteFor(cat, mon.species, mon.shiny == true)
@@ -195,11 +250,14 @@ function OnlineSprites.prime(version, party)
   return n
 end
 
+local savedColor = {}
+
 local function paintWhite()
   if not (love.graphics and love.graphics.getColor) then return nil end
-  local r, g, b, a = love.graphics.getColor()
+  local saved = savedColor
+  saved[1], saved[2], saved[3], saved[4] = love.graphics.getColor()
   love.graphics.setColor(1, 1, 1, 1)
-  return { r, g, b, a }
+  return saved
 end
 
 local function restore(saved)
@@ -208,7 +266,7 @@ local function restore(saved)
   end
 end
 
-function OnlineSprites.drawIcon(entry, x, y, size)
+function OnlineSprites.drawIcon(entry, x, y, size, frame)
   if type(entry) ~= "table" or not entry.icon then return false end
   local img = entry.icon
   if type(img.getDimensions) ~= "function" then return false end
@@ -216,13 +274,27 @@ function OnlineSprites.drawIcon(entry, x, y, size)
   if not iw or iw <= 0 or ih <= 0 then return false end
   local scale = (size or 16) / 16
   local saved = paintWhite()
-  if ih > 16 and entry.mirror then
-    local half = love.graphics.newQuad(0, 0, 8, 16, iw, ih)
-    love.graphics.draw(img, half, x, y, 0, scale, scale)
-    love.graphics.draw(img, half, x + 16 * scale, y, 0, -scale, scale)
+  local quad = entry.iconQuadFor == img and entry.iconQuad or nil
+  if entry.iconW and entry.iconH then
+    local fw, fh = math.min(entry.iconW, iw), math.min(entry.iconH, ih)
+    local frames = math.max(1, math.floor(ih / fh))
+    local index = math.floor(tonumber(frame) or 0) % frames
+    if entry.iconQuadFor ~= img then entry.iconQuads = {} end
+    entry.iconQuads = entry.iconQuads or {}
+    quad = entry.iconQuads[index] or love.graphics.newQuad(0, index * fh, fw, fh, iw, ih)
+    entry.iconQuads[index] = quad
+    entry.iconQuadFor = img
+    local s = (size or fw) / math.max(fw, fh)
+    love.graphics.draw(img, quad, x, y, 0, s, s)
+  elseif ih > 16 and entry.mirror then
+    quad = quad or love.graphics.newQuad(0, 0, 8, 16, iw, ih)
+    entry.iconQuad, entry.iconQuadFor = quad, img
+    love.graphics.draw(img, quad, x, y, 0, scale, scale)
+    love.graphics.draw(img, quad, x + 16 * scale, y, 0, -scale, scale)
   elseif ih > 16 then
-    local frame = love.graphics.newQuad(0, 0, 16, 16, iw, ih)
-    love.graphics.draw(img, frame, x, y, 0, scale, scale)
+    quad = quad or love.graphics.newQuad(0, 0, 16, 16, iw, ih)
+    entry.iconQuad, entry.iconQuadFor = quad, img
+    love.graphics.draw(img, quad, x, y, 0, scale, scale)
   else
     love.graphics.draw(img, x, y, 0, scale, scale)
   end

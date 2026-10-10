@@ -63,6 +63,7 @@ local FANFARES = {
   Pokedex_Rating = true,
   Dex_Page_Added = true,
   Pokeflute = true,
+  Pokeflute_In_Battle = true,
 }
 
 -- which mod put this key in the registry, for attributed failure logs
@@ -470,6 +471,50 @@ function Sound.play(data, name)
   return src
 end
 
+-- audio/poke_flute.asm:1
+local POKEFLUTE_IN_BATTLE = {
+  redblue = { 0x6322, 0x6325, 0x449b },
+  yellow = { 0x59eb, 0x59ee, 0x444b },
+}
+
+local function pokefluteInBattleDef(data)
+  local sfx = data and data.audio and data.audio.sfx
+  local base = sfx and sfx.Caught_Mon
+  if type(base) ~= "table" or base.chip ~= nil or base.bank ~= 8
+      or base.address ~= 0x41CE then
+    return nil
+  end
+  local alt = require("src.core.GameVersion").isYellow()
+    and POKEFLUTE_IN_BATTLE.yellow or POKEFLUTE_IN_BATTLE.redblue
+  local def = {}
+  for key, value in pairs(base) do def[key] = value end
+  def.startChannels = {
+    { number = 5, address = alt[1] },
+    { number = 6, address = alt[2] },
+    { number = 7, address = alt[3] },
+  }
+  def.fanfare = true
+  return def
+end
+Sound._pokefluteInBattleDef = pokefluteInBattleDef
+
+-- engine/items/item_effects.asm:1739
+function Sound.playPokefluteInBattle(data)
+  local sfx = data and data.audio and data.audio.sfx
+  if sfx and sfx.Pokeflute_In_Battle then
+    return Sound.play(data, "Pokeflute_In_Battle")
+  end
+  local field = sfx and sfx.Pokeflute
+  -- audio/headers/sfxheaders1.asm:467
+  if field ~= nil and (type(field) ~= "table" or field.chip ~= nil
+      or field.bank ~= 2 or field.address ~= 0x4228) then
+    return Sound.play(data, "Pokeflute")
+  end
+  local def = pokefluteInBattleDef(data)
+  if not def then return Sound.play(data, "Pokeflute") end
+  return startSfx(data, "Pokeflute_In_Battle", def)
+end
+
 -- PlayStereoSFX (audio/engine.asm), the battle animation path: same sound,
 -- same fanfare duck, but no CheckSFX/wCurSFX gate, and it never writes
 -- wCurSFX either -- so an animation sound can neither be dropped by, nor
@@ -734,6 +779,9 @@ function Sound.playPikaCry(data, n)
     local path = ("assets/generated/audio/pika_cries/cry_%02d.wav"):format(n)
     local ok, s = pcall(love.audio.newSource, path, "static")
     if not ok or not s then
+      if os.getenv("POKEPORT_DEV") == "1" or _G.POKEPORT_DEV_MODE == true then
+        error(("pikachu cry %d failed to load: %s"):format(n, tostring(s)))
+      end
       cache[key] = false
       return nil
     end
@@ -757,15 +805,8 @@ end
 function Sound.playCry(data, species, pikaClip)
   if not love.audio then return nil end
   if deviceSuspended() then return nil end
-  -- Yellow voices every Pikachu cry with the PCM clips (the chip cry is
-  -- never used for the species there).  Which clip is a property of the
-  -- call site in the original -- every caller of PlayPikachuSoundClip sets
-  -- its own `ldpikacry e, PikachuCryN` -- so pikaClip carries that choice
-  -- in; it is ignored for every other species.  Clip 1 is the LONG
-  -- title-screen "Pikachuuu" (engine/movie/title.asm:146), kept as the
-  -- default only for the sites that have not been given their own clip
-  -- yet; battle entrances pass 11/37 (#837).
-  if species == "PIKACHU" then
+  -- pokeyellow/home/pokemon.asm:140
+  if species == "PIKACHU" and pikaClip ~= false then
     local src = Sound.playPikaCry(data, pikaClip or 1)
     if src then return src end
   end
@@ -792,6 +833,45 @@ function Sound.playCry(data, species, pikaClip)
   pcall(src.play, src)
   played("cry", species, species)
   return src
+end
+
+-- Prewarm: the first play of a chip cry/SFX synthesizes it on the calling
+-- frame (~10-25 ms for a cry, far more for a long jingle), which is the hitch
+-- at a battle's first cry.  These hand that render to the chip audio worker
+-- ahead of time (ChipAudio.prewarmCry/prewarmSfx); the play that follows
+-- builds its Source from the finished PCM, identical to a fresh render.  Call
+-- at an idle point before the sound is needed (battle creation / the
+-- transition, for both species).  Returns true when a render was queued or
+-- the sound is already cached; never renders on the calling thread, and a
+-- play that comes first simply renders as before.
+function Sound.prewarmCry(data, species)
+  if not love.audio or deviceSuspended() then return false end
+  if cache["cry:" .. tostring(species)] ~= nil then return true end
+  local audio = data and data.audio
+  local def = audio and audio.cries and audio.cries[species]
+  if not def then return false end
+  -- pokeyellow/home/pokemon.asm:140 -- voiced by a PCM clip instead
+  if species == "PIKACHU" and audio.pikaCries then return false end
+  local resolved = resolveCry(data, def, 0)
+  if type(resolved) ~= "table" or not (resolved.header or resolved.chip) then
+    return false
+  end
+  local ok, queued = pcall(
+    require("src.core.ChipAudio").prewarmCry, data, species, resolved)
+  return ok and queued or false
+end
+
+-- the plain Sound.play variant of `name` (no pitch/tempo modifiers)
+function Sound.prewarmSfx(data, name)
+  if not love.audio or deviceSuspended() then return false end
+  name = Sound.resolve(data, name)
+  if cache[name] ~= nil then return true end
+  local sfx = data and data.audio and data.audio.sfx
+  local def = sfx and sfx[name]
+  if not isChipDef(def) then return false end
+  local ok, queued = pcall(
+    require("src.core.ChipAudio").prewarmSfx, data, name, nil, nil, def, nil)
+  return ok and queued or false
 end
 
 -- GROWL/ROAR are the only two moves that play a cry (IsCryMove checks

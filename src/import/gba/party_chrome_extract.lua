@@ -3,76 +3,12 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PartyChromeExtract = {}
 
 PartyChromeExtract.CACHE_SUB = "pokemon/party"
-
-local SLOT_PATHS = {
-  main = {
-    "src/import/gba/chrome/menus/party/slot_main.bin",
-    "pokefirered/graphics/party_menu/slot_main.bin",
-  },
-  wide = {
-    "src/import/gba/chrome/menus/party/slot_wide.bin",
-    "pokefirered/graphics/party_menu/slot_wide.bin",
-  },
-  empty = {
-    "src/import/gba/chrome/menus/party/slot_wide_empty.bin",
-    "pokefirered/graphics/party_menu/slot_wide_empty.bin",
-  },
-}
-
-local DEFAULT_SLOT_MAIN = string.char(
-  24, 25, 25, 25, 25, 25, 25, 25, 25, 26,
-  32, 33, 33, 33, 33, 33, 33, 33, 33, 34,
-  32, 33, 33, 33, 33, 33, 33, 33, 33, 34,
-  32, 33, 33, 33, 33, 33, 33, 33, 33, 34,
-  40, 59, 60, 58, 58, 58, 58, 58, 58, 61,
-  15, 16, 16, 16, 16, 16, 16, 16, 16, 17,
-  46, 47, 47, 47, 47, 47, 47, 47, 47, 48
-)
-
-local DEFAULT_SLOT_WIDE = string.char(
-  43, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 45,
-  49, 33, 33, 33, 33, 33, 33, 33, 33, 52, 53, 51, 51, 51, 51, 51, 51, 54,
-  55, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 56, 57
-)
-
-local DEFAULT_SLOT_WIDE_EMPTY = string.char(
-  21, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23,
-  30,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 31,
-  37, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 39
-)
-
-local STATUS_ICON_PATHS = {
-  "src/import/gba/chrome/menus/party/status_icons.png",
-  "data/generated/gba/pokemon/summary/status_icons.png",
-  "data/generated/gba/pokemon/party/status_icons.png",
-}
-
-local BUTTON_PATHS = {
-  cancel = {
-    "src/import/gba/chrome/menus/party/cancel_button.bin",
-    "pokefirered/graphics/party_menu/cancel_button.bin",
-    "graphics/party_menu/cancel_button.bin",
-  },
-  confirm = {
-    "src/import/gba/chrome/menus/party/confirm_button.bin",
-    "pokefirered/graphics/party_menu/confirm_button.bin",
-    "graphics/party_menu/confirm_button.bin",
-  },
-}
-
-local DEFAULT_CANCEL_BUTTON = string.char(
-  0x0a, 0x10, 0x0b, 0x10, 0x0b, 0x10, 0x0b, 0x10, 0x0b, 0x10, 0x0b, 0x10, 0x0c, 0x10,
-  0x12, 0x10, 0x0b, 0x18, 0x0b, 0x18, 0x0b, 0x18, 0x0b, 0x18, 0x0b, 0x18, 0x13, 0x10
-)
-
-local DEFAULT_CONFIRM_BUTTON = string.char(
-  0x1b, 0x10, 0x1c, 0x10, 0x1c, 0x10, 0x1c, 0x10, 0x1c, 0x10, 0x1c, 0x10, 0x1d, 0x10,
-  0x23, 0x10, 0x1c, 0x18, 0x1c, 0x18, 0x1c, 0x18, 0x1c, 0x18, 0x1c, 0x18, 0x24, 0x10
-)
+PartyChromeExtract.FORMAT_VERSION = 2
 
 local function default_cache_root()
   local ok, Extract = pcall(require, "src.import.gba.extract_island1")
@@ -165,27 +101,6 @@ local function bake_status_icons_rgba(gfx, palBytes)
   return table.concat(chunks), W, H
 end
 
-local function read_bin(candidates)
-  for _, p in ipairs(candidates) do
-    local okC, CacheFs = pcall(require, "src.import.CacheFs")
-    if okC and CacheFs and CacheFs.readActive then
-      local d = CacheFs.readActive(p)
-      if d and #d > 0 then return d end
-    end
-    if love and love.filesystem and love.filesystem.read then
-      local ok, d = pcall(love.filesystem.read, p)
-      if ok and d and #d > 0 then return d end
-    end
-    local f = io.open(p, "rb")
-    if f then
-      local d = f:read("*a")
-      f:close()
-      if d and #d > 0 then return d end
-    end
-  end
-  return nil
-end
-
 local function bake_bg_rgba(gfx, palBytes, map, W, H)
   local tileCount = math.floor(byte_len(gfx) / 32)
   local banks = load_pal_banks(palBytes, math.floor(byte_len(palBytes) / 32))
@@ -234,7 +149,7 @@ local function bake_bg_rgba(gfx, palBytes, map, W, H)
   return table.concat(chunks)
 end
 
-local function build_party_box_pal(palBytes, selected)
+local function build_party_box_pal(palBytes, selected, multi)
   local banks = load_pal_banks(palBytes, math.floor(byte_len(palBytes) / 32))
   local base = banks[3] or banks[0] or {}
   local pal = {}
@@ -244,7 +159,22 @@ local function build_party_box_pal(palBytes, selected)
     local c = id % 16
     return (banks[b] and banks[b][c]) or 0
   end
-  if selected then
+  -- src/party_menu.c:2273
+  if multi and selected then
+    pal[4] = get_pal_color(132)
+    pal[5] = get_pal_color(133)
+    pal[6] = get_pal_color(134)
+    pal[1] = get_pal_color(97)
+    pal[7] = get_pal_color(103)
+    pal[8] = get_pal_color(104)
+  elseif multi then
+    pal[4] = get_pal_color(68)
+    pal[5] = get_pal_color(69)
+    pal[6] = get_pal_color(70)
+    pal[1] = get_pal_color(65)
+    pal[7] = get_pal_color(71)
+    pal[8] = get_pal_color(72)
+  elseif selected then
     -- LOAD_PARTY_BOX_PAL(sPartyBoxCurrSelectionPalIds1, sPartyBoxPalOffsets1)
     -- sPartyBoxCurrSelectionPalIds1 = {116, 117, 118}, sPartyBoxPalOffsets1 = {4, 5, 6}
     pal[4] = get_pal_color(116)
@@ -383,73 +313,145 @@ local function bake_ball_sheet(gfx, palBytes)
   return table.concat(chunks), fw, sheetH, 2
 end
 
+local function bake_hold_icons(gfx, palBytes)
+  local W, frames = 8, math.floor(byte_len(gfx) / 32)
+  local H = 8 * frames
+  local pal = load_pal_banks(palBytes, 1)[0] or {}
+  local pixels = {}
+  for i = 1, W * H do pixels[i] = 0 end
+  for f = 0, frames - 1 do
+    local tile = {}
+    for i = 1, 32 do tile[i] = gfx[f * 32 + i] or 0 end
+    decode_tile_4bpp(tile, pixels, 0, f * 8, W, false, false)
+  end
+  local chunks = {}
+  for i = 1, W * H do
+    local idx = pixels[i] or 0
+    if idx == 0 then
+      chunks[i] = string.char(0, 0, 0, 0)
+    else
+      local r, g, b = bgr555_to_rgb8(pal[idx] or 0)
+      chunks[i] = string.char(r, g, b, 255)
+    end
+  end
+  return table.concat(chunks), W, H, frames
+end
+
+PartyChromeExtract.bakeHoldIcons = bake_hold_icons
+
+PartyChromeExtract.REQUIRED = {
+  "pokemon/party/manifest.lua", "pokemon/party/bg.rgba", "pokemon/party/slot_main.rgba",
+  "pokemon/party/slot_wide.rgba", "pokemon/party/slot_wide_empty.rgba", "pokemon/party/cancel_button.rgba",
+  "pokemon/party/confirm_button.rgba", "pokemon/party/status_balls.rgba", "pokemon/party/hold_icons.rgba",
+  "pokemon/party/status_icons.rgba",
+}
+
+-- pokeemerald/src/data/party_menu.h:565
+function PartyChromeExtract.keysFor(game)
+  local S = require("src.import.gba.syms").of(game)
+  return {
+    PARTY_MENU_BG_GFX = S.off("gPartyMenuBg_Gfx"),
+    PARTY_MENU_BG_PAL = S.off("gPartyMenuBg_Pal"),
+    PARTY_MENU_BG_TILEMAP = S.off("gPartyMenuBg_Tilemap"),
+    PARTY_MENU_BALL_GFX = S.off("gPartyMenuPokeball_Gfx"),
+    PARTY_MENU_BALL_PAL = S.off("gPartyMenuPokeball_Pal"),
+    PARTY_MENU_HOLD_ICONS_GFX = S.off("sHeldItemGfx"),
+    PARTY_MENU_HOLD_ICONS_PAL = S.off("sHeldItemPalette"),
+    PARTY_MENU_CONFIRM_BUTTON_TILEMAP = S.off("sConfirmButton_Tilemap"),
+    PARTY_MENU_CANCEL_BUTTON_TILEMAP = S.off("sCancelButton_Tilemap"),
+    PARTY_MENU_SLOT_MAIN_TILEMAP = S.off("sSlotTilemap_Main"),
+    PARTY_MENU_SLOT_WIDE_TILEMAP = S.off("sSlotTilemap_Wide"),
+    PARTY_MENU_SLOT_WIDE_EMPTY_TILEMAP = S.off("sSlotTilemap_WideEmpty"),
+    SUMMARY_STATUS_ICONS_GFX = S.off("gStatusGfx_Icons"),
+    SUMMARY_STATUS_ICONS_PAL = S.off("gStatusPal_Icons"),
+    SUMMARY_STATUS_ICONS_PAL_LZ = true,
+  }
+end
+
 function PartyChromeExtract.run(rom, cache, opts)
   opts = opts or {}
+  local K = opts.keys or (opts.game and PartyChromeExtract.keysFor(opts.game)) or Versions
   local root = (opts.cacheRoot or default_cache_root()) .. "/" .. PartyChromeExtract.CACHE_SUB
   local W = opts.width or 240
   local H = opts.height or 160
 
   local function get(i) return rom:get(i) end
-  local gfx = Lz77.decompress(get, Versions.PARTY_MENU_BG_GFX)
-  local pal = Lz77.decompress(get, Versions.PARTY_MENU_BG_PAL)
-  local map = Lz77.decompress(get, Versions.PARTY_MENU_BG_TILEMAP)
+  local gfx = Lz77.decompress(get, K.PARTY_MENU_BG_GFX)
+  local pal = Lz77.decompress(get, K.PARTY_MENU_BG_PAL)
+  local map = Lz77.decompress(get, K.PARTY_MENU_BG_TILEMAP)
   cache:write(root .. "/bg.rgba", bake_bg_rgba(gfx, pal, map, W, H))
 
   local palUnsel = build_party_box_pal(pal, false)
   local palSel = build_party_box_pal(pal, true)
+  local palMulti = build_party_box_pal(pal, false, true)
+  local palMultiSel = build_party_box_pal(pal, true, true)
 
-  local mainBin = read_bin(SLOT_PATHS.main) or DEFAULT_SLOT_MAIN
-  local wideBin = read_bin(SLOT_PATHS.wide) or DEFAULT_SLOT_WIDE
-  local emptyBin = read_bin(SLOT_PATHS.empty) or DEFAULT_SLOT_WIDE_EMPTY
-  if not mainBin then
-    error("party chrome: missing slot_main data")
+  local function raw(off, len)
+    local t = {}
+    for i = 1, len do t[i] = string.char(get(off + i - 1)) end
+    return table.concat(t)
   end
-  if mainBin and #mainBin >= 70 then
+  local mainBin = raw(K.PARTY_MENU_SLOT_MAIN_TILEMAP, 70)
+  local wideBin = raw(K.PARTY_MENU_SLOT_WIDE_TILEMAP, 54)
+  local emptyBin = raw(K.PARTY_MENU_SLOT_WIDE_EMPTY_TILEMAP, 54)
+  do
     local rgba = bake_slot_rgba(gfx, pal, mainBin, 10, 7, palUnsel)
     cache:write(root .. "/slot_main.rgba", rgba)
     local rgbaSel = bake_slot_rgba(gfx, pal, mainBin, 10, 7, palSel)
     cache:write(root .. "/slot_main_selected.rgba", rgbaSel)
+    cache:write(root .. "/slot_main_multi.rgba", bake_slot_rgba(gfx, pal, mainBin, 10, 7, palMulti))
+    cache:write(root .. "/slot_main_multi_selected.rgba", bake_slot_rgba(gfx, pal, mainBin, 10, 7, palMultiSel))
   end
-  if wideBin and #wideBin >= 54 then
+  do
     local rgba = bake_slot_rgba(gfx, pal, wideBin, 18, 3, palUnsel)
     cache:write(root .. "/slot_wide.rgba", rgba)
     local rgbaSel = bake_slot_rgba(gfx, pal, wideBin, 18, 3, palSel)
     cache:write(root .. "/slot_wide_selected.rgba", rgbaSel)
+    cache:write(root .. "/slot_wide_multi.rgba", bake_slot_rgba(gfx, pal, wideBin, 18, 3, palMulti))
+    cache:write(root .. "/slot_wide_multi_selected.rgba", bake_slot_rgba(gfx, pal, wideBin, 18, 3, palMultiSel))
   end
-  if emptyBin and #emptyBin >= 54 then
+  do
     local rgba = bake_slot_rgba(gfx, pal, emptyBin, 18, 3, palUnsel)
     cache:write(root .. "/slot_wide_empty.rgba", rgba)
   end
 
-  local cancelBin = read_bin(BUTTON_PATHS.cancel) or DEFAULT_CANCEL_BUTTON
-  if cancelBin and #cancelBin >= 28 then
+  local cancelBin = raw(K.PARTY_MENU_CANCEL_BUTTON_TILEMAP, 28)
+  do
     local cancelRgba = bake_button_rgba(gfx, pal, cancelBin, 7, 2, 1)
     cache:write(root .. "/cancel_button.rgba", cancelRgba)
     local cancelRgbaSel = bake_button_rgba(gfx, pal, cancelBin, 7, 2, 2)
     cache:write(root .. "/cancel_button_selected.rgba", cancelRgbaSel)
   end
 
-  local confirmBin = read_bin(BUTTON_PATHS.confirm) or DEFAULT_CONFIRM_BUTTON
-  if confirmBin and #confirmBin >= 28 then
+  local confirmBin = raw(K.PARTY_MENU_CONFIRM_BUTTON_TILEMAP, 28)
+  do
     local confirmRgba = bake_button_rgba(gfx, pal, confirmBin, 7, 2, 1)
     cache:write(root .. "/confirm_button.rgba", confirmRgba)
     local confirmRgbaSel = bake_button_rgba(gfx, pal, confirmBin, 7, 2, 2)
     cache:write(root .. "/confirm_button_selected.rgba", confirmRgbaSel)
   end
 
-  local ballGfx = Lz77.decompress(get, Versions.PARTY_MENU_BALL_GFX)
-  local ballPal = Lz77.decompress(get, Versions.PARTY_MENU_BALL_PAL)
+  local ballGfx = Lz77.decompress(get, K.PARTY_MENU_BALL_GFX)
+  local ballPal = Lz77.decompress(get, K.PARTY_MENU_BALL_PAL)
   local ballRgba, bw, bh, frames = bake_ball_sheet(ballGfx, ballPal)
   cache:write(root .. "/status_balls.rgba", ballRgba)
 
-  if Versions.SUMMARY_STATUS_ICONS_GFX and Versions.SUMMARY_STATUS_ICONS_PAL then
-    local statusGfx = Lz77.decompress(get, Versions.SUMMARY_STATUS_ICONS_GFX)
+  -- src/data/party_menu.h:664
+  local holdGfx, holdPal = {}, {}
+  for i = 1, 64 do holdGfx[i] = get(K.PARTY_MENU_HOLD_ICONS_GFX + i - 1) end
+  for i = 1, 32 do holdPal[i] = get(K.PARTY_MENU_HOLD_ICONS_PAL + i - 1) end
+  local holdRgba, holdW, holdH, holdFrames = bake_hold_icons(holdGfx, holdPal)
+  cache:write(root .. "/hold_icons.rgba", holdRgba)
+
+  if K.SUMMARY_STATUS_ICONS_GFX and K.SUMMARY_STATUS_ICONS_PAL then
+    local statusGfx = Lz77.decompress(get, K.SUMMARY_STATUS_ICONS_GFX)
     local function read_pal_bytes(off, len)
       local t = {}
       for i = 1, len do t[i] = get(off + i - 1) end
       return t
     end
-    local statusPal = read_pal_bytes(Versions.SUMMARY_STATUS_ICONS_PAL, 32)
+    local statusPal = K.SUMMARY_STATUS_ICONS_PAL_LZ and Lz77.decompress(get, K.SUMMARY_STATUS_ICONS_PAL)
+      or read_pal_bytes(K.SUMMARY_STATUS_ICONS_PAL, 32)
     if statusGfx and statusPal then
       local statusRgba = bake_status_icons_rgba(statusGfx, statusPal)
       cache:write(root .. "/status_icons.rgba", statusRgba)
@@ -458,50 +460,59 @@ function PartyChromeExtract.run(rom, cache, opts)
     end
   end
 
-  local statusPng = read_bin(STATUS_ICON_PATHS)
-  if statusPng then
-    cache:write(root .. "/status_icons.png", statusPng)
+  -- pokeemerald/src/party_menu.c:749
+  local palLines = {}
+  for id = 0, math.floor(byte_len(pal) / 2) - 1 do
+    local r, g, b = bgr555_to_rgb8((pal[id * 2 + 1] or 0) + (pal[id * 2 + 2] or 0) * 256)
+    palLines[#palLines + 1] = string.format("[%d] = { %d, %d, %d },", id, r, g, b)
   end
-
   local manifest = string.format(
-    "return {\n  width = %d, height = %d,\n  ballW = %d, ballSheetH = %d, ballFrames = %d,\n  slotMainW = 80, slotMainH = 56,\n  slotWideW = 144, slotWideH = 24,\n  cancelButtonW = 56, cancelButtonH = 16,\n  pokemonVersion = %d,\n}\n",
-    W, H, bw, bh, frames or 2, Versions.POKEMON_VERSION or 1)
+    "return {\n  formatVersion = %d,\n  width = %d, height = %d,\n  ballW = %d, ballSheetH = %d, ballFrames = %d,\n  slotMainW = 80, slotMainH = 56,\n  slotWideW = 144, slotWideH = 24,\n  cancelButtonW = 56, cancelButtonH = 16,\n  holdIconW = %d, holdIconSheetH = %d, holdIconFrames = %d,\n  pokemonVersion = %d,\n  palBuffer = { %s },\n}\n",
+    PartyChromeExtract.FORMAT_VERSION, W, H, bw, bh, frames or 2, holdW, holdH, holdFrames, K.POKEMON_VERSION or 1,
+    table.concat(palLines, " "))
   cache:write(root .. "/manifest.lua", manifest)
 
   return {
     root = root, width = W, height = H,
     ballW = bw, ballSheetH = bh, ballFrames = frames,
+    holdIconW = holdW, holdIconSheetH = holdH, holdIconFrames = holdFrames,
   }
+end
+
+local function read_any(cache, rel)
+  if cache then
+    if cache.read then return cache:read(rel) end
+    return nil
+  end
+  local okC, CacheFs = pcall(require, "src.import.CacheFs")
+  if okC and CacheFs and CacheFs.readActive then
+    local d = CacheFs.readActive(rel)
+    if d then return d end
+  end
+  if love and love.filesystem and love.filesystem.read then
+    local d = CacheBlob.readFs(rel)
+    if d then return d end
+  end
+  local f = io.open(rel, "rb")
+  if f then
+    local d = CacheBlob.decode(rel, f:read("*a"))
+    f:close()
+    return d
+  end
+  return nil
+end
+
+function PartyChromeExtract.manifestReady(body)
+  if type(body) ~= "string" then return false end
+  if tonumber(body:match("formatVersion%s*=%s*(%d+)")) ~= PartyChromeExtract.FORMAT_VERSION then return false end
+  return body:find("palBuffer = { [0] = {", 1, true) ~= nil
 end
 
 function PartyChromeExtract.ready(cache, cacheRoot)
   local root = (cacheRoot or default_cache_root()) .. "/" .. PartyChromeExtract.CACHE_SUB
-  local need = root .. "/slot_main.rgba"
-  if cache then
-    if cache.read then
-      local d = cache:read(need)
-      return (d and #d >= 80 * 56 * 4) or false
-    elseif cache.exists then
-      return cache:exists(need) or false
-    end
-    return false
-  end
-  local okC, CacheFs = pcall(require, "src.import.CacheFs")
-  if okC and CacheFs and CacheFs.readActive then
-    local d = CacheFs.readActive(need)
-    if d and #d >= 80 * 56 * 4 then return true end
-  end
-  if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(need)
-    if d and #d >= 80 * 56 * 4 then return true end
-  end
-  local f = io.open(need, "rb") or io.open("data/generated/gba/" .. PartyChromeExtract.CACHE_SUB .. "/slot_main.rgba", "rb")
-  if f then
-    local d = f:read("*a")
-    f:close()
-    if d and #d >= 80 * 56 * 4 then return true end
-  end
-  return false
+  if not PartyChromeExtract.manifestReady(read_any(cache, root .. "/manifest.lua")) then return false end
+  local d = read_any(cache, root .. "/slot_main.rgba")
+  return (type(d) == "string" and #d >= 80 * 56 * 4) or false
 end
 
 return PartyChromeExtract

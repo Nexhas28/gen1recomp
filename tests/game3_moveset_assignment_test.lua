@@ -2,6 +2,7 @@
 -- Test FireRed Pokémon moveset assignment, learnsets, and battle initialization.
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_moveset_assignment_test")
 
 local Pokemon = require("src.core.game3.pokemon")
 local Battle = require("src.core.game3.battle.init")
@@ -66,7 +67,7 @@ do
     -- moves is nil (wild encounter)
   }
 
-  local ok, err = Battle.start({
+  local ok, err = Battle.start({ playerName = "RED",
     wild = true,
     playerParty = playerParty,
     foe = foeMon,
@@ -98,8 +99,9 @@ do
     moves = { 85, 98 }, -- Thunderbolt (85), Quick Attack (98)
   }
 
-  local ok = Battle.start({
+  local ok = Battle.start({ playerName = "RED",
     wild = false,
+    trainerId = 326,
     playerParty = playerParty,
     foe = customFoe,
     headless = true,

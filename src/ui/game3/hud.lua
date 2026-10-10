@@ -1,6 +1,12 @@
 -- Game3 UI controller: input + open helpers.
 -- Drawing is owned by display.lua / gfx.lua (FRLG 240×160).
 
+local function lazyReq(name)
+  local m = package.loaded[name]
+  if type(m) == "table" then return m end
+  return require(name)
+end
+
 local Message = require("src.ui.game3.message")
 local Choice = require("src.ui.game3.choice")
 local StartMenu = require("src.ui.game3.start_menu")
@@ -12,6 +18,13 @@ local OptionMenu = require("src.ui.game3.option_menu")
 local SaveMenu = require("src.ui.game3.save_menu")
 local TrainerCard = require("src.ui.game3.trainer_card")
 local PcMenu = require("src.ui.game3.pc_menu")
+
+local s9Warned = {}
+local function s9log(key, err)
+  if s9Warned[key] then return end
+  s9Warned[key] = true
+  print("[game3/hud] hot-path pcall failed (" .. key .. "): " .. tostring(err))
+end
 local SummaryMenu = require("src.ui.game3.summary_menu")
 local ShopMenu = require("src.ui.game3.shop_menu")
 local Stack = require("src.ui.game3.stack")
@@ -55,6 +68,11 @@ end
 local function update_top_menu(input)
   local top = Stack.top()
   if top and top.mod then
+    local skin = lazyReq("src.ui.game3.screens").skin(top.id)
+    if skin and skin.handleInput then
+      skin.handleInput(input, top.mod)
+      return true
+    end
     if top.mod.handleInput then
       top.mod.handleInput(input)
       return true
@@ -149,13 +167,17 @@ local function start_button_allowed()
   local Space = package.loaded["src.core.game3.scripting.space"]
   local Forced = package.loaded["src.core.game3.forced_movement"]
   local Warp = package.loaded["src.core.game3.warp"]
+  local P = package.loaded["src.core.game3.player"]
   local scriptBusy = Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning()
   -- pokefirered/src/field_effect.c:1155 FieldCB_FallWarpExit
   local locked = (Field and Field.locked)
     or (Forced and Forced.isForced and Forced.isForced())
     or (Warp and Warp.isBusy and Warp.isBusy())
+    -- pokefirered/src/field_player_avatar.c:1419
+    or (P and P.boulderPush ~= nil)
   return not locked and not scriptBusy
 end
+Hud.startButtonAllowed = start_button_allowed
 
 -- pokefirered/src/field_control_avatar.c:76 FieldClearPlayerInput
 function Hud.clearFieldInput()
@@ -169,28 +191,43 @@ function Hud.sampleFieldInput(game)
     Hud._fieldInput = nil
     return
   end
+  -- pokeemerald/src/field_control_avatar.c:97
+  local okB, B = pcall(function() return lazyReq("src.core.game3.bike").rse() end)
+  if okB and B and B.playerSpeed and B.playerSpeed() == B.SPEED.FASTEST then
+    Hud._fieldInput = { start = false }
+    return
+  end
   Hud._fieldInput = {
     start = input:wasPressed("start") and start_button_allowed() or false,
   }
 end
 
-function Hud.update(game, _dt)
+function Hud.update(game, _dt, inputTop)
   local dt = tonumber(_dt) or (1 / 60)
 
   -- Active stack modal menu tick
   local top = Stack.top()
+  local namingTick = top and top.id == "naming"
+  if namingTick and top.mod and top.mod.handleInput then
+    -- Naming consumes input before its page-swap timer can unlock the keyboard.
+    -- A prompt that opened it during this frame keeps its opening button press.
+    if inputTop == nil or top == inputTop then top.mod.handleInput(game and game.input) end
+  end
   if top and top.mod and top.mod.update then
-    pcall(top.mod.update, dt)
+    local okU, errU = pcall(top.mod.update, dt)
+    if not okU then s9log("top.update", errU) end
   end
 
   -- Tick location map name popup banner
-  local okPop, MapNamePopup = pcall(require, "src.ui.game3.map_name_popup")
+  local okPop, MapNamePopup = pcall(lazyReq, "src.ui.game3.map_name_popup")
+  if not okPop then s9log("map_name_popup", MapNamePopup) end
   if okPop and MapNamePopup and MapNamePopup.update then
     MapNamePopup.update(dt)
   end
 
   -- Tick location preview screen (map_preview_screen.c Task_RunMapPreviewScreenForest)
-  local okPrev, MapPreviewScreen = pcall(require, "src.ui.game3.map_preview_screen")
+  local okPrev, MapPreviewScreen = pcall(lazyReq, "src.ui.game3.map_preview_screen")
+  if not okPrev then s9log("map_preview_screen", MapPreviewScreen) end
   if okPrev and MapPreviewScreen and MapPreviewScreen.update then
     MapPreviewScreen.update(dt)
   end
@@ -213,11 +250,18 @@ function Hud.update(game, _dt)
     end
   end
 
+  -- Do not replay naming input or leak its closing press to the menu underneath.
+  if namingTick then return end
+
   -- Active stack modal menu input takes top precedence.
   -- When battle is active, overlays like EvolutionScene or modal stack menus still receive input.
   if Stack.busy() then
     local top = Stack.top()
-    if (not inBattle) or (top and (top.id == "evolution_scene" or top.id == "naming" or top.id == "summary_menu")) then
+    local evoTop = top and top.id == "evolution_scene" and (inputTop == nil or top == inputTop)
+    local pyramidBagTop = top and top.id == "rse_pyramid_bag"
+    local safariCaseTop = top and top.id == "rse_pokeblock_case"
+      and Battle._phase == "safari_pokeblock" and (inputTop == nil or top == inputTop)
+    if (not inBattle) or evoTop or pyramidBagTop or safariCaseTop or (top and top.id == "naming") then
       if update_top_menu(input) then
         return
       end
@@ -243,7 +287,9 @@ function Hud.update(game, _dt)
     if aPress then
       local onLast = Message.isWaiting()
         and Message._page >= #(Message._pages or {})
-      if Message._stay and onLast then
+      if not Message.isWaiting() then
+        Message.pressAB()
+      elseif Message._stay and onLast then
         -- Stay on last page: waitbuttonpress / yesnobox own the A press.
         if Hud._waitButton then
           local cb = Hud._waitButton
@@ -276,7 +322,7 @@ function Hud.update(game, _dt)
     if input:wasPressed("start") then
       local Field = package.loaded["src.core.game3.field"]
       local Runtime = package.loaded["src.core.game3.runtime"]
-        or require("src.core.game3.runtime")
+        or lazyReq("src.core.game3.runtime")
       local sample = Hud._fieldInput
       -- pokefirered/src/field_control_avatar.c:108
       local allowed = sample and sample.start or false
@@ -319,20 +365,24 @@ function Hud.openStartMenu(game, session)
   do
     local Space = package.loaded["src.core.game3.scripting.space"]
     local Flags = package.loaded["src.core.game3.scripting.flags"]
-      or require("src.core.game3.scripting.flags")
+      or lazyReq("src.core.game3.scripting.flags")
     local store = Space and Space.store
-    if store and Flags.IDS and Flags.IDS.OPENED_START_MENU then
-      local scene = Flags.getVar(store, nil, 0x4070)
+    local ids = lazyReq("src.ui.game3.screens").flags(session)
+    local flag = ids.IDS.OPENED_START_MENU
+    local var = ids.VAR_IDS.MAP_SCENE_PALLET_TOWN_SIGN_LADY
+    if store and flag and var then
+      local scene = Flags.getVar(store, nil, var)
       if scene >= 1 then
-        Flags.setFlag(store, nil, Flags.IDS.OPENED_START_MENU, true)
+        Flags.setFlag(store, nil, flag, true)
         if Space.persistSession then
-          pcall(Space.persistSession)
+          local okP, errP = pcall(Space.persistSession)
+          if not okP then s9log("persistSession", errP) end
         end
       end
     end
   end
   log("Start Menu on game3 display (FRLG 240x160)")
-  StartMenu.show({ session = session, game = game })
+  lazyReq("src.ui.game3.screens").get("start_menu", session).show({ session = session, game = game })
 end
 
 function Hud.openMessage(game, text, opts)
@@ -348,7 +398,8 @@ function Hud.openMessageStay(game, text, opts)
 end
 
 function Hud.openPc(game, session)
-  PcMenu.show({ session = session or (require("src.core.game3.runtime").getSession()) })
+  pcall(function() lazyReq("src.core.game3.audio").playSe(lazyReq("src.core.game3.se_ids").resolve("SE_PC_ON")) end) -- data/scripts/pc.inc:9
+  lazyReq("src.ui.game3.screens").get("pc", session).show({ session = session or (lazyReq("src.core.game3.runtime").getSession()) })
 end
 
 function Hud.ensure(_game, _mode)

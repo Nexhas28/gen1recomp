@@ -20198,6 +20198,10 @@
       24,
       24418
     ],
+    "DisplayBattleMenu.oldManName": [
+      15,
+      20242
+    ],
     "DittoPicBack": [
       11,
       17853
@@ -20329,6 +20333,10 @@
     "ExeggutorPicFront": [
       9,
       20950
+    ],
+    "FallingObjects_DeltaXs": [
+      30,
+      23821
     ],
     "FallingStar": [
       28,

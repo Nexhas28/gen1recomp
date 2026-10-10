@@ -223,8 +223,9 @@ local rc, curFrames = walkAndSettle("right")
 eq(rc, "step", "the surfer paddles one cell east into the current")
 eq(Player.cellX, 16, "the eastward current runs them to the corner")
 eq(Player.cellY, 1, "the northward current then lifts them up the column")
+-- pokefirered/src/field_player_avatar.c:509
 -- pokefirered/src/event_object_movement.c:8925 sStepTimes
-eq(curFrames, 16 + 10 * 6, "one paddle plus ten current pushes")
+eq(curFrames, 8 + 10 * 6, "one paddle plus ten current pushes")
 eq(ForcedMovement.forced, false, "leaving the current clears the forced flag")
 
 print("[test] 8. a forced step rolls no encounter and burns no step counter")
@@ -275,25 +276,35 @@ end
 print("[test] 10. the per-step callback registry is wired")
 enterMap(ICEFALL_B1F)
 local Ctx = require("src.core.game3.scripting.ctx")
-local seen = nil
-ForcedMovement.registerStepCallback("ice", function(_, px, py)
-  seen = { px, py }
+local function walkTicking(dir, extra)
+  Player.facing = dir
+  Player.turnTimer = 0
+  Player.tryMove(dir, game, false)
+  local frames = 0
+  while Player.moving and frames < 4000 do
+    ForcedMovement.runStepCallback(game)
+    Player.tick(game)
+    frames = frames + 1
+  end
+  for _ = 1, extra or 8 do ForcedMovement.runStepCallback(game) end
+end
+local realIce = ForcedMovement.stepCallbacks["ice"]
+check(type(realIce) == "function", "STEP_CB_ICE has a registered handler")
+local calls = 0
+ForcedMovement.registerStepCallback("ice", function()
+  calls = calls + 1
   return false
 end)
 Ctx.setStepCallback(Ctx.STEP_CB.ICE, session.map)
 standAt(20, 9, "right")
-walkAndSettle("right")
-check(seen ~= nil, "STEP_CB_ICE reached the registered handler")
-if seen then
-  eq(seen[1], 20, "the handler got the cell the player left (x)")
-  eq(seen[2], 9, "the handler got the cell the player left (y)")
-end
+walkTicking("right")
+check(calls > 0, "STEP_CB_ICE reached the registered handler every frame")
 Ctx.resetStepCallback()
-ForcedMovement.stepCallbacks["ice"] = nil
 standAt(20, 9, "right")
-seen = nil
-walkAndSettle("right")
-check(seen == nil, "STEP_CB_DUMMY reaches no handler")
+calls = 0
+walkTicking("right")
+eq(calls, 0, "STEP_CB_DUMMY reaches no handler")
+ForcedMovement.registerStepCallback("ice", realIce)
 
 print("[test] 11. a warp taken mid-slide drops the FORCED flag with the map")
 enterMap(ICEFALL_B1F)

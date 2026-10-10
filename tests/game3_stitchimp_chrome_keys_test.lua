@@ -3,6 +3,7 @@
 -- pokefirered/src/region_map.c:425
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+local CacheBlob = require("src.import.CacheBlob")
 
 local failed = 0
 local function check(cond, msg)
@@ -21,7 +22,7 @@ end
 local function slurp(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local s = f:read("*a")
+  local s = CacheBlob.decode(path, f:read("*a"))
   f:close()
   return s
 end
@@ -191,7 +192,7 @@ else
   local flyIcon = slurp(root .. "/" .. FLY_ICON_REL)
   check(flyIcon ~= nil, "the cache carries " .. FLY_ICON_REL)
   if flyIcon then
-    eq(#flyIcon, 16 * 16 * 4, "the cached fly icon is 16x16 RGBA")
+    eq(#flyIcon, 16 * 32 * 4, "the cached fly icon is both 16x16 frames, 16x32 RGBA")
     local opaque = 0
     for i = 4, #flyIcon, 4 do
       if flyIcon:byte(i) > 0 then opaque = opaque + 1 end

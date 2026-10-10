@@ -64,7 +64,7 @@ local STONES = {
 -- STAT_LABEL (#811) -- Strings(stat:upper()) alone is a dynamic argument
 -- the harvester can't discover.
 local STAT_LABEL = {
-  hp = Strings.source("HP"), attack = Strings.source("ATTACK"),
+  hp = Strings.source("HEALTH"), attack = Strings.source("ATTACK"),
   defense = Strings.source("DEFENSE"), speed = Strings.source("SPEED"),
   special = Strings.source("SPECIAL"), accuracy = Strings.source("ACCURACY"),
 }
@@ -93,14 +93,11 @@ function ItemEffects.healsHP(id)
       or id == "REVIVE" or id == "MAX_REVIVE"
 end
 
--- .useRareCandy prints over the still-drawn party menu
--- (engine/items/item_effects.asm:1392-1418); .useVitamin ends at
--- RemoveUsedItem the same way (engine/items/item_effects.asm:1315-1322);
--- stones keep the menu on screen (engine/items/item_effects.asm:772-793,
+-- engine/items/item_effects.asm:1223-1237, :1392-1418, :1315-1322, :772-793
 -- engine/pokemon/evos_moves.asm:120-128
--- (engine/items/item_effects.asm:2022-2039)
+-- engine/items/item_effects.asm:2022-2039
 function ItemEffects.keepsPartyMenuOpen(id)
-  return ItemEffects.healsHP(id) or id == "RARE_CANDY"
+  return ItemEffects.isBattleMedicine(id) or id == "RARE_CANDY"
       or VITAMINS[id] ~= nil or ItemEffects.isStone(id)
       or id == "ELIXER" or id == "MAX_ELIXER"
       or id == "ETHER" or id == "MAX_ETHER" or id == "PP_UP"
@@ -327,7 +324,7 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
       local stat = X_ITEMS[itemId]
       local cur = b.stages[stat] or 0
       -- ItemUseXStat: PrintItemUseTextAndRemoveItem, then StatModifierUpEffect
-      if cur >= 6 then
+      if cur >= 6 or require("src.battle.Damage").statAtCap(battle, b, stat) then
         return "consumed", { used }, {
           useJingle = true,
           afterMessages = { romText(data, "_NothingHappenedText",
@@ -450,7 +447,9 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
       target.status = nil
       cureActiveToxic(battle, target)
     end
-    require("src.core.Sound").play(data, "Heal_HP")
+    local Sound = require("src.core.Sound")
+    if battle then Sound.stopLoop("Low_Health_Alarm") end
+    Sound.play(data, "Heal_HP")
     return "consumed", msgs, { healedFrom = before }
   end
 
@@ -507,21 +506,23 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
 
   if STONES[itemId] then
     if not target then return "failed", { noEffect(data) } end
-    -- Yellow's starter Pikachu never evolves: ItemUseEvoStone runs
-    -- IsThisPartyMonStarterPikachu (OT identity match) before
-    -- TryEvolvingMon and bails with the voiced cry + RefusingText.
-    -- The stone is NOT consumed on the refuse path.
-    if target.species == "PIKACHU"
-       and require("src.core.GameVersion").isYellow()
-       and target.ot == save.player.name
-       and target.otId == save.player.id then
-      require("src.core.Sound").playCry(data, "PIKACHU")
-      return "failed", { romText(data, "_RefusingText",
-        "%s\nis refusing!", monName(data, target)) }
-    end
     local speciesDef = data.pokemon[target.species]
     for _, evo in ipairs(speciesDef.evolutions) do
       if evo.method == "ITEM" and evo.item == itemId then
+        -- engine/items/item_effects.asm:810
+        -- Yellow's starter Pikachu never evolves: ItemUseEvoStone runs
+        -- IsThisPartyMonStarterPikachu (OT identity match) before
+        -- TryEvolvingMon and bails with the voiced cry + RefusingText.
+        -- The stone is NOT consumed on the refuse path.
+        if require("src.core.GameVersion").isYellow()
+           and require("src.world.PikachuFollower").isStarterPikachu(save, target) then
+          require("src.core.Sound").playCry(data, "PIKACHU")
+          -- engine/items/item_effects.asm:821
+          save.pikachuEmotionModifier = 4
+          save.pikachuMood = 0x82
+          return "failed", { romText(data, "_RefusingText",
+            "%s\nis refusing!", monName(data, target)) }
+        end
         -- (engine/items/item_effects.asm:779-781)
         require("src.core.Sound").play(data, "Heal_Ailment")
         return "consumed", nil, { evolveTo = evo.species }
@@ -553,8 +554,10 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
     -- Spanish ROM puts the stat before the name), so the extracted line
     -- cannot be filled positionally; the engine wording stands
     -- engine/items/item_effects.asm:1313
-    return "consumed", { Strings("%s's %s\nrose!", monName(data, target),
-      Strings(STAT_LABEL[vitaminStat])) }, { useJingle = true }
+    require("src.core.Sound").play(data, "Heal_Ailment")
+    -- data/text/text_6.asm:71
+    return "consumed", { Strings("%s's\n%s rose.", monName(data, target),
+      Strings(STAT_LABEL[vitaminStat])) }
   end
 
   -- PP UP boosts the move the player picked (ItemUsePPUp's move menu)
@@ -568,6 +571,11 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
       mv.pp = mv.pp + math.floor(mdef.pp / 5)
       return "consumed", { romText(data, "_PPIncreasedText",
         "%s's PP\nincreased!", mdef.name) }
+    end
+    -- engine/items/item_effects.asm:2001-2006
+    if mdef then
+      return "ppmaxed", { romText(data, "_PPMaxedOutText",
+        "%s's PP\nis maxed out.", mdef.name) }
     end
     return "failed", { noEffect(data) }
   end
@@ -612,6 +620,11 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
     -- on that carry -- surfing refuses the rod with the same OAK text as
     -- the mid-battle case above, no rod-specific message (#533)
     if ow and ow.player and ow.player.surfing then
+      return "failed", { notTime(data, save) }
+    end
+    -- FishingInit's `ret c` -> ItemUseNotTime -> ItemUseFailed, so a rod
+    -- away from water leaves the bag up (item_effects.asm:1893-1901)
+    if ow and ow.facingIsShoreOrWater and not ow:facingIsShoreOrWater() then
       return "failed", { notTime(data, save) }
     end
     return "fish", itemId

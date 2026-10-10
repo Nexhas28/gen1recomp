@@ -22,7 +22,8 @@ local function stack(...) return { states = { ... } } end
 
 local battle = { isBattle = true }
 local overworld = { isOverworld = true }
-local overlay = {} -- a party menu/choice box/naming screen/text box: no marker
+local overlay = {}
+local menu = { isMenu = true }
 
 eq(Game.speedCategoryInStack(nil), "menu", "a nil stack falls to menu")
 eq(Game.speedCategoryInStack(stack()), "menu", "an empty stack falls to menu")
@@ -35,16 +36,20 @@ eq(Game.speedCategoryInStack(stack(battle)), "battle",
   "a battle alone resolves to battle")
 
 eq(Game.speedCategoryInStack(stack(overworld, overlay)), "overworld",
-  "a menu opened while walking inherits overworld")
+  "unmarked dialogue while walking inherits overworld")
 eq(Game.speedCategoryInStack(stack(battle, overlay)), "battle",
-  "a menu opened mid-battle inherits battle, not menu")
+  "unmarked battle dialogue inherits battle")
 eq(Game.speedCategoryInStack(stack(overworld, overlay, overlay)), "overworld",
   "the inheritance walk sees through more than one stacked overlay")
 
 eq(Game.speedCategoryInStack(stack(overworld, battle)), "battle",
   "a battle opened over the overworld reads as battle, not the overworld underneath it")
 eq(Game.speedCategoryInStack(stack(overworld, battle, overlay)), "battle",
-  "and a menu on top of THAT still reads as battle")
+  "dialogue on top of battle still reads as battle")
+eq(Game.speedCategoryInStack(stack(overworld, menu)), "menu",
+  "an explicit field menu owns MENU SPEED")
+eq(Game.speedCategoryInStack(stack(overworld, battle, menu, overlay)), "menu",
+  "dialogue over an explicit battle menu inherits MENU SPEED")
 
 -- ------- Game:_resolveLogicSpeed: category -> save.options key -> clamp
 
@@ -66,6 +71,7 @@ do
   local g = gameWith({ battle },
     { speedOverworld = 4, speedBattle = 10, speedMenu = 2 })
   eq(g:_resolveLogicSpeed(), 10, "battle reads speedBattle")
+  eq(g:logicSpeed(), 10, "and a local battle runs at BATTLE SPEED")
 end
 do
   local g = gameWith({ overlay },
@@ -97,9 +103,15 @@ do
   eq(g:logicSpeed(), 1, "an open linkNet forces 1X the same way")
 end
 do
-  local g = gameWith({ battle }, { speedBattle = 50 })
+  local g = gameWith({ overworld }, { speedOverworld = 50 })
   g.linkNet = { closed = true }
   eq(g:logicSpeed(), 50, "a CLOSED linkNet does not force 1X")
+end
+do
+  local g = gameWith({ overworld, battle }, { speedOverworld = 50, speedBattle = 50 })
+  g.speedOverride = 20
+  eq(g:logicSpeed(), 20, "speedOverride wins in a local battle")
+  check(not g:speedLocked(), "a local battle is not speed locked")
 end
 do
   local g = gameWith({ overworld }, { speedOverworld = 4 })
@@ -173,9 +185,19 @@ do
   function g:writeOptions() writeOptions.calls = writeOptions.calls + 1 end
   g:_cycleSpeed(1)
   eq(g.save.options.speedBattle, 2, "cycling during battle bumps speedBattle")
-  eq(g.save.options.speedOverworld, 1, "...and leaves speedOverworld alone")
-  eq(g.save.options.speedMenu, 1, "...and leaves speedMenu alone")
+  eq(g.save.options.speedOverworld, 2, "...and syncs speedOverworld")
+  eq(g.save.options.speedMenu, 2, "...and syncs speedMenu")
   eq(writeOptions.calls, 1, "a successful cycle persists the option")
+end
+do
+  local calls = 0
+  local g = gameWith({ overworld },
+    { speedOverworld = 1, speedBattle = 1, speedMenu = 1 })
+  function g:writeOptions() calls = calls + 1 end
+  g.linkSession = true
+  g:_cycleSpeed(1)
+  eq(g.save.options.speedOverworld, 1, "cycling during link play is ignored")
+  eq(calls, 0, "...and persists nothing")
 end
 do
   local g = gameWith({ overworld },
@@ -183,7 +205,8 @@ do
   function g:writeOptions() end
   g:_cycleSpeed(1)
   eq(g.save.options.speedOverworld, 2, "cycling on the overworld bumps speedOverworld")
-  eq(g.save.options.speedBattle, 1, "...and leaves speedBattle alone")
+  eq(g.save.options.speedBattle, 2, "...and syncs speedBattle")
+  eq(g.save.options.speedMenu, 2, "...and syncs speedMenu")
 end
 do
   local g = gameWith({ overlay },
@@ -191,6 +214,21 @@ do
   function g:writeOptions() end
   g:_cycleSpeed(1)
   eq(g.save.options.speedMenu, 2, "cycling in a menu bumps speedMenu")
+  eq(g.save.options.speedOverworld, 2, "...and syncs speedOverworld")
+end
+do
+  local g = gameWith({ overworld },
+    { speedOverworld = 3, speedBattle = 10, speedMenu = 1 })
+  function g:writeOptions() end
+  g:_cycleSpeed(-1)
+  eq(g.save.options.speedOverworld, 2, "speed down steps the active category")
+  eq(g.save.options.speedBattle, 2, "speed down syncs battle")
+  eq(g.save.options.speedMenu, 2, "speed down syncs menu")
+  g:_cycleSpeed(-1)
+  g:_cycleSpeed(-1)
+  eq(g.save.options.speedOverworld, GameSpeed.LEVELS[#GameSpeed.LEVELS],
+    "wrapping down from NORMAL lands on the top level for every category")
+  eq(g.save.options.speedMenu, GameSpeed.LEVELS[#GameSpeed.LEVELS], "including menu")
 end
 
 -- A cart may narrow the ladder (CartManifest's `speeds`), and returning to

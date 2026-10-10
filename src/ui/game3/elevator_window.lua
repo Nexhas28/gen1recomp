@@ -2,7 +2,7 @@
 
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local ElevatorWindow = {}
 
@@ -64,12 +64,30 @@ function ElevatorWindow.labelX()
   return ElevatorWindow.LEFT * 8 + ElevatorWindow.LABEL_RIGHT - w
 end
 
+local function rseLayout()
+  local ok, P = pcall(function() return require("src.core.game3.profile").forSession(nil) end)
+  return ok and P and P.ui and P.ui.elevatorWindow or nil
+end
+
 function ElevatorWindow.draw()
   if not ElevatorWindow.visible then return end
+  local L = rseLayout()
+  if L then
+    local t = Window.template(L.left, L.top, L.width, L.height)
+    Window.stdFrame(t)
+    local function centered(text, y)
+      local w = FrlgFont.measure(text)
+      -- pokeemerald/src/field_specials.c:1893
+      Window.printPx(text, L.left * 8 + math.floor((L.center - w) / 2), L.top * 8 + y)
+    end
+    centered(RomText.plain(L.nowOn), L.titleY)
+    if ElevatorWindow._label then centered(ElevatorWindow._label, L.labelY) end
+    return
+  end
   local left, top = TEMPLATE.tilemapLeft, TEMPLATE.tilemapTop
   Window.stdFrame(TEMPLATE)
   -- pokefirered/src/field_specials.c:1105
-  Window.printPx(Strings("Now on:"), left * 8, top * 8 + 2)
+  Window.printPx(RomText.plain("gText_NowOn"), left * 8, top * 8 + 2)
   local label = ElevatorWindow._label
   if label then
     -- pokefirered/src/field_specials.c:1108

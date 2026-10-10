@@ -85,6 +85,7 @@ YELLOW_EXTRA_SYMBOLS = (
     "YellowIntroCloudGFX",
     "PikachuCriesPointerTable",
     "CGBBasePalettes",
+    "DisplayBattleMenu.profOakName",
     # Jessie & James share the ROCKET trainer class but battle behind their
     # own pic (home/trainers2.asm IsFightingJessieJames) (#439)
     "JessieJamesPic",
@@ -108,17 +109,13 @@ YELLOW_EXTRA_SYMBOLS = (
     # picks OldManPicBack for BATTLE_TYPE_OLD_MAN but ProfOakPicBack for
     # BATTLE_TYPE_PIKACHU, the Pallet Town catch scene (#557).
     "ProfOakPicBack",
-    # Base frames for the framed portrait TalkToPikachu draws, one per
-    # PikaPicAnimScript (data/pikachu/pikachu_pic_animation.asm).  These are
-    # raw address labels because the pikapic blobs carry no named symbols;
-    # RomExtractor's PIKAPIC_BASE table indexes them positionally, so the
-    # order here is not load bearing but every entry must resolve (#561).
-    "Pic_e4000", "Pic_e411c", "Pic_e4272", "Pic_e4383", "Pic_e458b",
-    "Pic_e467b", "Pic_e476e", "Pic_e49d1", "Pic_e4b39", "Pic_e4c3e",
-    "Pic_e5000", "Pic_e523f", "Pic_e548e", "Pic_e56d1", "Pic_e5924",
-    "Pic_e5b7d", "Pic_e5ddd", "GFX_e6020", "Pic_e6340", "Pic_e6587",
-    "Pic_e67d6", "GFX_e6e6f", "GFX_e718f", "GFX_e74af", "Pic_e77cf",
-    "Pic_f0abf", "Pic_f0cf4",
+    # engine/pikachu/pikachu_emotions.asm:264, engine/pikachu/pikachu_pic_animation.asm:171
+    "PikachuEmotionTable", "PikachuMovementDatabase", "SineWave_3f",
+    "PikaPicAnimPointers", "PikaPicAnimBGFramesPointers",
+    "PikaPicTilemapPointers", "PikaPicAnimGFXHeaders",
+    "PikachuMoodLookupTable", "PikaPicAnimationScriptPointerLookupTable",
+    "MapSpecificPikachuExpression.Emotions", "IsPlayerPikachuAsleepInParty",
+    "PikaPicAnimThunderboltPals",
     # Yellow-only overworld player surf sprite, loaded outside
     # SpriteSheetPointerTable (LoadSurfingPlayerSpriteGraphics2) --
     # needs its own extract like RedBikeSprite. (RFC 0001)

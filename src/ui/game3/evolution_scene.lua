@@ -13,9 +13,23 @@ local Audio = require("src.core.game3.audio")
 local LearnMove = require("src.core.game3.battle.learn_move")
 local SE = require("src.core.game3.se_ids")
 local Oam = require("src.core.game3.oam")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local EvolutionScene = {}
+
+-- pokeruby/src/evolution_scene.c:551
+local RS_EVO_TEXT = {
+  gText_PkmnIsEvolving = "BattleText_StartEvo",
+  gText_CongratsPkmnEvolved = "BattleText_FinishEvo",
+  gText_PkmnStoppedEvolving = "BattleText_StopEvo",
+  gText_EllipsisQuestionMark = "BattleText_StopEvo",
+}
+local function evoBox(key, vars)
+  if RS_EVO_TEXT[key] and not RomText.has(key) then
+    return RomText.box(RS_EVO_TEXT[key], { stringVars = vars, battle = { [2] = vars[1], [3] = vars[2] } })
+  end
+  return RomText.box(key, { stringVars = vars })
+end
 
 EvolutionScene.open = false
 EvolutionScene._mon = nil
@@ -59,16 +73,60 @@ local function clean_string(s)
   return (s:gsub("%z+", ""):match("^%s*(.-)%s*$")) or ""
 end
 
+local Song = require("src.core.game3.song_ids")
+
+-- pokefirered/src/sound.c:50
+local NON_MAP_SONGS = {
+  MUS_HEAL = true, MUS_LEVEL_UP = true, MUS_OBTAIN_ITEM = true, MUS_EVOLVED = true, MUS_OBTAIN_BADGE = true,
+  MUS_OBTAIN_TMHM = true, MUS_OBTAIN_BERRY = true, MUS_EVOLUTION_INTRO = true, MUS_EVOLUTION = true,
+  MUS_RS_VS_GYM_LEADER = true, MUS_RS_VS_TRAINER = true, MUS_SCHOOL = true, MUS_SLOTS_JACKPOT = true,
+  MUS_SLOTS_WIN = true, MUS_MOVE_DELETED = true, MUS_TOO_BAD = true, MUS_DEX_RATING = true,
+  MUS_OBTAIN_KEY_ITEM = true, MUS_POKE_FLUTE = true,
+  -- pokeemerald/src/sound.c:37
+  MUS_AWAKEN_LEGEND = true, MUS_RG_POKE_FLUTE = true, MUS_RG_OBTAIN_KEY_ITEM = true, MUS_RG_DEX_RATING = true,
+  MUS_OBTAIN_B_POINTS = true, MUS_OBTAIN_SYMBOL = true, MUS_REGISTER_MATCH_CALL = true,
+}
+
 local function is_fanfare_or_evo_song(id)
   id = tonumber(id)
   if not id or id == 0 or id == 0xFFFF then return true end
-  if id >= 256 and id <= 271 then return true end
-  if id == 317 or id == 318 or id == 338 then return true end
-  return false
+  local name = Song.nameOf(id)
+  return name ~= nil and NON_MAP_SONGS[name] == true
 end
 
 function EvolutionScene.isOpen()
   return EvolutionScene.open
+end
+
+-- pokefirered/src/evolution_scene.c:266
+local function evo_pic(species)
+  local mon = EvolutionScene._mon
+  return Pokemon.frontPic(Pokemon.picSpecies(species, mon and mon.personality), nil, Pokemon.isShiny(mon),
+    mon and mon.personality, "evolution")
+end
+
+-- pokeemerald/src/evolution_scene.c:1674
+local function evo_mon_anim(species)
+  local MonAnim = require("src.core.game3.mon_anim")
+  if not MonAnim.enabled() then return false end
+  if EvolutionScene._monAnim then MonAnim.stop(EvolutionScene._monAnim) end
+  local sp = tonumber(species) or 0
+  local sprite = MonAnim.run(MonAnim.newSprite(sp, { data = { [2] = sp } }), { tasksFirst = false })
+  sprite.evoSpecies = species
+  EvolutionScene._monAnim = sprite
+  MonAnim.doFront(sprite, sp, false, 0, { cry = function(s, pan) pcall(Audio.playCry, s, 0, pan) end })
+  return true
+end
+
+local function evo_anim_draw(species, pic, cx, cy)
+  local sprite = EvolutionScene._monAnim
+  if not (sprite and sprite.evoSpecies == species and pic and pic.image) then return false end
+  local MonAnim = require("src.core.game3.mon_anim")
+  local mon = EvolutionScene._mon
+  local f = MonAnim.framePic(Pokemon.picSpecies(species, mon and mon.personality), sprite.frame, Pokemon.isShiny(mon))
+  love.graphics.setColor(1, 1, 1, 1)
+  MonAnim.draw(sprite, (f or pic).image, cx, cy)
+  return true
 end
 
 --- Start an evolution scene.
@@ -83,6 +141,7 @@ function EvolutionScene.start(mon, postSpecies, opts)
   end
 
   EvolutionScene.open = true
+  EvolutionScene._monAnim = nil
   EvolutionScene._mon = mon
   EvolutionScene._preSpecies = Pokemon.speciesOf(mon) or 1
   EvolutionScene._postSpecies = Pokemon.speciesFromName(postSpecies) or tonumber(postSpecies) or EvolutionScene._preSpecies
@@ -132,13 +191,13 @@ function EvolutionScene.start(mon, postSpecies, opts)
   end
 
   -- Ensure pre-evolution and post-evolution pics are cached
-  Pokemon.frontPic(EvolutionScene._preSpecies)
-  Pokemon.frontPic(EvolutionScene._postSpecies)
+  evo_pic(EvolutionScene._preSpecies)
+  evo_pic(EvolutionScene._postSpecies)
 
   -- Open message box in battle frame
   if Message.setFrame then Message.setFrame("battle") end
 
-  Stack.push("evolution_scene", EvolutionScene, { hideBelow = true })
+  Stack.push("evolution_scene", EvolutionScene, { hideBelow = true, fullscreen = true })
   return true
 end
 
@@ -206,12 +265,9 @@ end
 
 local function open_pending_yesno()
   if EvolutionScene._pendingYesNo == nil then return end
-  if not (Message.isOpen and Message.isOpen()) then
-    EvolutionScene._pendingYesNo = nil
-    return
-  end
   -- pokefirered/src/evolution_scene.c:912
-  if not (Message.isWaiting and Message.isWaiting()) then return end
+  if Message.isOpen and Message.isOpen()
+      and not (Message.isWaiting and Message.isWaiting()) then return end
   local cb = EvolutionScene._pendingYesNo
   EvolutionScene._pendingYesNo = nil
   local Choice = require("src.ui.game3.choice")
@@ -312,10 +368,11 @@ function EvolutionScene.handleInput(input)
 
   local Choice = package.loaded["src.ui.game3.choice"]
   if Choice and Choice.active then
+    -- pokefirered/src/evolution_scene.c:925
     if input:wasPressed("up") then
-      Choice.move(-1)
+      if Choice.cursor ~= 1 then Choice.move(-1) end
     elseif input:wasPressed("down") then
-      Choice.move(1)
+      if Choice.cursor == 1 then Choice.move(1) end
     elseif input:wasPressed("a") then
       Choice.confirm()
     elseif input:wasPressed("b") then
@@ -332,7 +389,8 @@ function EvolutionScene.handleInput(input)
       Audio.playSong(0)
       pcall(function() Audio.playSe(SE.SE_NOT_EFFECTIVE or 2) end)
       local fromName = Pokemon.displayMonName(EvolutionScene._mon)
-      Message.show(Strings("Huh? %s\nstopped evolving!", fromName), { frame = "battle" })
+      -- pokefirered/src/evolution_scene.c:857
+      Message.show(evoBox("gText_PkmnStoppedEvolving", { fromName }), { frame = "battle" })
       return
     end
   end
@@ -418,7 +476,7 @@ function EvolutionScene.update(dt)
     EvolutionScene._timer = 0
     Audio.playSong(0)
     -- pokefirered/src/battle_message.c:1277 gText_EllipsisQuestionMark
-    Message.show(Strings("……?"), { frame = "battle" })
+    Message.show(evoBox("gText_EllipsisQuestionMark", { Pokemon.displayMonName(EvolutionScene._mon) }), { frame = "battle" })
     return
   end
 
@@ -430,7 +488,8 @@ function EvolutionScene.update(dt)
       EvolutionScene._state = "intro_msg"
       EvolutionScene._timer = 0
       local fromName = Pokemon.displayMonName(EvolutionScene._mon)
-      Message.show(Strings("What?\n%s is evolving!", fromName), { frame = "battle" })
+      -- pokefirered/src/evolution_scene.c:678
+      Message.show(evoBox("gText_PkmnIsEvolving", { fromName }), { frame = "battle" })
     end
 
   elseif st == "intro_msg" then
@@ -438,15 +497,18 @@ function EvolutionScene.update(dt)
     if EvolutionScene._timer >= 45 then
       EvolutionScene._state = "intro_cry"
       EvolutionScene._timer = 0
-      Audio.playCry(EvolutionScene._preSpecies)
+      if not evo_mon_anim(EvolutionScene._preSpecies) then Audio.playCry(EvolutionScene._preSpecies) end
     end
 
   elseif st == "intro_cry" then
     EvolutionScene._timer = EvolutionScene._timer + 1
-    if EvolutionScene._timer >= 40 then
+    local ma = EvolutionScene._monAnim
+    -- pokeemerald/src/evolution_scene.c:676
+    if ma and require("src.core.game3.mon_anim").busy(ma) then EvolutionScene._timer = 0 end
+    if EvolutionScene._timer >= (ma and 1 or 40) then
       EvolutionScene._state = "intro_sound"
       EvolutionScene._timer = 0
-      Audio.playSong(263, { loop = false }) -- MUS_EVOLUTION_INTRO
+      Audio.playSong(Song.MUS_EVOLUTION_INTRO, { loop = false })
     end
 
   elseif st == "intro_sound" then
@@ -454,7 +516,7 @@ function EvolutionScene.update(dt)
     if EvolutionScene._timer >= 35 then
       EvolutionScene._state = "start_music"
       EvolutionScene._timer = 0
-      Audio.playSong(264, { restart = true, loop = true }) -- MUS_EVOLUTION
+      Audio.playSong(Song.MUS_EVOLUTION, { restart = true, loop = true })
     end
 
   elseif st == "start_music" then
@@ -518,7 +580,7 @@ function EvolutionScene.update(dt)
     if EvolutionScene._timer >= 30 then
       EvolutionScene._state = "evo_cry"
       EvolutionScene._timer = 0
-      Audio.playCry(EvolutionScene._postSpecies)
+      if not evo_mon_anim(EvolutionScene._postSpecies) then Audio.playCry(EvolutionScene._postSpecies) end
     end
 
   elseif st == "evo_cry" then
@@ -527,11 +589,13 @@ function EvolutionScene.update(dt)
       EvolutionScene._state = "congrats"
       EvolutionScene._timer = 0
       Audio.stopCry()
-      Audio.playFanfare(259) -- MUS_EVOLVED
+      Audio.playFanfare(Song.MUS_EVOLVED)
 
       local fromName = EvolutionScene._nick or clean_string(Pokemon.name(EvolutionScene._preSpecies))
       local intoName = Pokemon.name(EvolutionScene._postSpecies) or "POKéMON"
-      Message.show(Strings("Congratulations! Your %s\nevolved into %s!", fromName, intoName), { frame = "battle" })
+      -- pokefirered/src/evolution_scene.c:775
+      Message.show(evoBox("gText_CongratsPkmnEvolved", { fromName, intoName }),
+        { frame = "battle" })
     end
 
   elseif st == "cancel" then
@@ -583,8 +647,8 @@ function EvolutionScene.draw()
 
   -- 4. Draw Pokémon sprites (silhouette or full color)
   local st = EvolutionScene._state
-  local prePic = Pokemon.frontPic(EvolutionScene._preSpecies)
-  local postPic = Pokemon.frontPic(EvolutionScene._postSpecies)
+  local prePic = evo_pic(EvolutionScene._preSpecies)
+  local postPic = evo_pic(EvolutionScene._postSpecies)
 
   if st == "cycle" then
     -- Solid white silhouette shader
@@ -608,14 +672,16 @@ function EvolutionScene.draw()
 
   elseif st == "cancel" or st == "fade_in" or st == "intro_msg" or st == "intro_cry" or st == "intro_sound" or st == "start_music" then
     -- Normal pre-evolution sprite
-    if prePic and prePic.image then
+    if evo_anim_draw(EvolutionScene._preSpecies, prePic, cx, cy) then
+    elseif prePic and prePic.image then
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.draw(prePic.image, cx, cy, 0, 1, 1, 32, 32)
     end
 
   else
     -- Normal post-evolution sprite (flash_reveal, evo_cry, congrats, learn_moves)
-    if postPic and postPic.image then
+    if evo_anim_draw(EvolutionScene._postSpecies, postPic, cx, cy) then
+    elseif postPic and postPic.image then
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.draw(postPic.image, cx, cy, 0, 1, 1, 32, 32)
     end

@@ -495,9 +495,9 @@ check(bm.items[1].label == "UP" and bm.items[1].right == "UP/D-UP"
   and bm.items[7].label == "START" and bm.items[7].right == "ESC/START"
   and bm.items[8].label == "SELECT" and bm.items[8].right == "TAB/BACK",
   "with no rebind the rows mirror the fixed map, key and pad both (#589)")
-check(bm.items[9].label == "SPEED -" and bm.items[9].right == "LB"
-  and bm.items[10].label == "SPEED +" and bm.items[10].right == "RB",
-  "and the GAME SPEED shortcuts show the shoulders they sit on (#1922)")
+check(bm.items[9].label == "SPEED -" and bm.items[9].right == "0/LB"
+  and bm.items[10].label == "SPEED +" and bm.items[10].right == "1/RB",
+  "and the GAME SPEED shortcuts show their keys and the shoulders they sit on (#1922)")
 check(cbGame.save.options.bindings == nil,
   "opening the screen alone writes nothing")
 
@@ -769,8 +769,9 @@ check(title.logo and title.logo.path == "mods/x/logo.png",
 check(title.version and title.version.path == "mods/x/ribbon.png",
   "versionRibbon wins as the file-12 patch key")
 -- pin against the shipped data itself: a real boot must load the logo
--- art, never fall back to the ASCII placeholder
-title = TitleState.new({ data = { field = dofile("data/generated/field.lua") } },
+local Data = require("src.core.Data")
+if not Data.field then Data:load() end
+title = TitleState.new({ data = { field = Data.field } },
                        {})
 check(title.logo and title.logo.path
   == "assets/generated/title/pokemon_logo.png",
@@ -977,7 +978,7 @@ do
   local fgame = { data = {}, stack = newStack(), input = newInput(),
                   save = { player = {} } }
   local fspeech = OakSpeech.new(fgame, nil)
-  fspeech.shrink = { frame = 103 } -- past the shrink timeline's end
+  fspeech.shrink = { frame = OakSpeech.SHRINK_END } -- past the shrink timeline's end
   fgame.stack:push(fspeech)
   fspeech.picReveal = nil -- skip the intro fade so update reaches shrink
   local finishes = 0

@@ -3,6 +3,7 @@
 -- Run: luajit tests/game3_battle_special_moves_test.lua
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_battle_special_moves_test")
 
 local State = require("src.core.game3.battle.state")
 local Engine = require("src.core.game3.battle.engine")
@@ -712,7 +713,7 @@ do
 end
 
 do
-  -- Rapid Spin clears spikes, leech seed, and trapping
+  -- pokefirered/src/battle_script_commands.c:8435
   local spinId = Moves.numForName("RAPID_SPIN")
   local st = State.new({
     wild = true,
@@ -724,15 +725,27 @@ do
   st.playerSide.spikes = 1
   st.player.leechSeed = true
   st.player.trapped = true
+  st.player.expTrapTurns = 3
+  st.player.expTrapSource = st.enemy
+  st.player.expTrapMove = 35
 
   local ad = setup_test_battle(st)
   local out = {}
   Engine.resolveMove(st.player, st.enemy, spinId, 1, ad, st, out)
-  check(st.playerSide.spikes == 0, "Rapid Spin removed Spikes from side")
+  check(st.player.expTrapTurns == nil, "Rapid Spin freed the wrap")
   check(st.player.leechSeed == nil, "Rapid Spin removed Leech Seed")
   check(st.player.trapped == nil, "Rapid Spin removed trapping effect")
+  check(st.playerSide.spikes == 0, "Rapid Spin removed Spikes in the same use")
   local joined = table.concat(out, " || ")
-  check(joined:find("blew away\nSPIKES!", 1, true) ~= nil, "Spikes blown away message printed")
+  local iWrap = joined:find("got free of", 1, true)
+  check(joined:find("WRAP!", 1, true) ~= nil, "Wrap freed message names WRAP")
+  local iSeed = joined:find("shed\nLEECH SEED!", 1, true)
+  local iSpikes = joined:find("blew away\nSPIKES!", 1, true)
+  check(iWrap ~= nil, "Wrap freed message printed")
+  check(iSeed ~= nil, "Leech Seed shed message printed")
+  check(iSpikes ~= nil, "Spikes blown away message printed")
+  check(iWrap and iSeed and iSpikes and iWrap < iSeed and iSeed < iSpikes,
+    "Rapid Spin frees wrap, then Leech Seed, then Spikes")
 end
 
 print("\n=== 8. Two-Turn Charging, Semi-Invulnerable, and Recharge (Solar Beam, Skull Bash, Fly, Hyper Beam) ===")
@@ -761,6 +774,33 @@ do
   Engine.resolveMove(st.player, st.enemy, sbId, 1, ad, st, out2)
   check(ad:hp(st.enemy) < 100, "Foe takes damage on unleash turn 2")
   check(st.player.twoTurnMove == nil, "twoTurnMove is cleared after unleash")
+end
+
+do
+  -- Solarbeam in Sun (e.g. Groudon Drought) fires in 1 turn and uses unleash animation (turn=1)
+  local sbId = Moves.numForName("SOLARBEAM") or Moves.numForName("SOLAR_BEAM")
+  local st = State.new({
+    wild = true,
+    weather = "SUN",
+    playerParty = { { species = 383, level = 50, hp = 200, maxHp = 200, moves = { sbId }, pp = { 10 },
+      attack = 150, defense = 140, spAtk = 100, spDef = 90, speed = 90 } },
+    foeMon = { species = 19, level = 20, hp = 100, maxHp = 100, moves = { 33 }, pp = { 35 },
+      attack = 20, defense = 50, spAtk = 20, spDef = 50, speed = 20 },
+  })
+  local ad = setup_test_battle(st)
+  local out = {}
+  Engine.resolveMove(st.player, st.enemy, sbId, 1, ad, st, out)
+  check(ad:hp(st.enemy) < 100, "Foe takes damage immediately in Sun without a charge turn")
+  check(st.player.twoTurnMove == nil, "No twoTurnMove locked in Sun")
+  local moveEvents = {}
+  for _, ev in ipairs(ad:events()) do
+    if ev.kind == "move" and ev.moveId == sbId then
+      moveEvents[#moveEvents + 1] = ev
+    end
+  end
+  check(#moveEvents == 1, "Exactly one move event generated for instant Solar Beam")
+  check(moveEvents[1] and moveEvents[1].turn == 1,
+    "Solar Beam animation event uses turn=1 (unleash beam), got turn=" .. tostring(moveEvents[1] and moveEvents[1].turn))
 end
 
 do

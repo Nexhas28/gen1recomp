@@ -4,6 +4,9 @@ local Chrome = require("src.ui.game3.chrome")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Pokemon = require("src.core.game3.pokemon")
 local Extract = require("src.import.gba.extract_island1")
+local Profile = require("src.core.game3.profile")
+local RsTrade = require("src.ui.game3.rs.trade_policy")
+local CacheBlob = require("src.import.CacheBlob")
 
 local TradeSceneUi = {}
 
@@ -43,16 +46,16 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if type(d) == "string" and #d > 0 then return d end
   end
   for _, p in ipairs({ rel, "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")) }) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -89,12 +92,21 @@ local SHEETS = {
   cableEnd = "cable_end",
   linkMonGlow = "link_mon_glow",
   linkMonShadow = "link_mon_shadow",
+  monShadowBg = "mon_shadow_bg",
   gbaFlash = "gba_screen_flash",
   ball = "ball",
 }
 
 -- pokefirered/src/trade_scene.c:1220 LoadTradeGbaSpriteGfx
 function TradeSceneUi.loadArt()
+  local version = Profile.forSession().id
+  if TradeSceneUi._artVersion ~= version then TradeSceneUi.invalidate(); TradeSceneUi._artVersion = version end
+  if RsTrade.matches(version) then
+    if TradeSceneUi._artTried then return TradeSceneUi._art end
+    TradeSceneUi._artTried = true
+    TradeSceneUi._art = require("src.ui.game3.rs.trade_scene_chrome").load(read_bytes, load_lua, cache_root())
+    return TradeSceneUi._art
+  end
   if TradeSceneUi._artTried then return TradeSceneUi._art end
   TradeSceneUi._artTried = true
   local man = load_lua(trade_root() .. "/manifest.lua")
@@ -133,6 +145,7 @@ end
 function TradeSceneUi.invalidate()
   TradeSceneUi._art = nil
   TradeSceneUi._artTried = false
+  TradeSceneUi._artVersion = nil
 end
 
 function TradeSceneUi.isOpen()
@@ -141,7 +154,7 @@ end
 
 function TradeSceneUi.start(core)
   TradeSceneUi._core = core
-  Stack.push("trade_scene", TradeSceneUi, { hideBelow = true })
+  Stack.push("trade_scene", TradeSceneUi, { hideBelow = true, fullscreen = true })
 end
 
 function TradeSceneUi.close()
@@ -212,9 +225,19 @@ function TradeSceneUi.draw()
   local s = core.state()
   if not s then return end
   local art = s.art
+  if s.nativeRS and art and art.native then
+    require("src.ui.game3.rs.trade_scene_chrome").draw(s, art)
+    return
+  end
 
   love.graphics.setColor(0, 0, 0, 1)
   love.graphics.rectangle("fill", 0, 0, Display.W, Display.H)
+
+  -- pokefirered/src/trade_scene.c:1121
+  if art and s.monShadowBg and art.monShadowBg then
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(art.monShadowBg, -(tonumber(s.bg2hofs) or 0), 0)
+  end
 
   if art and s.gbaVisible then
     love.graphics.setColor(1, 1, 1, 1)
@@ -257,23 +280,24 @@ function TradeSceneUi.draw()
     love.graphics.draw(art.linkMonShadow, 129 - w2, (s.crossMonBy or -10) + (s.crossY2b or 0) - h2)
   end
 
+  -- pokefirered/src/trade_scene.c:757 draws every mon by MON_DATA_SPECIES_OR_EGG
   -- pokefirered/src/trade_scene.c:1541
   if s.crossMonVisible then
-    draw_mon(Pokemon.frontPic(s.offer and (s.offer.species or s.offer.speciesId)),
+    draw_mon(Pokemon.monFrontPic(s.offer, nil, "trade"),
       60, 192 + (s.monY2a or 0), 1)
-    draw_mon(Pokemon.frontPic(s.received and (s.received.species or s.received.speciesId)),
+    draw_mon(Pokemon.monFrontPic(s.received, nil, "trade"),
       180, -32 + (s.monY2b or 0), 1)
   end
 
   -- pokefirered/src/trade_scene.c:772
   if s.playerVisible then
-    draw_mon(Pokemon.frontPic(s.offer and (s.offer.species or s.offer.speciesId)),
+    draw_mon(Pokemon.monFrontPic(s.offer, nil, "trade"),
       120 + (s.monX2 or 0), 60, s.monScale or 1)
   end
 
   -- pokefirered/src/trade_scene.c:1716
   if s.partnerVisible then
-    draw_mon(Pokemon.frontPic(s.received and (s.received.species or s.received.speciesId)),
+    draw_mon(Pokemon.monFrontPic(s.received, nil, "trade"),
       120, 60, 1)
   end
 

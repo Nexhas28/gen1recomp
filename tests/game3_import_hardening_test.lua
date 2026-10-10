@@ -82,7 +82,7 @@ contains(tostring(picsErr), "front/0", "the error lists the missing front sprite
 
 print("[test] 2. RomExtractorGen3 stage gating")
 local Json = require("src.link.Json")
-local SHA1 = "0000000000000000000000000000000000000000"
+local SHA1 = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 
 local function loadExtractorWithStubs(pokeRun, sectionsRun)
   for name in pairs(package.loaded) do
@@ -121,7 +121,8 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
   for _, sibling in ipairs({
     "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
     "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
-    "map_preview_extract",
+    "cave_transition_extract", "weather_extract", "ingame_trades_extract",
+    "union_room_classes_extract", "map_preview_extract",
   }) do
     package.loaded["src.import.gba." .. sibling] = { run = function() return true end }
   end
@@ -133,6 +134,12 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
     ready = function() return true end,
     run = function() return {} end,
   }
+  for _, sibling in ipairs({ "credits_extract", "league_extract", "battle_ai_extract" }) do
+    package.loaded["src.import.gba." .. sibling] = {
+      ready = function() return true end,
+      run = function() return {} end,
+    }
+  end
   package.loaded["src.import.gba.map_sections_extract"] = {
     run = sectionsRun or function(_, cache, opts)
       cache:write((opts and opts.cacheRoot or "data/generated/gba")
@@ -210,6 +217,9 @@ package.loaded["src.import.gba.rom"] = nil
 package.loaded["src.import.gba.pokemon_extract"] = nil
 package.loaded["src.import.gba.region_map_extract"] = nil
 package.loaded["src.import.gba.multichoice_extract"] = nil
+package.loaded["src.import.gba.credits_extract"] = nil
+package.loaded["src.import.gba.league_extract"] = nil
+package.loaded["src.import.gba.battle_ai_extract"] = nil
 package.loaded["src.import.gba.map_sections_extract"] = nil
 package.loaded["src.import.gba.revision_view"] = nil
 package.loaded["src.import.gba.extract_intro"] = nil
@@ -219,6 +229,7 @@ package.loaded["src.import.RomExtractorGen3"] = nil
 for _, sibling in ipairs({
   "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
   "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
+  "cave_transition_extract", "ingame_trades_extract", "union_room_classes_extract",
   "map_preview_extract",
 }) do
   package.loaded["src.import.gba." .. sibling] = nil
@@ -365,6 +376,20 @@ for _, rel in ipairs(siblings) do
   check(requiredSet[rel] == true,
     rel .. " is both a ready() sentinel and a contract-required key")
 end
+
+print("[test] 4. the parallel success path writes the stage markers")
+local par, parFiles = loadExtractorWithStubs(function()
+  return { root = "data/generated/gba/pokemon", picsWritten = { icons = 412 } }
+end)
+par.runParallel = function() return true end
+local parOk, parErr = pcall(par.run, par)
+check(parOk == true, "the parallel path completes the import (" .. tostring(parErr) .. ")")
+local parPoke = parFiles[STATUS] and Json.decode(parFiles[STATUS])
+check(parPoke ~= nil and parPoke.ok == true,
+  "the parallel path writes pokemon/extract_status.json with ok = true")
+local parAux = parFiles[AUX_STATUS] and Json.decode(parFiles[AUX_STATUS])
+check(parAux ~= nil and parAux.ok == true,
+  "the parallel path writes region_map/extract_status.json with ok = true")
 
 if failed > 0 then
   print("[test] FAILED " .. failed)

@@ -142,6 +142,8 @@ function Evolution.learnEvolutionMoves(game, mon, onDone)
     local name = mon.nickname or def.name
     if #mon.moves < 4 then
       table.insert(mon.moves, { id = moveId, pp = mdef.pp })
+      require("src.world.PikachuFollower")
+        .onMoveLearned(game.save, mon, moveId)
       Runtime.emit("pokemon.move_learned", { mon = mon, moveId = moveId })
       -- LearnedMove1Text: text_far, sound_get_item_1, text_promptbutton
       -- (learn_move.asm), so the jingle rides the box
@@ -157,9 +159,52 @@ function Evolution.learnEvolutionMoves(game, mon, onDone)
   nextStep()
 end
 
+local function clearScreenLayer()
+  local layer = { isOpaque = true, evoClear = true }
+  layer.update = function() end
+  layer.draw = function()
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.rectangle("fill", 0, 0, 160, 144)
+  end
+  -- engine/movie/evolution.asm:68
+  layer.sgbPalettes = function(_, g)
+    local P = require("src.render.PaletteFX")
+    local c = layer.species and P.monPal(g.data, layer.species)
+    if c then return { P.whole(c) } end
+    return P.wholeNamed(g.data, "MEWMON")
+  end
+  return layer
+end
+
+-- engine/pokemon/evos_moves.asm:156
+function Evolution.clearScreen(game, species)
+  while game.stack:top() and game.stack:top().evoIntro do game.stack:pop() end
+  local top = game.stack:top()
+  if not (top and top.evoClear) then
+    top = clearScreenLayer()
+    game.stack:push(top)
+  end
+  if species then top.species = species end
+end
+
+local function dropClearScreen(game)
+  local top = game.stack:top()
+  while top and (top.evoClear or top.evoIntro) do
+    game.stack:pop()
+    top = game.stack:top()
+  end
+end
+
+-- engine/pokemon/evos_moves.asm:245
+local function finishEvolution(game)
+  dropClearScreen(game)
+  -- engine/link/cable_club.asm:290
+  Music.restoreMap(game.data)
+end
+
 -- Play the evolution movie (flashing forms), then apply + text.
 -- Headless (no real graphics) falls back to the plain text flow.
-function Evolution.evolve(game, mon, newSpecies, onDone, via)
+function Evolution.evolve(game, mon, newSpecies, onDone, via, batch)
   local oldName = mon.nickname or game.data.pokemon[mon.species].name
   -- IsEvolvingText, DelayFrames 50; ClearScreenArea then wipes rows 0-11
   -- ONLY, so the box rides through EvolveMon (evos_moves.asm:120-134)
@@ -179,8 +224,11 @@ function Evolution.evolve(game, mon, newSpecies, onDone, via)
           -- forward `via` so trade evolutions stay non-cancelable while
           -- others accept B (evos_moves.asm:72-75) (#213)
           Screens.push(game, "EvolutionState", mon, newSpecies, function()
-            -- the result/cancel box owns the intro box's pop (#1596)
-            if game.stack:top() == intro then game.stack:pop() end
+            if batch then
+              Evolution.clearScreen(game)
+            else
+              finishEvolution(game)
+            end
             if onDone then onDone() end
           end, via)
         end
@@ -188,6 +236,7 @@ function Evolution.evolve(game, mon, newSpecies, onDone, via)
         game.stack:push(hold)
       end,
     } })
+    intro.evoIntro = true
     game.stack:push(intro)
     return
   end
@@ -199,10 +248,12 @@ function Evolution.evolve(game, mon, newSpecies, onDone, via)
     .. romText(game.data, "_IntoText", "\ninto %s!",
          game.data.pokemon[newSpecies].name)
   game.stack:push(TextBox.new(game, msg, function()
-    Music.restoreMap(game.data)
     -- re-run the evolved species' level-up learn check before onDone
     -- (evos_moves.asm EvolveMon -> learn_move.asm LearnMoveFromLevelUp, #12)
-    Evolution.learnEvolutionMoves(game, mon, onDone)
+    Evolution.learnEvolutionMoves(game, mon, function()
+      if not batch then finishEvolution(game) end
+      if onDone then onDone() end
+    end)
   end, TextBox.soundOpts(game, "Get_Item2")))
 end
 
@@ -243,10 +294,11 @@ function Evolution.checkParty(game, onDone, leveledUp)
     i = i + 1
     local p = pending[i]
     if not p then
+      dropClearScreen(game)
       if onDone then onDone() end
       return
     end
-    Evolution.evolve(game, p.mon, p.to, nextOne, p.via)
+    Evolution.evolve(game, p.mon, p.to, nextOne, p.via, true)
   end
   nextOne()
   return #pending

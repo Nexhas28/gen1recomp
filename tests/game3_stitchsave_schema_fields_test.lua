@@ -1,6 +1,7 @@
 #!/usr/bin/env luajit
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").stubSpeciesNames()
 
 package.loaded["src.core.game3.audio"] = setmetatable({}, {
   __index = function() return function() end end,
@@ -76,7 +77,7 @@ do
     flags = {}, vars = {},
   }
   local loaded = Schema.fromSaveTable(old)
-  eq(loaded.secretId, nil, "no secretId in, no secretId out")
+  eq(loaded.secretId, 4242, "no secretId in, the owned mon's secret id is recovered at load")
   eq(loaded.safari, nil, "no safari block")
   eq(loaded.mail, nil, "no mail pool")
   eq(#loaded.party, 1, "the party is not quarantined")
@@ -96,7 +97,7 @@ do
   local save = {
     schemaVersion = 1, engine = "game3", version = "firered",
     party = {}, dex = { seen = {}, owned = {} },
-    map = "FR_SAFARI_ZONE_CENTER", x = 4, y = 4,
+    map = "FR_FUCHSIA_CITY", x = 4, y = 4,
     flags = {
       [FLAG_SYS_SAFARI_MODE] = true,
       [tostring(FLAG_SYS_SAFARI_MODE)] = true,
@@ -132,6 +133,20 @@ do
   session.safari = { balls = 30, steps = 600 }
   eq(Schema.toSaveTable(session).safari, nil,
     "and they are EWRAM, so no save block ever carries them")
+
+  local stranded = Schema.fromSaveTable({
+    schemaVersion = 1, engine = "game3", version = "firered",
+    party = {}, dex = { seen = {}, owned = {} },
+    map = "FR_SAFARI_ZONE_CENTER", x = 26, y = 30, facing = "up",
+    flags = {}, vars = {},
+  })
+  -- pokefirered/data/scripts/safari_zone.inc:7 SafariZone_EventScript_Exit
+  eq(stranded.map, "FR_FUCHSIA_CITY_SAFARI_ZONE_ENTRANCE", "a save left in the zone resumes at the gate")
+  eq(stranded.x, 4, "gate x")
+  eq(stranded.y, 1, "gate y")
+  eq(Flags.getVar(stranded, nil, VAR_SAFARI_ENTRANCE), 1, "entrance ExitWarpIn scene queued")
+  local again = Schema.fromSaveTable(Schema.toSaveTable(stranded))
+  eq(again.map, "FR_FUCHSIA_CITY_SAFARI_ZONE_ENTRANCE", "second Continue stays at the gate")
 end
 
 print("[test] 5. The mail pool rides the save through mail.lua")
@@ -263,6 +278,26 @@ do
   eq(old.flashLevel, 0, "and that default is what the next save carries")
 
   Runtime.session = prev
+end
+
+print("[test] berryPowder round-trips through the schema")
+do
+  -- include/global.h:354, src/berry_powder.c:50
+  local session = Schema.newGame({ rngSeed = 0x99 })
+  eq(session.berryPowder, 0, "a New Game starts with 0 berry powder")
+
+  session.berryPowder = 40
+  local save = Schema.toSaveTable(session)
+  eq(save.berryPowder, 40, "toSaveTable writes berryPowder")
+  local loaded = Schema.fromSaveTable(save)
+  eq(loaded.berryPowder, 40, "fromSaveTable restores berryPowder")
+
+  local old = Schema.fromSaveTable({
+    schemaVersion = 1, engine = "game3", version = "firered",
+    party = {}, dex = { seen = {}, owned = {} },
+    map = "FR_PALLET_TOWN", x = 5, y = 6, facing = "down", flags = {}, vars = {},
+  })
+  eq(old.berryPowder, 0, "a save with no berryPowder key loads 0")
 end
 
 print(string.format("[test] %d passed, %d failed", passed, failed))

@@ -71,10 +71,14 @@ mobile/dist/
 /build/tiled/
 
 # Local visual scratch from minigame development (not wired to CI).
-/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/save/
+!/tests/fixtures/gen2_buena.lua
 
 # per-machine iOS bundle-id pin (see scripts/build_ios.sh)
 mobile/ios/bundle_id.local
+
+tools/reimport.local
 
 # Xbox UWP build output
 /ports/uwp/build/
@@ -90,6 +94,7 @@ mobile/ios/bundle_id.local
 
 # Local options / preferences
 /options.lua*
+/mod_option_schemas.json
 
 # User-owned ROMs imported for individual mods. Manifests declare the
 # destinations, but source checkouts and packaged mods never ship the files.
@@ -105,6 +110,8 @@ mobile/ios/bundle_id.local
 
 # Reference decompilation repositories (used for reference / extraction only)
 pokefirered/
+pokeemerald/
+pokeruby/
 pokered/
 pokegold/
 pokecrystal/

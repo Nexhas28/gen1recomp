@@ -53,6 +53,16 @@ end
 -- endFrame composites the padded canvas back with a matching offset.
 Renderer.UPRIGHT_MARGIN = 160
 
+-- Whether endFrame composites a world override MIRRORED.  A pipeline owns its
+-- own clip convention and the ones in the wild pre-flip Y for LOVE 11, which
+-- LOVE 12 turns into one flip too many.  Named because it is not only the
+-- blit's business: see ctx.drawFx in src/world/OverworldController.lua.
+function Renderer.mirrorsWorldOverride()
+  local sys = love.system
+  if not (sys and sys.getOS and sys.getOS() == "iOS") then return false end
+  return (love.getVersion()) >= 12
+end
+
 -- LOVE units + framebuffer pixels + per-axis unit→pixel ratios.
 -- Android's DisplayMetrics.density is often non-integer (1.5, 2.75, …).
 -- Integer scaling in units then maps each GB pixel to a fractional number of
@@ -112,8 +122,10 @@ function Renderer:releaseCanvases()
   releaseCanvas(self.battleHUDCanvas); self.battleHUDCanvas = nil
   releaseCanvas(self.worldCanvas); self.worldCanvas = nil
   releaseCanvas(self.uprightCanvas); self.uprightCanvas = nil
+  releaseCanvas(self.tiltOverheadCanvas); self.tiltOverheadCanvas = nil
   self.worldActive = false
   self.uprightActive = false
+  self.uprightOccluded = false
   self.worldOverride = nil
 end
 
@@ -337,11 +349,13 @@ function Renderer:beginFrame(transparent)
   self.uiOpaque = not transparent
   self.worldActive = false
   self.uprightActive = false
+  self.uprightOccluded = false
   self.worldOverride = nil
   -- warp-fade overlay from Transition (issue #121); cleared each frame so
   -- a popped transition cannot leave a sticky black veil
   self.worldFadeAlpha = nil
   self.worldFadeColor = nil
+  self.voidVeil = nil
   -- battle-transition wipe, drawn over the whole surface (BattleTransition)
   self.battleWipe = nil
   -- engine/battle/battle_transitions.asm:28
@@ -485,6 +499,15 @@ function Renderer:endWorldPass()
   love.graphics.setCanvas(self.canvas)
 end
 
+-- A field compositor may consume the current world into another compatible
+-- target. Its caller continues drawing into the replacement until endWorldPass.
+function Renderer:exchangeWorldCanvas(current, replacement)
+  if self.worldCanvas ~= current or not self.worldActive then return false end
+  if current:getWidth() ~= replacement:getWidth() or current:getHeight() ~= replacement:getHeight() then return false end
+  self.worldCanvas = replacement
+  return true
+end
+
 -- Tilt mode's upright pass: standing things (sprites, tall-grass feet
 -- overdraw, screen-anchored FX) draw here instead of into the ground
 -- world canvas, each already projected to its ground anchor and colorized
@@ -568,6 +591,51 @@ function Renderer:tiltMesh()
     self._tiltMesh = ok and mesh or false
   end
   return self._tiltMesh or nil
+end
+
+function Renderer:occludeUprightActors(drawOverhead)
+  local mesh = self:tiltMesh()
+  if not mesh then return end
+  if self._tiltOcclusionShader == nil then
+    local source, replaced = TILT_SHADER:gsub("return Texel%(tex, tc / vScale%) %* color;", [[
+      float a = Texel(tex, tc / vScale).a;
+      if (a <= 0.0) discard;
+      return vec4(1.0 - a);
+    ]])
+    assert(replaced == 1)
+    self._tiltOcclusionShader = love.graphics.newShader(source)
+  end
+  local shader = self._tiltOcclusionShader
+  local vw, vh = self.worldCanvas:getWidth(), self.worldCanvas:getHeight()
+  local mask = self.tiltOverheadCanvas
+  if not mask or mask:getWidth() ~= vw or mask:getHeight() ~= vh then
+    if mask and mask.release then mask:release() end
+    mask = PixelCanvas.new(vw, vh, "linear")
+    self.tiltOverheadCanvas = mask
+  end
+  love.graphics.push("all")
+  love.graphics.origin()
+  love.graphics.setCanvas(mask)
+  love.graphics.setShader()
+  love.graphics.setStencilTest()
+  love.graphics.setScissor()
+  love.graphics.setBlendMode("alpha", "alphamultiply")
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.setColor(1, 1, 1, 1)
+  drawOverhead()
+  love.graphics.pop()
+
+  love.graphics.push("all")
+  love.graphics.setShader(shader)
+  love.graphics.setStencilTest()
+  love.graphics.setScissor()
+  love.graphics.setBlendMode("multiply", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  mesh:setTexture(mask)
+  mesh:setVertices(Tilt.meshCorners(vw, vh))
+  love.graphics.draw(mesh)
+  love.graphics.pop()
+  self.uprightOccluded = true
 end
 
 -- Draw the world pass through the tilt projection.  Two steps: (1) a
@@ -950,8 +1018,8 @@ function Renderer:endFrame(zones, worldZones)
   local extendedBlackBand = false
   local bandR, bandG, bandB = 1, 1, 1
   if not self.worldActive then
-    local ok, Game = pcall(require, "src.core.Game")
-    local stack = ok and Game and Game.stack
+    local Game = package.loaded["src.core.Game"]
+    local stack = type(Game) == "table" and Game.stack
     local base = stack and stack.visibleBase and stack:visibleBase()
     local state = base and stack.states and stack.states[base]
     local ownState = self.surroundState
@@ -1055,8 +1123,7 @@ function Renderer:endFrame(zones, worldZones)
     -- runs, so dialogs, menus and the HUD sit on top as usual.
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setScissor(vux, vuy, vuw, vuh)
-    local loveMajor = love.getVersion()
-    if love.system and love.system.getOS and love.system.getOS() == "iOS" and loveMajor >= 12 then
+    if Renderer.mirrorsWorldOverride() then
       love.graphics.draw(self.worldOverride, vux, vuy + vuh, 0, 1 / dpiX, -1 / dpiY)
     else
       love.graphics.draw(self.worldOverride, vux, vuy, 0, 1 / dpiX, 1 / dpiY)
@@ -1138,7 +1205,13 @@ function Renderer:endFrame(zones, worldZones)
       local M = self.UPRIGHT_MARGIN
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.setScissor(vux, vuy, vuw, vuh)
+      local blend, alpha
+      if self.uprightOccluded then
+        blend, alpha = love.graphics.getBlendMode()
+        love.graphics.setBlendMode("alpha", "premultiplied")
+      end
       love.graphics.draw(self.uprightCanvas, wox - M * sx, woy - M * sy, 0, sx, sy)
+      if self.uprightOccluded then love.graphics.setBlendMode(blend, alpha) end
       love.graphics.setScissor()
     end
     -- Screen-space warp fade (Transition) over the full world composite so
@@ -1176,6 +1249,14 @@ function Renderer:endFrame(zones, worldZones)
     end
     love.graphics.setColor(1, 1, 1, 1)
   end
+  local voidVeil = self.voidVeil
+  if voidVeil and (voidVeil[4] or 0) > 0 then
+    love.graphics.setColor(voidVeil[1], voidVeil[2], voidVeil[3], voidVeil[4])
+    for _, r in ipairs(subtractRect({ { vux, vuy, vuw, vuh } }, uox, uoy, uvpw, uvph)) do
+      love.graphics.rectangle("fill", r[1], r[2], r[3], r[4])
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+  end
 
   -- Extended/WORLD keeps the frozen world as the physical surround, but stock
   -- Gen 1 back sprites rely on the battle's paper shade for visible highlights.
@@ -1187,8 +1268,8 @@ function Renderer:endFrame(zones, worldZones)
   -- field, so never cover it with the native back-sprite fallback.
   if self.extendedWorldBand and not self.worldOverride
      and not FaithfulRes.scaleCap() then
-    local ok, Game = pcall(require, "src.core.Game")
-    love.graphics.setColor(PaletteFX.paperShade(ok and Game and Game.data))
+    local Game = package.loaded["src.core.Game"]
+    love.graphics.setColor(PaletteFX.paperShade(type(Game) == "table" and Game.data or nil))
     love.graphics.rectangle("fill", uox, vuy, uvpw, vuh)
     love.graphics.setColor(1, 1, 1, 1)
   end

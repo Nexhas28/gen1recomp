@@ -2,6 +2,7 @@
 -- Shop & Bag chrome extraction, contract, state machine, and interaction unit tests.
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_shop_bag_chrome_test")
 
 local failed = 0
 local function check(cond, msg)
@@ -38,6 +39,47 @@ check(reqSet["data/generated/gba/items/bag/manifest.lua"] == true, "contract has
 check(reqSet["data/generated/gba/items/bag/bg.rgba"] == true, "contract has bag bg.rgba")
 check(reqSet["data/generated/gba/items/shop/manifest.lua"] == true, "contract has shop manifest.lua")
 check(reqSet["data/generated/gba/items/shop/bg.rgba"] == true, "contract has shop bg.rgba")
+
+print("[test] 2b. Bag Chrome Pixel Buffer Decoding")
+local BagChromeExtract = require("src.import.gba.bag_chrome_extract")
+local Rom = require("src.import.gba.rom")
+local f = io.open("1636 - Pokemon Fire Red (U)(Squirrels).gba", "rb")
+if f then
+  local content = f:read("*a")
+  f:close()
+  local mockImports = {
+    info = function() return { size = #content, md5 = "dummy" } end,
+    read = function(self, id, pos, len) return content:sub(pos + 1, pos + len) end,
+  }
+  local testRom = Rom.open(mockImports, "firered")
+  local testStore = {}
+  local testCache = {
+    write = function(self, p, d) testStore[p] = d end,
+    read = function(self, p) return testStore[p] end,
+    exists = function(self, p) return testStore[p] ~= nil end,
+  }
+  BagChromeExtract.run(testRom, testCache, { cacheRoot = "data/generated/gba" })
+  local bg = testCache:read("data/generated/gba/items/bag/bg.rgba")
+  local bagMale = testCache:read("data/generated/gba/items/bag/bag_male.rgba")
+  check(bg and #bg == 240 * 160 * 4, "bg.rgba extracted with correct size")
+  check(bagMale and #bagMale == 64 * 256 * 4, "bag_male.rgba extracted with correct size")
+  local bgColors = {}
+  for i = 1, #bg, 4 do
+    local k = string.format("%d,%d,%d,%d", bg:byte(i, i + 3))
+    bgColors[k] = (bgColors[k] or 0) + 1
+  end
+  local distinctBg = 0
+  for _ in pairs(bgColors) do distinctBg = distinctBg + 1 end
+  check(distinctBg > 10, "bg.rgba has diverse colors (not solid mono-color): " .. tostring(distinctBg))
+  local bagColors = {}
+  for i = 1, #bagMale, 4 do
+    local k = string.format("%d,%d,%d,%d", bagMale:byte(i, i + 3))
+    bagColors[k] = (bagColors[k] or 0) + 1
+  end
+  local distinctBag = 0
+  for _ in pairs(bagColors) do distinctBag = distinctBag + 1 end
+  check(distinctBag > 8, "bag_male.rgba has non-zero sprites: " .. tostring(distinctBag))
+end
 
 print("[test] 3. BagMenu Lifecycle & Pockets")
 local Bag = require("src.core.game3.bag")
@@ -119,7 +161,7 @@ check(closed == true, "onClose called")
 
 Audio.playSe = origPlaySe
 
-print("[test] 4. ShopMenu Purchasing, Selling, and Premier Ball Bonus")
+print("[test] 4. ShopMenu Purchasing and Selling")
 local ShopMenu = require("src.ui.game3.shop_menu")
 local shopClosed = false
 local shopSession = {
@@ -158,36 +200,32 @@ mockInput:set("a")
 ShopMenu.handleInput(mockInput)
 check(shopSession.money == 1000, "money reduced by 2000 to 1000")
 check(Bag.has(shopSession.bag, 4, 10) == true, "bag received 10 Poké Balls")
-check(Bag.has(shopSession.bag, 12, 1) == true, "bag received 1 PREMIER BALL bonus for buying 10 Poké Balls!")
+check(Bag.has(shopSession.bag, 12, 1) == false, "FRLG gives no PREMIER BALL bonus (shop.c:978)")
 
--- Enter SELL mode
-ShopMenu.mode = "sell"
-ShopMenu.cursor = 1
+-- pokefirered/src/item_menu.c:1787 Task_ItemContext_Sell
+ShopMenu.mode = "root"
+local SellFlow = require("src.ui.game3.sell_flow")
+local soldCb = nil
+local flow = SellFlow.start({
+  itemId = 4, owned = Bag.get(shopSession.bag, 4), session = shopSession, bag = shopSession.bag,
+  onDone = function(sold) soldCb = sold end,
+})
+check(flow.state == "qty", "a stack of 10 asks how many to sell")
+for _ = 1, 4 do
+  mockInput:set("up")
+  flow:handleInput(mockInput)
+end
+check(flow.qty == 5, "up raises the quantity to 5")
 mockInput:set("a")
-ShopMenu.handleInput(mockInput)
-check(ShopMenu.mode == "sell_qty", "A on bag item enters sell_qty mode")
-
--- Sell 5 units of the selected item
-ShopMenu.qty = 5
-local itemPrice = (ShopMenu._pending and ShopMenu._pending.price) or 100
-local expectedMoney = 1000 + (itemPrice * 5)
+flow:handleInput(mockInput)
+check(flow.state == "confirm", "A asks gText_ICanPayThisMuch_WouldThatBeOkay")
 mockInput:set("a")
-ShopMenu.handleInput(mockInput)
-check(ShopMenu.mode == "sell_confirm", "A enters sell_confirm mode")
-
--- Confirm sell
+flow:handleInput(mockInput)
+check(shopSession.money == 1500, "selling 5 POKé BALLs added 500 (" .. tostring(shopSession.money) .. ")")
+check(Bag.get(shopSession.bag, 4) == 5, "five POKé BALLs left")
 mockInput:set("a")
-ShopMenu.handleInput(mockInput)
-check(shopSession.money == expectedMoney, string.format("selling 5 added %d to money (%d)", itemPrice * 5, expectedMoney))
-
--- Dismiss sell message
-mockInput:set("a")
-ShopMenu.handleInput(mockInput)
-check(ShopMenu.mode == "sell", "A dismisses sell message back to sell mode")
-
-mockInput:set("b")
-ShopMenu.handleInput(mockInput)
-check(ShopMenu.mode == "root", "B from sell returns to root")
+flow:handleInput(mockInput)
+check(soldCb == true and not flow:active(), "A after the sale returns to the list")
 
 mockInput:set("b")
 ShopMenu.handleInput(mockInput)

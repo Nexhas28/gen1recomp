@@ -16,7 +16,7 @@ local Font = require("src.render.Font")
 local Strings = require("src.core.Strings")
 local Theme = require("src.ui.Theme")
 
-local DexEntryMenu = {}
+local DexEntryMenu = { isMenu = true }
 DexEntryMenu.__index = DexEntryMenu
 DexEntryMenu.isOpaque = true
 
@@ -145,6 +145,7 @@ function DexEntryMenu.new(game, speciesOrOpts, onDone)
   self.pageCount = pages and #pages or 1
   self.species = species
   self.picDelay = PIC_DELAY
+  self.metricMasks = { Strings("GR. ???m"), Strings("GEW. ???kg") }
   return self
 end
 
@@ -187,7 +188,7 @@ function DexEntryMenu:draw()
   DexEntryMenu.render(self.game, self.def, not waiting and self.sprite or nil,
                       self.forceOwned, self.spriteTrueColor, self.page,
                       { crying = self:crying(), waiting = waiting,
-                        arrow = (self.blink or 0) < 30 })
+                        arrow = (self.blink or 0) < 30, metricMasks = self.metricMasks })
 end
 
 -- Static entry-page renderer, shared with the printer stand-in
@@ -261,6 +262,10 @@ function DexEntryMenu.render(game, def, sprite, forceOwned, trueColor, page, sta
       Font.draw("??", 120, 48)
       Font.draw("???", 112, 64)
     end
+  elseif not numbers or state.crying or state.waiting then
+    local masks = state.metricMasks or { Strings("GR. ???m"), Strings("GEW. ???kg") }
+    Font.draw(masks[1], 72, 48)
+    Font.draw(masks[2], 72, 64)
   end
   -- engine/menus/pokedex.asm:516: everything below the divider waits on the
   -- cry the line above it started

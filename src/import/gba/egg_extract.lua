@@ -3,13 +3,41 @@
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
 local BgBake = require("src.import.gba.bg_bake")
+local PokemonExtract = require("src.import.gba.pokemon_extract")
 
 local EggExtract = {}
 
 EggExtract.CACHE_SUB = "pokemon/egg"
 EggExtract.MANIFEST_VERSION = 1
+EggExtract.REQUIRED = {
+  "pokemon/egg/hatch.rgba", "pokemon/egg/shard.rgba", "pokemon/egg/manifest.lua",
+  "pokemon/front/412.rgba", "pokemon/icons/412.rgba",
+}
 
-EggExtract.SPECIES_EGG = 412
+setmetatable(EggExtract, {
+  __index = function(_, key)
+    if key == "SPECIES_EGG" then
+      local Constants = require("src.core.game3.constants")
+      return Constants.of(Versions.active()):require("species", "SPECIES_EGG")
+    end
+  end,
+})
+
+local function need(key)
+  local v = Versions[key]
+  if v == nil then
+    error("egg_extract: Versions." .. key .. " is not set for " .. tostring(Versions.active()))
+  end
+  return v
+end
+
+local function pic_table(key, introKey)
+  local v = Versions[key] or (Versions.INTRO and Versions.INTRO[introKey])
+  if v == nil then
+    error("egg_extract: Versions." .. key .. " is not set for " .. tostring(Versions.active()))
+  end
+  return v
+end
 
 -- src/daycare.c:141 sOamData_EggHatch is SPRITE_SIZE(32x32), :158 four frames 16 tiles apart
 local HATCH_W, HATCH_H, HATCH_FRAMES = 32, 32, 4
@@ -54,19 +82,19 @@ function EggExtract.run(rom, cache, opts)
   local root = cacheRoot .. "/" .. EggExtract.CACHE_SUB
   local function get(i) return rom:get(i) end
 
-  local palBytes = raw_bytes(rom, Versions.EGG_PALETTE, 32)
+  local palBytes = raw_bytes(rom, need("EGG_PALETTE"), 32)
   local bank = BgBake.loadPalBanks(palBytes, 1)[0]
 
-  local hatch = raw_bytes(rom, Versions.EGG_HATCH_GFX, HATCH_W * HATCH_H / 2 * HATCH_FRAMES)
+  local hatch = raw_bytes(rom, need("EGG_HATCH_GFX"), HATCH_W * HATCH_H / 2 * HATCH_FRAMES)
   cache:write(root .. "/hatch.rgba",
     stack_frames(hatch, bank, HATCH_FRAMES, (HATCH_W / 8) * (HATCH_H / 8), HATCH_W, HATCH_H))
 
-  local shard = raw_bytes(rom, Versions.EGG_SHARD_GFX, SHARD_W * SHARD_H / 2 * SHARD_FRAMES)
+  local shard = raw_bytes(rom, need("EGG_SHARD_GFX"), SHARD_W * SHARD_H / 2 * SHARD_FRAMES)
   cache:write(root .. "/shard.rgba",
     stack_frames(shard, bank, SHARD_FRAMES, 1, SHARD_W, SHARD_H, true))
 
-  local picTable = (Versions.OAK_SPEECH and Versions.OAK_SPEECH.mon_front_pic_table) or 0x2350AC
-  local palTable = (Versions.OAK_SPEECH and Versions.OAK_SPEECH.mon_palette_table) or 0x23730C
+  local picTable = pic_table("MON_FRONT_PIC_TABLE", "mon_front_pic_table")
+  local palTable = pic_table("MON_PALETTE_TABLE", "mon_palette_table")
   local picOff = rom:ptrOffset(rom:u32(picTable + EggExtract.SPECIES_EGG * 8))
   local picPalOff = rom:ptrOffset(rom:u32(palTable + EggExtract.SPECIES_EGG * 8))
   if not (picOff and picPalOff) then error("egg_extract: no SPECIES_EGG pic entry") end
@@ -76,6 +104,10 @@ function EggExtract.run(rom, cache, opts)
   local picBank = BgBake.loadPalBanks(picPal, 1)[0]
   cache:write(cacheRoot .. "/pokemon/front/" .. EggExtract.SPECIES_EGG .. ".rgba",
     BgBake.bakeSpriteRgba(tiles, picBank, 0, PIC_W, PIC_H, false, false))
+
+  -- src/party_menu.c:2655 draws an egg's icon from MON_DATA_SPECIES_OR_EGG
+  cache:write(cacheRoot .. "/pokemon/icons/" .. EggExtract.SPECIES_EGG .. ".rgba",
+    PokemonExtract.iconRgba(rom, EggExtract.SPECIES_EGG))
 
   cache:write(root .. "/manifest.lua", string.format([[
 return {
@@ -102,7 +134,12 @@ function EggExtract.ready(cache, cacheRoot)
   for _, rel in ipairs({ "hatch.rgba", "shard.rgba", "manifest.lua" }) do
     if not cache:exists(root .. "/" .. rel) then return false end
   end
-  return cache:exists(cacheRoot .. "/pokemon/front/" .. EggExtract.SPECIES_EGG .. ".rgba")
+  for _, sub in ipairs({ "front", "icons" }) do
+    if not cache:exists(cacheRoot .. "/pokemon/" .. sub .. "/" .. EggExtract.SPECIES_EGG .. ".rgba") then
+      return false
+    end
+  end
+  return true
 end
 
 return EggExtract

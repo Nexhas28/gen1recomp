@@ -1,10 +1,65 @@
+local function lazyReq(name)
+  local m = package.loaded[name]
+  if type(m) == "table" then return m end
+  return require(name)
+end
+
 local Sample = require("src.core.game3.m4a_sample")
 local Mix = require("src.core.game3.m4a_mix")
 local Player = require("src.core.game3.m4a_player")
 local SE = require("src.core.game3.se_ids")
+local Song = require("src.core.game3.song_ids")
+local Warm = require("src.core.game3.warm")
 local ffiOk, ffi = pcall(require, "ffi")
 
 local Audio = {}
+
+local function audio_profile()
+  local ok, row = pcall(function()
+    return lazyReq("src.core.game3.profile").forSession(nil)
+  end)
+  if ok and type(row) == "table" then return row end
+  return nil
+end
+
+function Audio.config()
+  local row = audio_profile()
+  return row and row.audio or {}
+end
+
+function Audio.songs()
+  local row = audio_profile()
+  if row and row.id then
+    local ok, t = pcall(Song.forVersion, row.id)
+    if ok and t then return t end
+  end
+  return Song
+end
+
+function Audio.mapMusicPolicy()
+  return Audio.config().mapMusicPolicy or "frlg"
+end
+
+function Audio.questLogGating()
+  return Audio.config().questLogGating ~= false
+end
+
+local function rse_policy()
+  if Audio.mapMusicPolicy() == "rs" then return lazyReq("src.core.game3.audio_policy_rs") end
+  if Audio.mapMusicPolicy() ~= "rse" then return nil end
+  return lazyReq("src.core.game3.audio_policy_rse")
+end
+
+local RIDE_SONG_KEYS = { MUS_CYCLING = "cycling", MUS_SURF = "surf", MUS_UNDERWATER = "underwater" }
+
+setmetatable(Audio, {
+  __index = function(_, k)
+    local role = RIDE_SONG_KEYS[k]
+    if not role then return nil end
+    local names = Audio.config().rideSongs
+    return Audio.songs()[(names and names[role]) or k]
+  end,
+})
 
 Audio._pack = nil
 Audio._cache = nil
@@ -87,6 +142,15 @@ local function filesystem_cache()
   }
 end
 
+local function push_install()
+  Audio._cmdCh:push({
+    cmd = "install",
+    root = Audio._root,
+    prefix = lazyReq("src.core.WorkerFs").prefix(),
+    sampleRate = Mix.SAMPLE_RATE,
+  })
+end
+
 local function ensure_worker()
   if Audio._worker ~= nil then return Audio._worker end
   if not (love and love.thread and love.thread.newThread) then
@@ -101,20 +165,18 @@ local function ensure_worker()
   Audio._cmdCh = love.thread.getChannel("game3_m4a_cmd")
   Audio._outCh = love.thread.getChannel("game3_m4a_out")
   Audio._fanfareCh = love.thread.getChannel("game3_m4a_fanfare")
+  Audio._statusCh = love.thread.getChannel("game3_m4a_status")
   Audio._cmdCh:clear()
   Audio._outCh:clear()
   Audio._fanfareCh:clear()
+  Audio._statusCh:clear()
   local started = pcall(function() thread:start() end)
   if not started then
     Audio._worker = false
     return false
   end
   Audio._worker = thread
-  Audio._cmdCh:push({
-    cmd = "install",
-    root = Audio._root,
-    sampleRate = Mix.SAMPLE_RATE,
-  })
+  push_install()
   return true
 end
 
@@ -149,11 +211,7 @@ function Audio.install(cache, opts)
     Audio._fanfareRoot = Audio._root
   end
   if ensure_worker() then
-    Audio._cmdCh:push({
-      cmd = "install",
-      root = Audio._root,
-      sampleRate = Mix.SAMPLE_RATE,
-    })
+    push_install()
   end
   log("installed root=" .. Audio._root)
   return true
@@ -191,30 +249,60 @@ end
 -- internal species id, not the National Dex number. SPECIES_DEOXYS is 410
 -- (include/constants/species.h:419); 386 is SPECIES_VOLBEAT and must not match.
 Audio.LEGENDARY_BATTLE_SONGS = {
-  [150] = { "battleMewtwo", 340 }, -- SPECIES_MEWTWO
-  [410] = { "battleDeoxys", 339 }, -- SPECIES_DEOXYS
-  [144] = { "battleLegend", 341 }, -- SPECIES_ARTICUNO
-  [145] = { "battleLegend", 341 }, -- SPECIES_ZAPDOS
-  [146] = { "battleLegend", 341 }, -- SPECIES_MOLTRES
-  [249] = { "battleLegend", 341 }, -- SPECIES_LUGIA
-  [250] = { "battleLegend", 341 }, -- SPECIES_HO_OH
+  SPECIES_MEWTWO = { "battleMewtwo", "MUS_VS_MEWTWO" },
+  SPECIES_DEOXYS = { "battleDeoxys", "MUS_VS_DEOXYS" },
+  SPECIES_ARTICUNO = { "battleLegend", "MUS_VS_LEGEND" },
+  SPECIES_ZAPDOS = { "battleLegend", "MUS_VS_LEGEND" },
+  SPECIES_MOLTRES = { "battleLegend", "MUS_VS_LEGEND" },
+  SPECIES_RAIKOU = { "battleDeoxys", "MUS_VS_DEOXYS" },
+  SPECIES_ENTEI = { "battleDeoxys", "MUS_VS_DEOXYS" },
+  SPECIES_SUICUNE = { "battleDeoxys", "MUS_VS_DEOXYS" },
+  SPECIES_LUGIA = { "battleLegend", "MUS_VS_LEGEND" },
+  SPECIES_HO_OH = { "battleLegend", "MUS_VS_LEGEND" },
 }
 
--- Returns the legendary battle theme for a species, or nil for any other mon.
-function Audio.legendaryBattleSong(species)
-  local entry = Audio.LEGENDARY_BATTLE_SONGS[tonumber(species) or -1]
-  if not entry then return nil end
-  return Audio.role(entry[1]) or entry[2]
+local function species_name(species)
+  local row = audio_profile()
+  local ok, C = pcall(function()
+    return lazyReq("src.core.game3.constants").of(row and row.id or "firered")
+  end)
+  if not ok or not C then return nil end
+  local byId = C.species.byId
+  local rev = byId and (byId.SPECIES_ or byId)
+  return type(rev) == "table" and rev[species] or nil
 end
 
-function Audio.applyOptions(session)
-  local Options = require("src.core.game3.options")
-  local o = Options.ensure(session)
-  local mono = (tonumber(o.sound) or 0) == 0
+-- Returns the legendary battle theme for a species, or nil for any other mon.
+function Audio.legendaryBattleSong(species, opts)
+  local cfg = Audio.config()
+  local tbl = cfg.legendaryBattleSongs or Audio.LEGENDARY_BATTLE_SONGS
+  local n = tonumber(species)
+  local entry = n and tbl[species_name(n)]
+  local songs = Audio.songs()
+  if not entry then
+    local def = type(opts) == "table" and opts.legendary and cfg.legendaryBattleDefault
+    return def and songs[def] or nil
+  end
+  if type(entry) == "table" then
+    return Audio.role(entry[1]) or songs[entry[2]]
+  end
+  return songs[entry]
+end
+
+-- pokeruby/src/libs/m4a.c:1738
+function Audio.setCryStereo(value)
+  local mono = (tonumber(value) or 0) == 0
   if mono ~= Audio._mono then
     Audio._mono = mono
     Audio.pushMixOptions()
   end
+  return mono and 0 or 1
+end
+
+function Audio.applyOptions(session)
+  local Options = lazyReq("src.core.game3.options")
+  local o = Options.ensure(session)
+  return Audio.setCryStereo(o.sound)
 end
 
 local function bgm_gain(volume)
@@ -280,13 +368,21 @@ end
 
 function Audio.applyEngineOptions(opts)
   if type(opts) ~= "table" then return end
-  Audio._bgmVolume = level_gain(opts.musicVol, 7)
+  local mode = opts.audioMode or "both"
+  Audio._audioMode = mode
+  require("src.audio.AudioMix").set(mode ~= "game_only")
+  if mode == "external_only" then
+    Audio._bgmVolume = 0
+  else
+    Audio._bgmVolume = level_gain(opts.musicVol, 7)
+  end
   Audio._sfxVolume = level_gain(opts.sfxVol, 7)
   local filter = tonumber(opts.musicFilter) or 0
   if filter < 0 then filter = 0 end
   if filter > 3 then filter = 3 end
   Audio._filterLevel = filter > 0 and filter or nil
   Audio.pushMixOptions()
+  Audio.applyGain()
 end
 
 function Audio.applyGain()
@@ -336,10 +432,19 @@ local function stop_bgm_source()
   Audio._bgmBaseAt = 0
 end
 
+function Audio.resolveSong(id)
+  if type(id) == "string" and not tonumber(id) then
+    return Audio.songs()[id] or Song.resolve(id) or id
+  end
+  return tonumber(id) or id
+end
+
 function Audio.playSong(id, opts)
   opts = opts or {}
-  id = tonumber(id) or id
+  id = Audio.resolveSong(id)
   if id == nil or id == 0 or id == 0xFFFF then
+    Audio._fadeOut, Audio._fadeIn = nil, nil
+    Audio._fanfareRestore, Audio._fanfareDeferred = nil, nil
     stop_bgm_source()
     Audio._currentSong = nil
     return true
@@ -347,7 +452,8 @@ function Audio.playSong(id, opts)
   if opts.fanfare or (Audio.songInfo(id) and Audio.songInfo(id).kind == "fanfare") or (fanfare_entry(id) ~= nil) then
     return Audio.playFanfare(id)
   end
-  if not opts.restart and Audio._currentSong and Audio._currentSong.id == id then
+  if not opts.restart and not Audio._fadeOut and Audio._currentSong and Audio._currentSong.id == id then
+    if Audio._fanfareActive then Audio._fanfareDeferred = nil end
     return true
   end
   local info = Audio.songInfo(id) or {}
@@ -359,7 +465,6 @@ function Audio.playSong(id, opts)
   }
   Audio._mapSong = Audio._mapSong or id
 
-  -- A new song owns the bus — cancel stale fades and fanfares (oak exit fade was killing lab BGM).
   Audio._fadeOut = nil
   Audio._fadeIn = nil
   Audio._fanfareActive = false
@@ -394,14 +499,74 @@ function Audio.playSong(id, opts)
     -- Sync fallback
     Audio._bgmLocal = { voices = {}, songId = id }
     Player.start(Audio._pack, Audio._cache, Audio._bgmLocal, id, { forceSeq = true })
+    local src = ensure_bgm_source()
+    if src then
+      pcall(function()
+        src:stop()
+        src:setVolume(bgm_gain())
+      end)
+    end
   end
   log(string.format("playsong id=%s", tostring(id)))
   return true
 end
 
+function Audio.currentMapMusic()
+  if Audio._fanfareActive and Audio._fanfareDeferred ~= nil then
+    return Audio._fanfareDeferred
+  end
+  if Audio._fadeOut then return Audio._fadeOut.nextSong or 0 end
+  return (Audio._currentSong and Audio._currentSong.id) or 0
+end
+
+local function play_policy_song(id, fadeOut, fadeIn)
+  if id == nil then return true end
+  if Audio._fanfareActive then
+    Audio._fanfareDeferred = id
+    return true
+  end
+  if fadeOut then return Audio.fadeOutAndPlay(id, fadeOut, fadeIn) end
+  return Audio.playSong(id)
+end
+
+-- pokeemerald/src/overworld.c:1142
+function Audio.mapLoadMusic(info)
+  info = info or {}
+  local P = rse_policy()
+  if not P then
+    return Audio.playMapSong(info.song or info.music, { mapSong = info.music })
+  end
+  local after = P.live(Audio)
+  Audio._mapSong = P.currLocationDefaultMusic(after)
+  if info.seamless and info.fromMapId and info.mapId then
+    -- pokeemerald/src/overworld.c:792
+    local before = P.live(Audio, { locationMap = info.fromMapId })
+    local t = P.transitionMapMusic(before, before.at(info.mapId, info.x, info.y))
+    if t then return play_policy_song(t.song, t.fadeOut, t.fadeIn) end
+    return true
+  end
+  local id = P.playSpecialMapMusic(after)
+  if id then return play_policy_song(id) end
+  return true
+end
+
+-- pokeemerald/src/overworld.c:1216
+function Audio.tryFadeOutOldMapMusic(destMapId, x, y)
+  local P = rse_policy()
+  if not P then return nil end
+  local ctx = P.live(Audio)
+  local speed = P.tryFadeOutOldMapMusic(ctx, ctx.at(destMapId, x, y))
+  if not speed then return 0 end
+  Audio.fadeOutBgm(speed)
+  return 16 * speed
+end
+
 function Audio.playMapSong(id, opts)
   opts = opts or {}
-  id = tonumber(id) or id
+  id = Audio.resolveSong(id)
+  if opts.mapSong ~= nil and not opts.exact and rse_policy() then
+    return Audio.mapLoadMusic({ music = opts.mapSong })
+  end
   if id == nil or id == 0xFFFF then return true end
   Audio._mapSong = opts.mapSong or id
   if Audio._fanfareActive then
@@ -415,27 +580,145 @@ function Audio.playMapSong(id, opts)
 end
 
 function Audio.setMapSong(id)
+  local R = rse_policy()
+  if R then
+    Audio._mapSong = R.currLocationDefaultMusic(R.live(Audio))
+    return
+  end
   Audio._mapSong = tonumber(id) or id
+end
+
+-- pokefirered/include/constants/region_map_sections.h:106
+local NO_RIDE_MUSIC_SECTIONS = { [97] = true, [123] = true, [132] = true }
+
+local function current_section()
+  local Map = package.loaded["src.core.game3.map"]
+  local def = Map and Map.currentDef and Map.currentDef()
+  return def and def.regionMapSectionId
+end
+
+-- pokefirered/src/overworld.c:1193
+function Audio.canOverrideMapMusic(song, sectionId)
+  if rse_policy() then return true end
+  if song == Audio.MUS_CYCLING or song == Audio.MUS_SURF then
+    if sectionId == nil then sectionId = current_section() end
+    return not NO_RIDE_MUSIC_SECTIONS[tonumber(sectionId) or -1]
+  end
+  return true
+end
+
+-- pokefirered/src/overworld.c:1014
+function Audio.specialMapSong(sectionId)
+  local R = rse_policy()
+  if R then return R.specialMapMusic(R.live(Audio)) end
+  if Audio._savedSong then return Audio._savedSong end
+  local P = package.loaded["src.core.game3.player"]
+  if P and (P.surfing or P.surfHopping) and not P.dismounting
+      and Audio.canOverrideMapMusic(Audio.MUS_SURF, sectionId) then
+    return Audio.MUS_SURF
+  end
+  if P and P.biking and Audio.canOverrideMapMusic(Audio.MUS_CYCLING, sectionId) then
+    return Audio.MUS_CYCLING
+  end
+  return Audio._mapSong
 end
 
 -- pokefirered/src/overworld.c:1039
 function Audio.restoreMapSong(opts)
-  local id = Audio._savedSong or Audio._mapSong
+  local id = Audio.specialMapSong()
   if id then return Audio.playSong(id, opts) end
   return true
 end
 
+-- pokefirered/src/sound.c:152
+function Audio.fadeOutAndPlay(id, speed, fadeInSpeed)
+  id = Audio.resolveSong(id)
+  if Audio._fanfareActive then
+    Audio._fanfareDeferred = id
+    return true
+  end
+  if not (Audio._currentSong and Audio._bgmSource) then
+    return Audio.playSong(id)
+  end
+  Audio.fadeOutBgm(speed)
+  if Audio._fadeOut then
+    Audio._fadeOut.nextSong = id
+    Audio._fadeOut.fadeIn = fadeInSpeed
+  end
+  return true
+end
+
+-- pokefirered/src/overworld.c:1096
+function Audio.changeMusicTo(id)
+  id = Audio.resolveSong(id)
+  local R = rse_policy()
+  if R then
+    local t = R.changeMusicTo(R.live(Audio), id)
+    if t then return Audio.fadeOutAndPlay(t.song, t.fadeOut) end
+    return true
+  end
+  if Audio.currentMapMusic() == id then return true end
+  return Audio.fadeOutAndPlay(id, 8)
+end
+
+-- pokefirered/src/overworld.c:1089
+function Audio.changeMusicToDefault()
+  local R = rse_policy()
+  if R then
+    local t = R.changeMusicToDefault(R.live(Audio))
+    if t then return Audio.fadeOutAndPlay(t.song, t.fadeOut) end
+    return true
+  end
+  if Audio._mapSong then return Audio.changeMusicTo(Audio._mapSong) end
+  return true
+end
+
+-- pokefirered/src/field_effect.c:2986
+function Audio.startSurfMusic()
+  Audio.setSavedSong(nil)
+  if Audio.canOverrideMapMusic(Audio.MUS_SURF) then Audio.changeMusicTo(Audio.MUS_SURF) end
+end
+
+-- pokefirered/src/field_player_avatar.c:1579
+function Audio.stopSurfMusic()
+  Audio.setSavedSong(nil)
+  Audio.changeMusicToDefault()
+end
+
+-- pokefirered/src/bike.c:314
+function Audio.bikeMusic(on, forced)
+  if on then
+    if forced or Audio.canOverrideMapMusic(Audio.MUS_CYCLING) then
+      Audio.setSavedSong(Audio.MUS_CYCLING)
+      Audio.changeMusicTo(Audio.MUS_CYCLING)
+    end
+    return
+  end
+  Audio.setSavedSong(nil)
+  local id = Audio.specialMapSong()
+  if id and id ~= Audio.currentMapMusic() then
+    play_policy_song(id)
+  end
+end
+
 -- pokefirered/src/overworld.c:1048
 function Audio.setSavedSong(id)
-  id = tonumber(id) or id
+  id = Audio.resolveSong(id)
   if id == 0 or id == 0xFFFF then id = nil end
   Audio._savedSong = id
 end
 
+-- pokeemerald/src/battle_setup.c:952 / pokefirered/src/overworld.c:1056 Overworld_ClearSavedMusic
+function Audio.clearSavedSong()
+  Audio._savedSong = nil
+end
+
 -- pokefirered/src/overworld.c:1089
 function Audio.fadeDefaultBgm(speed)
+  if rse_policy() then return Audio.changeMusicToDefault() end
   local id = Audio._mapSong
-  if id and Audio._currentSong and Audio._currentSong.id == id then return true end
+  if id and Audio.currentMapMusic() == id then return true end
+  if Audio._fanfareActive then return play_policy_song(id) end
   Audio.fadeOutBgm(speed)
   if id then return Audio.playSong(id) end
   return true
@@ -518,7 +801,12 @@ function Audio.resumeBgm()
   Audio._bgmPaused = false
   if Audio._cmdCh then Audio._cmdCh:push({ cmd = "resume" }) end
   if Audio._bgmSource then
-    pcall(function() Audio._bgmSource:setVolume(bgm_gain()) end)
+    pcall(function()
+      Audio._bgmSource:setVolume(bgm_gain())
+      if not Audio._bgmSource:isPlaying() then
+        Audio._bgmSource:play()
+      end
+    end)
   end
   Audio.pumpBgm()
 end
@@ -537,9 +825,11 @@ Audio.SE_LOOP_MAX_SEC = 2.5
 Audio.SE_ONESHOT_MAX_SEC = 30
 
 function Audio._seRawClear()
+  Audio._cryCache, Audio._cryCacheN = nil, 0
   Audio._seRaw = {}
   Audio._seRawFrames = 0
   Audio._seRawTick = 0
+  if Audio._seSourceClear then Audio._seSourceClear() end
 end
 
 function Audio._seRawGet(id)
@@ -550,7 +840,7 @@ function Audio._seRawGet(id)
   return e
 end
 
-function Audio._seRawPut(id, loop, rawL, rawR)
+function Audio._seRawPut(id, loop, rawL, rawR, loopStart)
   if type(rawL) ~= "table" then return end
   local n = #rawL
   if n > Audio.SE_RAW_MAX_FRAMES then return end
@@ -558,7 +848,8 @@ function Audio._seRawPut(id, loop, rawL, rawR)
   local prev = Audio._seRaw[id]
   if prev then Audio._seRawFrames = Audio._seRawFrames - prev.frames end
   Audio._seRawTick = Audio._seRawTick + 1
-  Audio._seRaw[id] = { loop = loop, rawL = rawL, rawR = rawR, frames = n, tick = Audio._seRawTick }
+  Audio._seRaw[id] = { loop = loop, rawL = rawL, rawR = rawR, loopStart = loopStart, frames = n,
+    tick = Audio._seRawTick }
   Audio._seRawFrames = Audio._seRawFrames + n
   while Audio._seRawFrames > Audio.SE_RAW_MAX_FRAMES do
     local oldId, oldTick
@@ -569,6 +860,121 @@ function Audio._seRawPut(id, loop, rawL, rawR)
     Audio._seRawFrames = Audio._seRawFrames - Audio._seRaw[oldId].frames
     Audio._seRaw[oldId] = nil
   end
+end
+
+-- Static Sources for one-shot / looping SEs, keyed by everything baked into
+-- their PCM (id, pan, master gain, mono, loop).  A repeat SE (wall bump, ball
+-- placement, menu cursor) used to rebuild its SoundData sample by sample and
+-- upload a new Source on every play; now a cached Source is rewound and
+-- replayed, or cloned (shares the uploaded buffer) while the cached one is
+-- still live on another player slot.  Entries are tied to the memoized raw
+-- PCM tables, so an evicted/rebaked SE never reuses a stale Source.
+Audio.SE_SOURCE_CACHE_MAX = 32
+
+function Audio._seSourceClear()
+  Audio._seSrcCache = {}
+  Audio._seSrcCount = 0
+  Audio._seSrcTick = 0
+end
+
+function Audio._seSourceFor(id, rawL, rawR, master, pan, mono, loop)
+  if not (love and love.audio and love.audio.newSource) then return nil end
+  local hit = Audio._seRaw and Audio._seRaw[id]
+  local cacheable = hit and hit.rawL == rawL and hit.rawR == rawR
+  local key = cacheable and table.concat({ tostring(id), tostring(pan),
+    tostring(master), mono and "m" or "s", loop and "l" or "o" }, ":")
+  if not Audio._seSrcCache then Audio._seSourceClear() end
+  local entry = key and Audio._seSrcCache[key]
+  if entry and entry.rawL == rawL then
+    Audio._seSrcTick = Audio._seSrcTick + 1
+    entry.tick = Audio._seSrcTick
+    local src = entry.src
+    if Audio._seMeta[src] then
+      -- still tracked as a live SE: play a copy rather than cut it off
+      local ok, copy = pcall(function() return src:clone() end)
+      src = ok and copy or nil
+    end
+    if src then
+      pcall(function() src:stop() end)
+      if loop then pcall(function() src:setLooping(true) end) end
+      return src
+    end
+    key = nil -- no clone support: build a one-off, keep the cached entry
+  end
+  local sd = Audio._buildSeSoundData(rawL, rawR, master, pan, mono)
+  if not sd then return nil end
+  local src = love.audio.newSource(sd, "static")
+  if loop then
+    pcall(function() src:setLooping(true) end)
+  end
+  if key then
+    if not Audio._seSrcCache[key] then
+      Audio._seSrcCount = Audio._seSrcCount + 1
+    end
+    Audio._seSrcTick = Audio._seSrcTick + 1
+    Audio._seSrcCache[key] = { src = src, rawL = rawL, tick = Audio._seSrcTick }
+    while Audio._seSrcCount > Audio.SE_SOURCE_CACHE_MAX do
+      local oldKey, oldTick
+      for k, e in pairs(Audio._seSrcCache) do
+        if k ~= key and (oldTick == nil or e.tick < oldTick) then
+          oldKey, oldTick = k, e.tick
+        end
+      end
+      if oldKey == nil then break end
+      Audio._seSrcCache[oldKey] = nil
+      Audio._seSrcCount = Audio._seSrcCount - 1
+    end
+  end
+  return src
+end
+
+local function bake_se(id, opts, memoable)
+  local slot = { voices = {} }
+  -- SE must run the M4A sequencer (SE_SELECT is CGB pulse, not voice0 PCM).
+  local ok = Player.start(Audio._pack, Audio._cache, slot, id, { forceSeq = true })
+  if not ok then
+    warn_once("se:" .. tostring(id), "SE " .. tostring(id) .. " missing")
+    return nil
+  end
+
+  local loop = opts.loop
+  if loop == nil then
+    -- SE_LOW_HEALTH and any track with GOTO before FINE are hardware loops.
+    loop = (id == SE.SE_LOW_HEALTH) or Audio._songHasGoto(slot)
+  end
+
+  local loopBody = loop and opts.loop == nil and id ~= SE.SE_LOW_HEALTH
+  -- pokefirered/src/battle_anim_special.c:1200
+  local cut = ((loop and not loopBody) or id == SE.SE_EXP)
+  local maxSec = opts.maxSec
+    or (cut and Audio.SE_LOOP_MAX_SEC or Audio.SE_ONESHOT_MAX_SEC)
+  local rawL, rawR, loopStart = Player.bakeSlot(slot, {
+    raw = true,
+    maxSec = maxSec,
+    stopOnGoto = loop and true or false,
+    loopBody = loopBody,
+  })
+  if not cut and opts.maxSec == nil and type(rawL) == "table"
+    and #rawL >= math.floor(Mix.SAMPLE_RATE * maxSec) then
+    warn_once("selen:" .. tostring(id),
+      "SE " .. tostring(id) .. " hit the " .. tostring(maxSec) .. "s bake ceiling")
+  end
+  if memoable then Audio._seRawPut(id, loop and true or false, rawL, rawR, loopStart) end
+  return loop and true or false, rawL, rawR, loopStart
+end
+
+function Audio.prewarmSe(id, priority)
+  id = SE.resolve(id)
+  if id == nil or not Audio.isReady() then return false end
+  if Audio._seRaw and Audio._seRaw[id] then return false end
+  local info = Audio.songInfo(id)
+  if info and info.kind == "fanfare" then return false end
+  return Warm.add("se:" .. tostring(id), function()
+    if Audio._seRaw and Audio._seRaw[id] then return end
+    local loop, rawL, rawR = bake_se(id, {}, true)
+    if loop == nil or loop then return end
+    Audio._seSourceFor(id, rawL, rawR, Audio._sfxVolume or 1, Audio.normalizePan(nil), Audio._mono, false)
+  end, priority)
 end
 
 function Audio.playSe(id, opts)
@@ -590,58 +996,34 @@ function Audio.playSe(id, opts)
   Audio._stopSePlayer(mplay)
 
   local memoable = opts.loop == nil and opts.maxSec == nil
+  if memoable then Warm.flush("se:" .. tostring(id)) end
   local hit = memoable and Audio._seRawGet(id) or nil
-  local loop, rawL, rawR
+  local loop, rawL, rawR, loopStart
   if hit then
-    loop, rawL, rawR = hit.loop, hit.rawL, hit.rawR
+    loop, rawL, rawR, loopStart = hit.loop, hit.rawL, hit.rawR, hit.loopStart
   else
-    local slot = { voices = {} }
-    -- SE must run the M4A sequencer (SE_SELECT is CGB pulse, not voice0 PCM).
-    local ok = Player.start(Audio._pack, Audio._cache, slot, id, { forceSeq = true })
-    if not ok then
-      warn_once("se:" .. tostring(id), "SE " .. tostring(id) .. " missing")
-      return false
-    end
-
-    loop = opts.loop
-    if loop == nil then
-      -- SE_LOW_HEALTH and any track with GOTO before FINE are hardware loops.
-      loop = (id == SE.SE_LOW_HEALTH) or Audio._songHasGoto(slot)
-    end
-
-    -- pokefirered/src/battle_anim_special.c:1200
-    local cut = (loop or id == SE.SE_EXP)
-    local maxSec = opts.maxSec
-      or (cut and Audio.SE_LOOP_MAX_SEC or Audio.SE_ONESHOT_MAX_SEC)
-    rawL, rawR = Player.bakeSlot(slot, {
-      raw = true,
-      maxSec = maxSec,
-      stopOnGoto = loop and true or false,
-    })
-    if not cut and opts.maxSec == nil and type(rawL) == "table"
-      and #rawL >= math.floor(Mix.SAMPLE_RATE * maxSec) then
-      warn_once("selen:" .. tostring(id),
-        "SE " .. tostring(id) .. " hit the " .. tostring(maxSec) .. "s bake ceiling")
-    end
-    if memoable then Audio._seRawPut(id, loop and true or false, rawL, rawR) end
+    loop, rawL, rawR, loopStart = bake_se(id, opts, memoable)
+    if loop == nil then return false end
   end
 
   local pan = Audio.normalizePan(opts.pan)
   local master = (Audio._sfxVolume or 1) * (opts.volume or 1)
-  local sd = Audio._buildSeSoundData(rawL, rawR, master, pan, Audio._mono)
-  if sd and love and love.audio and love.audio.newSource then
-    local src = love.audio.newSource(sd, "static")
+  local src, body
+  if loop and loopStart and love and love.audio and love.audio.newQueueableSource then
+    src, body = Audio._newIntroLoopSource(rawL, rawR, loopStart, master, pan, Audio._mono)
+  end
+  if not src then
+    src = Audio._seSourceFor(id, rawL, rawR, master, pan, Audio._mono, loop)
+  end
+  if src then
     src:setVolume(1)
-    if loop then
-      pcall(function() src:setLooping(true) end)
-    end
     Audio._seSources[#Audio._seSources + 1] = src
     Audio._seByPlayer[mplay] = src
     Audio._seMeta[src] = { id = id, player = mplay,
       duckBgm = not loop and id ~= SE.SE_SELECT
         and (Audio._sfxVolume or 1) * (opts.volume or 1) > 0,
       rawL = rawL, rawR = rawR, master = master, pan = pan,
-      mono = Audio._mono, loop = loop and true or false }
+      mono = Audio._mono, loop = loop and true or false, body = body }
     update_se_duck(src)
     src:play()
     update_se_duck()
@@ -693,6 +1075,7 @@ function Audio._buildSeSoundData(L, R, master, pan, mono)
   master = master or 1
   local gainL, gainR = Audio._seGains(pan)
   local gl, gr = master * gainL, master * gainR
+  local warm = package.loaded["src.core.game3.warm"]
   local ptr
   if ffiOk and ffi and sd.getFFIPointer then
     local okP, p = pcall(sd.getFFIPointer, sd)
@@ -716,6 +1099,7 @@ function Audio._buildSeSoundData(L, R, master, pan, mono)
       sd:setSample(i - 1, 1, l)
       sd:setSample(i - 1, 2, r)
     end
+    if warm and i % 4096 == 0 then warm.yield() end
   end
   return sd
 end
@@ -726,7 +1110,7 @@ function Audio.setSePan(pan)
   for _, mplay in ipairs({ 1, 2 }) do
     local old = Audio._seByPlayer[mplay]
     local meta = old and Audio._seMeta[old]
-    if meta and meta.rawL and meta.pan ~= pan then
+    if meta and meta.rawL and not meta.body and meta.pan ~= pan then
       local playing = false
       pcall(function() playing = old:isPlaying() end)
       meta.pan = pan
@@ -754,6 +1138,34 @@ function Audio.setSePan(pan)
     end
   end
   return pan
+end
+
+local function slice(t, from, to)
+  local out = {}
+  for i = from, to do out[#out + 1] = t[i] end
+  return out
+end
+
+function Audio._newIntroLoopSource(L, R, loopStart, master, pan, mono)
+  local n = #L
+  if loopStart <= 0 or loopStart >= n then return nil end
+  local intro = Audio._buildSeSoundData(slice(L, 1, loopStart), slice(R, 1, loopStart), master, pan, mono)
+  local body = Audio._buildSeSoundData(slice(L, loopStart + 1, n), slice(R, loopStart + 1, n), master, pan, mono)
+  if not (intro and body) then return nil end
+  local ok, src = pcall(love.audio.newQueueableSource, Mix.SAMPLE_RATE, 16, mono and 1 or 2, 3)
+  if not (ok and src) then return nil end
+  src:queue(intro)
+  src:queue(body)
+  return src, body
+end
+
+function Audio._pumpSeLoops()
+  for _, src in ipairs(Audio._seSources) do
+    local meta = Audio._seMeta[src]
+    if meta and meta.body and src:getFreeBufferCount() > 0 then
+      src:queue(meta.body)
+    end
+  end
 end
 
 function Audio._songHasGoto(slot)
@@ -803,7 +1215,7 @@ function Audio.stopSe(id)
     Audio._seByPlayer = {}
     return
   end
-  local SE = require("src.core.game3.se_ids")
+  local SE = lazyReq("src.core.game3.se_ids")
   id = SE.resolve(id)
   for i = #Audio._seSources, 1, -1 do
     local src = Audio._seSources[i]
@@ -817,13 +1229,17 @@ function Audio.stopSe(id)
 end
 
 function Audio.isSePlaying(id)
+  if Audio._suspended then return false end
   if id == nil then
+    local rse = rse_policy() ~= nil
     for _, src in ipairs(Audio._seSources) do
-      if src:isPlaying() then return true end
+      local meta = Audio._seMeta[src]
+      -- pokeemerald/src/sound.c:606
+      if src:isPlaying() and not (rse and meta and tonumber(meta.player) == 3) then return true end
     end
     return false
   end
-  local SE = require("src.core.game3.se_ids")
+  local SE = lazyReq("src.core.game3.se_ids")
   id = SE.resolve(id)
   for _, src in ipairs(Audio._seSources) do
     local meta = Audio._seMeta[src]
@@ -832,10 +1248,21 @@ function Audio.isSePlaying(id)
   return false
 end
 
+-- pokeemerald/src/sound.c:624
+-- pokeruby/src/sound.c:554
+function Audio.isSpecialSePlaying()
+  if Audio._suspended then return false end
+  for _, src in ipairs(Audio._seSources) do
+    local meta = Audio._seMeta[src]
+    if meta and tonumber(meta.player) == 3 and src:isPlaying() then return true end
+  end
+  return false
+end
+
 function Audio.waitSe(id, cb)
-  -- Poll in update via callback list
+  -- Poll in update via callback list with 180 frame (~3s) defensive timeout
   Audio._waitSe = Audio._waitSe or {}
-  Audio._waitSe[#Audio._waitSe + 1] = { id = id, cb = cb }
+  Audio._waitSe[#Audio._waitSe + 1] = { id = id, cb = cb, frames = 180 }
 end
 
 local function start_fanfare_source(id, mplay)
@@ -890,13 +1317,13 @@ local function start_fanfare_source(id, mplay)
 end
 
 function Audio.playFanfare(id)
-  local SE = require("src.core.game3.se_ids")
-  id = SE.resolve(id)
-  if id == nil then return false end
+  local SE = lazyReq("src.core.game3.se_ids")
+  id = SE.resolve(id) or Audio.resolveSong(id)
+  if type(id) ~= "number" then return false end
   local entry, haveTable = fanfare_entry(id)
   if haveTable and not entry then
     -- pokefirered/src/sound.c:245
-    id = 257
+    id = Audio.songs()[Audio.config().fanfareFallback or "MUS_LEVEL_UP"]
     entry = fanfare_entry(id)
   end
   local info = Audio.songInfo(id) or {}
@@ -937,6 +1364,7 @@ function Audio.pumpFanfares()
 end
 
 function Audio.isFanfareFinished()
+  if Audio._suspended then return true end
   return not Audio._fanfareActive
 end
 
@@ -945,19 +1373,81 @@ function Audio.waitFanfare(cb)
   if not Audio._fanfareActive and cb then cb() end
 end
 
+Audio.CRY_CACHE_MAX = 24
+
+local function cry_inputs(mode, pan, volume)
+  mode = tonumber(mode) or 0
+  local cfg = Audio.config()
+  -- pokeruby/src/sound.c:364
+  if cfg.cryModeMax and (mode < 0 or mode > cfg.cryModeMax) then mode = 0 end
+  local params = Sample.cryParams(mode, volume or cfg.cryDefaultVolume, cfg.cryModeOverrides)
+  return params, pan and pan ~= 0 and Audio.normalizePan(pan) or nil
+end
+
+local function cry_meta(slot)
+  local cry = slot and slot.info
+  if not (cry and cry.cryIndex ~= nil) then return nil end
+  local c = Audio._pack.index.cries[cry.cryIndex]
+  return c and Audio._pack.samples[c.sampleId], cry.cryIndex
+end
+
+local function cry_render(slot, params, pan, mode, volume)
+  local meta, cryIndex = cry_meta(slot)
+  if not meta then return nil end
+  local key = table.concat({ tostring(cryIndex), tostring(mode), tostring(volume), tostring(pan),
+    Audio._mono and "m" or "s" }, ":")
+  Warm.flush("cry:" .. key)
+  local cache = Audio._cryCache or {}
+  Audio._cryCache = cache
+  local hit = cache[key]
+  if hit then return hit.sd, hit.info end
+  local pcm = Sample.loadPcm(Audio._pack.samplesBin, meta)
+  if not pcm then return nil end
+  local sd, info = Sample.renderCry(pcm, Mix.waveRate(meta.freq), params, {
+    outRate = Mix.SAMPLE_RATE,
+    pan = pan,
+    mono = Audio._mono,
+  })
+  if sd then
+    Audio._cryCacheN = (Audio._cryCacheN or 0) + 1
+    if Audio._cryCacheN > Audio.CRY_CACHE_MAX then
+      Audio._cryCache, Audio._cryCacheN = {}, 1
+      cache = Audio._cryCache
+    end
+    cache[key] = { sd = sd, info = info }
+  end
+  return sd, info
+end
+
+function Audio.prewarmCry(species, mode, pan, priority)
+  species = tonumber(species) or species
+  if species == nil or not Audio.isReady() then return false end
+  local params, npan = cry_inputs(mode, pan, nil)
+  local slot = Player.startCry(Audio._pack, species, { pitch = 1.0 })
+  local _, cryIndex = cry_meta(slot)
+  if cryIndex == nil then return false end
+  local key = table.concat({ tostring(cryIndex), tostring(tonumber(mode) or 0), "nil", tostring(npan),
+    Audio._mono and "m" or "s" }, ":")
+  if Audio._cryCache and Audio._cryCache[key] then return false end
+  return Warm.add("cry:" .. key, function()
+    cry_render(slot, params, npan, tonumber(mode) or 0, nil)
+  end, priority)
+end
+
 -- pokefirered/src/sound.c:333
 function Audio.playCry(species, mode, pan)
   species = tonumber(species) or species
-  local volume
+  local volume, noDuck
   if type(mode) == "table" then
     local o = mode
     mode = o.mode
     if pan == nil then pan = o.pan end
     volume = o.volume
+    noDuck = o.noDuck == true
   end
   mode = tonumber(mode) or 0
-  local params = Sample.cryParams(mode, volume)
-  local doubles = params.mode == 1
+  local params, npan = cry_inputs(mode, pan, volume)
+  local doubles = params.mode == 1 or noDuck
   Audio._cryParams = params
   log(string.format("playCry species=%s mode=%d", tostring(species), params.mode))
   if not Audio.isReady() then
@@ -970,24 +1460,14 @@ function Audio.playCry(species, mode, pan)
     return false
   end
   Audio._crySlot = slot
-  local cry = slot.info
-  local meta = nil
-  if cry and cry.cryIndex ~= nil then
-    local c = Audio._pack.index.cries[cry.cryIndex]
-    if c then meta = Audio._pack.samples[c.sampleId] end
-  end
-  local pcm = meta and Sample.loadPcm(Audio._pack.samplesBin, meta)
-  if pcm then
+  if cry_meta(slot) then
     Audio._crySource = nil
     if not doubles then
       Audio._duck = 85 / 256
       Audio._duckHold = 2
       apply_bgm_gain()
     end
-    local sd, info = Sample.renderCry(pcm, Mix.waveRate(meta.freq), params, {
-      outRate = Mix.SAMPLE_RATE,
-      pan = pan and pan ~= 0 and Audio.normalizePan(pan) or nil,
-    })
+    local sd, info = cry_render(slot, params, npan, mode, volume)
     if info then
       Audio._cryUntil = (Audio._cryClock or 0) + info.frames
     end
@@ -1040,6 +1520,7 @@ end
 function Audio.update(dt)
   dt = dt or 1 / 60
   Audio.tickCry(dt)
+  Audio._pumpSeLoops()
   update_se_duck()
 
   Audio.pumpFanfares()
@@ -1047,7 +1528,7 @@ function Audio.update(dt)
   -- Fanfare countdown (frame-exact)
   if Audio._fanfareActive then
     Audio._fanfareFrames = (Audio._fanfareFrames or 0) - dt * 60
-    if Audio._fanfareFrames <= 0 then
+    if Audio._fanfareFrames <= 0 or Audio._suspended then
       Audio._fanfareActive = false
       Audio._fanfarePending = nil
       local deferred, restore = Audio._fanfareDeferred, Audio._fanfareRestore
@@ -1094,6 +1575,14 @@ function Audio.update(dt)
         Audio._currentSong = nil
       end
       Audio._fadeOut = nil
+      if stillSame and f.nextSong then
+        if f.fadeIn then
+          -- pokeemerald/src/sound.c:151
+          Audio.fadeInBgm(f.nextSong, f.fadeIn)
+        else
+          Audio.playSong(f.nextSong)
+        end
+      end
     end
   end
   if Audio._fadeIn and Audio._bgmSource then
@@ -1132,18 +1621,57 @@ function Audio.update(dt)
   if Audio._waitSe then
     local pending = {}
     for _, w in ipairs(Audio._waitSe) do
-      if Audio.isSePlaying(w.id) then
+      w.frames = (w.frames or 180) - dt * 60
+      if not Audio.isSePlaying(w.id) or w.frames <= 0 or Audio._suspended then
+        if w.cb then
+          pcall(w.cb)
+        end
+      else
         pending[#pending + 1] = w
-      elseif w.cb then
-        w.cb()
       end
     end
     Audio._waitSe = pending
   end
 end
 
+local function check_worker_status()
+  local ch = Audio._statusCh
+  if not (ch and Audio._worker) then return end
+  local msg = ch:pop()
+  while msg do
+    if type(msg) == "table" and msg.installFailed and msg.root == Audio._root then
+      warn_once("worker", "bgm worker could not load pack at " .. tostring(msg.root)
+        .. ": " .. tostring(msg.err))
+      if Audio._cmdCh then Audio._cmdCh:push({ cmd = "quit" }) end
+      if Audio._outCh then Audio._outCh:clear() end
+      if Audio._fanfareCh then Audio._fanfareCh:clear() end
+      ch:clear()
+      Audio._worker = false
+      Audio._cmdCh = nil
+      Audio._outCh = nil
+      Audio._fanfareCh = nil
+      Audio._statusCh = nil
+      Audio._pendingBgm = nil
+      Audio._bgmQueuedAt = {}
+      local gen = Audio._bgmGen
+      if gen and Audio.isReady() then
+        Audio._bgmLocal = { voices = {}, songId = gen }
+        Player.start(Audio._pack, Audio._cache, Audio._bgmLocal, gen, { forceSeq = true })
+        ensure_bgm_source()
+      end
+      local p = Audio._fanfarePending
+      if p and Audio._fanfareActive and Audio.isReady() then
+        start_fanfare_source(p.id, p.player)
+      end
+      return
+    end
+    msg = ch:pop()
+  end
+end
+
 --- Drain worker → QueueableSource. Safe to call from focus/resume hooks.
 function Audio.pumpBgm()
+  check_worker_status()
   if Audio._suspended then return end
   if not (Audio._outCh and Audio._bgmSource) or Audio._bgmPaused then return end
   local src = Audio._bgmSource
@@ -1212,7 +1740,6 @@ function Audio.onFocusGained()
   end
 end
 
---- Device reset: QueueableSource may be dead — rebuild then refill.
 function Audio.rebuildPlayback()
   Audio._suspended = false
   if not (love and love.audio and love.audio.newQueueableSource) then return false end
@@ -1294,14 +1821,16 @@ function Audio.shutdown()
   if Audio._cmdCh then Audio._cmdCh:clear() end
   if Audio._outCh then Audio._outCh:clear() end
   if Audio._fanfareCh then Audio._fanfareCh:clear() end
+  if Audio._statusCh then Audio._statusCh:clear() end
   Audio._worker = nil
   Audio._cmdCh = nil
   Audio._outCh = nil
   Audio._fanfareCh = nil
+  Audio._statusCh = nil
 end
 
 pcall(function()
-  require("src.core.SessionLifecycle").registerProcessShutdown(Audio.shutdown)
+  lazyReq("src.core.SessionLifecycle").registerProcessShutdown(Audio.shutdown)
 end)
 
 return Audio

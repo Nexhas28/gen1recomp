@@ -79,6 +79,10 @@ end
 -- to the A/B path once the cry is over -- see TextBox's opts.auto.wait
 -- (#247, #251).
 function Commands.show_text(ctx, textId, subs, extraOpts)
+  -- home/window.asm:289
+  if ctx.overworld and ctx.overworld.applyPendingFace then
+    ctx.overworld:applyPendingFace()
+  end
   local text = ctx.game.data.text[textId]
   if not text and ctx.overworld then
     text = ctx.game.data:resolveText(ctx.overworld.map.def.label, textId)
@@ -235,7 +239,7 @@ function Commands.jump_if_false(ctx, target)
   if not ctx.lastCheck then return target end
 end
 
--- give_item <itemId> [count] [gotText] [fullText]: adds to the bag, plays
+-- give_item <itemId> [count] [gotText] [fullText] [sound] [fullNoFace]: adds to the bag, plays
 -- the gift jingle and shows the "got item!" box.  pokered's GiveItem (home/
 -- give.asm) copies the item name to wStringBuffer and every gift script
 -- then prints a text ending "<PLAYER> got\n<item>!" with
@@ -243,7 +247,8 @@ end
 -- text (label or literal; {RAM:wStringBuffer} becomes the item name);
 -- pass false when the script shows its own received-text row.  fullText
 -- picks the refusal text (scripts/BillsHouse.asm:184-186).
-function Commands.give_item(ctx, itemId, count, gotText, fullText)
+function Commands.give_item(ctx, itemId, count, gotText, fullText, sound,
+                             fullNoFace)
   -- the bag can refuse at its configured capacity (20 in vanilla): halt
   -- the script, so later set_flag rows don't burn the gift -- make
   -- room and talk again, like the original (pokered's `jr nc, .bag_full`
@@ -252,6 +257,10 @@ function Commands.give_item(ctx, itemId, count, gotText, fullText)
       ctx.save, itemId, count or 1, ctx.game.data) then
     Commands.show_text(ctx, fullText or (ctx.game.data.text
       and ctx.game.data.text._BagFullText) or Strings("You can't carry\nany more items!"))
+    if fullNoFace then
+      -- scripts/SSAnneCaptainsRoom.asm:36-37
+      Commands.no_npc_face_player(ctx, true)
+    end
     return math.huge
   end
   local def = ctx.game.data.items[itemId]
@@ -261,7 +270,8 @@ function Commands.give_item(ctx, itemId, count, gotText, fullText)
   -- the jingle rides the box -- Sound.play routes fanfares through
   -- Music.duckForFanfare, like PlaySoundWaitForCurrent
   local Sound = require("src.core.Sound")
-  local jingle = (def and def.keyItem) and "Get_Key_Item" or "Get_Item1"
+  local jingle = sound
+    or ((def and def.keyItem) and "Get_Key_Item" or "Get_Item1")
   if gotText ~= false then
     -- the gift texts carry the jingle as a trailing text command
     -- (sound_get_item_1 / sound_get_key_item -> home/text.asm
@@ -382,8 +392,9 @@ function Commands.start_battle(ctx, kind, a, b)
   runner:yield()
 end
 
-function Commands.warp(ctx, mapId, x, y, facing)
+function Commands.warp(ctx, mapId, x, y, facing, door)
   local runner = ctx.runner
+  if door then ctx.overworld.doorWarp = true end
   ctx.overworld:startWarpTo(mapId, x, y, facing, function()
     runner:resume()
   end)
@@ -492,10 +503,12 @@ function Commands.face(ctx, dir)
 end
 
 -- face an arbitrary map object (by object_event index)
-function Commands.face_object(ctx, objIndex, dir)
+function Commands.face_object(ctx, objIndex, dir, opts)
   local npc = stampSpriteIndex(ctx,
     ctx.overworld and ctx.overworld:npcByIndex(objIndex))
   if npc then npc.facing = dir end
+  -- pokeyellow engine/overworld/movement.asm:349
+  if npc and opts and opts.hold then npc.timer = opts.hold end
 end
 
 -- Instantly relocate an NPC (OaksLabCalcRivalMovementScript / SetSpritePosition1).
@@ -634,7 +647,7 @@ function Commands.hide_object(ctx, mapId, objName)
 end
 
 function Commands.play_sound(ctx, soundId)
-  require("src.core.Sound").play(ctx.game.data, soundId)
+  ctx.lastSfxSrc = require("src.core.Sound").play(ctx.game.data, soundId)
 end
 
 -- wait_sound: WaitForSoundToFinish (home/delay.asm:15), the drain that
@@ -644,12 +657,20 @@ local WAIT_SOUND_CEILING = 600
 
 function Commands.wait_sound(ctx)
   local Sound = require("src.core.Sound")
-  if not Sound.sfxBusy() then return end
+  local src = ctx.lastSfxSrc
+  ctx.lastSfxSrc = nil
+  local function busy()
+    if Sound.sfxBusy() then return true end
+    if not src then return false end
+    local ok, playing = pcall(function() return src:isPlaying() end)
+    return ok and playing and true or false
+  end
+  if not busy() then return end
   local runner = ctx.runner
   local left = WAIT_SOUND_CEILING
   runner.waitingCheck = function()
     left = left - 1
-    return left <= 0 or not Sound.sfxBusy()
+    return left <= 0 or not busy()
   end
   runner:yield()
 end
@@ -846,6 +867,12 @@ function Commands.give_pokemon(ctx, species, level, skipNickname, gotText)
         function() end))
     end
   end
+end
+
+-- pokeyellow scripts/OaksLab.asm:1037
+function Commands.set_catch_rate(ctx, slot, value)
+  local mon = ctx.save.party and ctx.save.party[slot]
+  if mon then mon.catchRate = value end
 end
 
 function Commands.give_money(ctx, amount)
@@ -1201,12 +1228,17 @@ function Commands.walk_npc(ctx, objIndex, dirs, opts)
   claimMove(ctx, entity)
   local runner = ctx.runner
   local wait = not (opts and opts.wait == false)
+  -- pokeyellow engine/overworld/movement.asm:932
+  local fast = opts and opts.stepFrames and entity ~= ow.player
+  local prevStep = entity.stepFrames
+  if fast then entity.stepFrames = opts.stepFrames end
   local yielded, finished = false, false
   local i = 0
   local function step()
     i = i + 1
     if not dirs[i] then
       finished = true
+      if fast then entity.stepFrames = prevStep end
       if wait and yielded then runner:resume() end
       return
     end

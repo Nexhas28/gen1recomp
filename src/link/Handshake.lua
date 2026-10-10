@@ -172,7 +172,19 @@ end
 -- signals it reads).  A game with no data at all is Gen 1, which is what every
 -- pre-Gold build was.
 function Handshake.generation(game)
+  if type(game) == "table" and tonumber(game.generation) then
+    return tonumber(game.generation)
+  end
   return Fingerprint.generationOf(game and game.data)
+end
+
+local function trainerName(game)
+  local save = game and game.save
+  if type(save) ~= "table" then return nil end
+  local player = save.player
+  if type(player) == "table" and type(player.name) == "string" then return player.name end
+  if type(save.name) == "string" then return save.name end
+  return nil
 end
 
 Handshake.DEFAULT_RULESET = "gen1_faithful"
@@ -198,7 +210,7 @@ function Handshake.hello(game, mode)
   return {
     type = "hello",
     protocol = Handshake.PROTOCOL,
-    name = game and game.save and game.save.player and game.save.player.name,
+    name = trainerName(game),
     mode = mode,
     engineVersion = Version.engine,
     apiVersion = Version.modApi,
@@ -354,6 +366,24 @@ function Handshake.describe(localHello, remoteHello, verdict, mode)
   local lines = {}
   local peerName = remoteHello and remoteHello.name
   local peer = type(peerName) == "string" and peerName or "THEY"
+  if type(localHello) == "table" and type(localHello.game3) == "table"
+      and type(remoteHello) == "table" and type(remoteHello.game3) == "table" then
+    local Game3Link = require("src.link.Game3Link")
+    if Game3Link.crossFamily(localHello, remoteHello) then
+      local GameVersion = require("src.core.GameVersion")
+      local info = GameVersion.info(Game3Link.peerVersionOf(localHello, remoteHello))
+      wrap(lines, "The other game is")
+      wrap(lines, tostring(info and info.label or "another game"):upper() .. ".")
+      if mode == "battle" then
+        wrap(lines, "Link battles need")
+        wrap(lines, "the same game.")
+      else
+        wrap(lines, "Trading works")
+        wrap(lines, "between them.")
+      end
+      return lines
+    end
+  end
   if verdict == "refused" then
     -- checked before the v1 arm for the same reason checkCompat checks it
     -- first: a Gen 1 peer meeting a Gen 2 one has no `protocol` to read yet

@@ -2,7 +2,7 @@
 
 local Rules = require("src.core.game3.battle.rules")
 local EffectCtx = require("src.core.game3.battle.effect_ctx")
-local Strings = require("src.core.Strings")
+local BattleProfile = require("src.core.game3.battle.profile")
 
 local Residuals = {}
 
@@ -53,6 +53,16 @@ local function sortedBattlers(adapter)
   local list = adapter:activeBattlers() or {}
   local a, b = list[1], list[2]
   if a and b then
+    -- pokefirered/src/battle_util.c:484
+    local ids = st and st._endTurnOrder
+    if ids and ids[1] and ids[2] then
+      if ids[1] == b.id and ids[2] == a.id then
+        list[1], list[2] = b, a
+      elseif ids[1] == a.id then
+        list[1], list[2] = a, b
+      end
+      return list
+    end
     local sa, sb = battlerSpeed(a, adapter), battlerSpeed(b, adapter)
     if sb > sa or (sb == sa and adapter:roll(0, 1) == 1) then
       list[1], list[2] = b, a
@@ -66,7 +76,11 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
   if battler and adapter:isFainted(battler) then return false end
   if adapter:isBattleDecided() then return false end
 
+  if adapter.prepareFaintStep then adapter:prepareFaintStep(battler, phase) end
+
   local active = adapter:activeBattlers() or {}
+  local sequencing = BattleProfile.rule(adapter._st, "sequencingPolicy")
+  if sequencing then active = sequencing.residualOrder(adapter, battler, phase, active) end
   local hpBefore = {}
   for _, b in ipairs(active) do
     if b and b.side then
@@ -106,7 +120,7 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
         if not b._faintAnnounced then
           b._faintAnnounced = true
           if adapter.pushEvent then adapter:pushEvent({ kind = "faint", side = b.side, battler = b.id }) end
-          adapter:say(Strings("%s fainted!", adapter:displayName(b)))
+          adapter:sayText("STRINGID_ATTACKERFAINTED", { atk = b })
         end
         adapter:emitFaint(b)
       end
@@ -158,13 +172,16 @@ function Residuals.collectEvents(adapter)
   end
 
   local st = adapter._st
-  if st and st.double then
+  if st then
     st._endTurnOrder = nil
     -- pokefirered/src/battle_util.c:484
     local order = {}
     for _, b in ipairs(sortedBattlers(adapter)) do order[#order + 1] = b.id end
     st._endTurnOrder = order
-    st.turnOrder = order
+    if st.double then
+      -- pokefirered/src/battle_util.c:484
+      st.turnOrder = order
+    end
   end
 
   for _, phase in ipairs(Rules.FIELD_PHASES_ORDER) do

@@ -1224,7 +1224,7 @@ AnimCallbacks.MudSportDirt = AnimCallbacks.DirtPlumeParticle
 AnimCallbacks.SandAttackMud = AnimCallbacks.DirtPlumeParticle
 AnimCallbacks.MudSand = AnimCallbacks.DirtPlumeParticle
 
---- pret AnimWaveFromCenterOfTarget / AnimAirWaveCrescent / AnimSoundWave (pokefirered/src/battle_anim_sound.c:220, 270)
+--- pret AnimWaveFromCenterOfTarget / AnimAirWaveCrescent / AnimSoundWave (pokefirered/src/battle_anim_ice.c:822, pokefirered/src/battle_anim_flying.c:433)
 function AnimCallbacks.WaveFromCenterOfTarget(sprite)
   if not sprite._inited then
     sprite._inited = true
@@ -1420,6 +1420,33 @@ function AnimCallbacks.SimpleFadeOut(sprite)
   if life >= 20 then destroy(sprite) end
 end
 
+-- pokefirered/src/battle_anim_special.c:2166-2177,
+function AnimCallbacks.ShinySparkleOrbit(sprite)
+  sprite.imageValue = sprite.data[2] or 0
+  local angle = sprite.data[1] or 0
+  local radians = (angle % 256) * 2 * math.pi / 256
+  sprite.ox = math.floor(math.sin(radians) * 24)
+  sprite.oy = math.floor(math.cos(radians) * 24)
+  sprite.data[1] = angle + 12
+  if sprite.data[1] > 255 then destroy(sprite) end
+end
+
+-- pokefirered/src/battle_anim_special.c:2120-2139,
+function AnimCallbacks.ShinySparkle(sprite)
+  sprite.imageValue = sprite.data[2] or 0
+  local step = (sprite.data[0] or 0) + 1
+  sprite.data[0] = step
+  if step <= 4 then
+    sprite.visible = false
+    return
+  end
+  sprite.visible = true
+  local n = step - 4
+  sprite.ox = -32 + n * 5
+  sprite.oy = 32 - n * 5
+  if sprite.ox > 32 then destroy(sprite) end
+end
+
 --- noGfx helpers are handled as visual tasks, not sprites.
 AnimCallbacks.HorizontalLunge = nil
 AnimCallbacks.VerticalDip = nil
@@ -1427,7 +1454,7 @@ AnimCallbacks.SlideMonToOriginalPos = nil
 AnimCallbacks.SlideMonToOffset = nil
 
 AnimCallbacks._destroy = destroy
-for _, group in ipairs({ "g1", "g2", "g3", "g4" }) do
+for _, group in ipairs({ "g1", "g2", "g3", "g4", "rs", "rs_early" }) do
   local ok, mod = pcall(require, "src.core.game3.battle.anim_port." .. group .. "_callbacks")
   if ok and type(mod) == "function" then mod = mod(AnimCallbacks) end
   if ok and type(mod) == "table" then
@@ -1447,4 +1474,3 @@ function AnimCallbacks.get(name)
 end
 
 return AnimCallbacks
-

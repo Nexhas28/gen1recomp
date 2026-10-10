@@ -49,7 +49,8 @@ function Party.applyBattleFields(opaqueMon, fields)
     "happiness", "friendship", "evs", "pokerus", "item", "heldItem",
     "species", "speciesId", "name", "growthRate",
     "attack", "defense", "speed", "spAtk", "spDef",
-    "atk", "def", "spe", "spa", "spd",
+    "atk", "def", "spe", "spa", "spd", "ppBonusesPacked",
+    "ability", "abilityId",
   }) do
     if fields[key] ~= nil then opaqueMon[key] = fields[key] end
   end
@@ -163,10 +164,8 @@ Party.VERSION_LEAF_GREEN = 5
 -- pokefirered/include/config.h:45 GAME_VERSION
 function Party.metGame()
   local ok, GameVersion = pcall(require, "src.core.GameVersion")
-  if ok and GameVersion and GameVersion.current == "leafgreen" then
-    return Party.VERSION_LEAF_GREEN
-  end
-  return Party.VERSION_FIRE_RED
+  local code = ok and GameVersion and GameVersion.gameCode and GameVersion.gameCode(GameVersion.current)
+  return tonumber(code) or Party.VERSION_FIRE_RED
 end
 
 -- pokefirered/src/pokemon.c:1822 gSaveBlock2Ptr->playerGender
@@ -185,10 +184,18 @@ function Party.giveMon(session, species, level, nickname, opts)
   level = tonumber(level) or 5
   if level < 1 then level = 1 end
   local Pokemon = require("src.core.game3.pokemon")
-  if not Pokemon._names then pcall(Pokemon.install, nil) end
+  if not Pokemon._names then
+    local okI, errI = pcall(Pokemon.install, nil)
+    if not okI and not Pokemon._installWarned then
+      Pokemon._installWarned = true
+      print("[game3/pokemon] install failed: " .. tostring(errI))
+    end
+  end
 
   local Rng = require("src.core.game3.rng")
-  local personality = Rng.Random32()
+  local personality = opts and tonumber(opts.fixedPersonality)
+  if personality == nil then personality = Rng.Random32() end
+  personality = personality % 0x100000000
   local iv1 = Rng.Random()
   local iv2 = Rng.Random()
   local ivs = {
@@ -205,7 +212,7 @@ function Party.giveMon(session, species, level, nickname, opts)
   local growthRate = (meta and tonumber(meta.growthRate)) or 0
   local ability = Pokemon.abilityId and Pokemon.abilityId(species, personality) or 0
   local gender = Pokemon.gender and Pokemon.gender(species, personality) or "U"
-  local name = (Pokemon.name and Pokemon.name(species)) or "POKéMON"
+  local name = Pokemon.name(species)
   local moves, pp, maxPp = {}, {}, {}
   if Pokemon.movesAtLevel then
     moves, pp, maxPp = Pokemon.movesAtLevel(species, level)
@@ -249,7 +256,7 @@ function Party.giveMon(session, species, level, nickname, opts)
     otName = session.name or session.playerName or "RED",
     otId = session.trainerId or session.id or session.playerId or 12345,
     -- pokefirered/src/pokemon.c:1796 CreateBoxMon OT_ID_PLAYER_ID
-    otSecretId = tonumber(session.secretId or session.otSecretId) or nil,
+    otSecretId = Pokemon.playerSecretId(session),
     -- pokefirered/src/pokemon.c:1822
     otGender = Party.otGender(session),
     pokeball = 4, -- Poké Ball
@@ -272,18 +279,20 @@ function Party.giveMon(session, species, level, nickname, opts)
     return false, code, nil
   end
   -- pokefirered/src/script_pokemon_util.c:66
-  session.dex = session.dex or { seen = {}, owned = {} }
+  session.dex = session.dex or { seen = {}, owned = {}, caught = {} }
   session.dex.seen = session.dex.seen or {}
   session.dex.owned = session.dex.owned or {}
+  session.dex.caught = session.dex.caught or {}
   session.dex.seen[species] = true
   session.dex.owned[species] = true
+  session.dex.caught[species] = true
   return true, code, mon, boxId, slotIdx
 end
 
 --- Give an egg for script giveegg.
 -- pokefirered/src/script_pokemon_util.c:75
 function Party.giveEgg(session, species, opts)
-  if not session or not session.party then return false, Party.MON_CANT_GIVE end
+  if not session then return false, Party.MON_CANT_GIVE end
   species = tonumber(species) or 1
   local ok, code, egg = Party.giveMon(session, species, 5, "EGG", opts)
   if ok and egg then

@@ -1,7 +1,7 @@
 
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local CoinsBox = {}
 
@@ -65,16 +65,37 @@ end
 
 -- pokefirered/src/coins.c:52
 function CoinsBox.countText(amount)
-  return Strings("%s COINS", string.format("%4d", clamp(amount)))
+  return (RomText.plain("gText_Coins", { stringVars = { string.format("%4d", clamp(amount)) } }))
 end
 
 function CoinsBox.draw()
   if not CoinsBox.visible then return end
+  local Profile = require("src.core.game3.profile")
+  local row = Profile.forSession()
+  local cw = type(row) == "table" and type(row.ui) == "table" and row.ui.coinsWindow or nil
+  if cw and cw.frameOrigin then
+    -- pokeruby/src/coins.c:16
+    local left, top = CoinsBox.x + 1, CoinsBox.y + 1
+    Window.stdFrame(Window.template(left, top, 8, 2))
+    -- pokeruby/src/coins.c:25
+    local digits = tostring(clamp(CoinsBox._amount))
+    local text = RomText.plain(cw.text or "gText_Coins", { stringVars = { digits } })
+    Window.printPx(text, left * 8 + 7 + math.max(0, 4 - #digits) * 6, top * 8)
+    return
+  end
+  if Profile.family() == "rse" then
+    -- pokeemerald/src/coins.c:14 PrintCoinsString, :24 ShowCoinsWindow
+    local tpl = Window.template(CoinsBox.x, CoinsBox.y, 8, 2)
+    Window.stdFrame(tpl)
+    local text = RomText.plain("gText_Coins", { stringVars = { tostring(clamp(CoinsBox._amount)) } })
+    Window.printPx(text, CoinsBox.x * 8 + 64 - FrlgFont.measure(text), CoinsBox.y * 8 + 1)
+    return
+  end
   -- pokefirered/src/coins.c:79
   local left = CoinsBox.x + 1
   local top = CoinsBox.y + 1
   Window.stdFrame(Window.template(left, top, 8, 3))
-  Window.printPx(Strings("COINS"), left * 8, top * 8)
+  Window.printPx(RomText.plain("gText_Coins_2"), left * 8, top * 8)
   local countStr = CoinsBox.countText(CoinsBox._amount)
   local cw = (FrlgFont.measure and FrlgFont.measure(countStr, { small = true })) or (6 * #countStr)
   -- pokefirered/src/coins.c:76

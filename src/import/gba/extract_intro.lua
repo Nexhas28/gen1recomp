@@ -351,6 +351,8 @@ end
 function ExtractIntro.run(rom, cache, opts)
   opts = opts or {}
   local root = opts.root or "data/generated/gba/intro"
+  local game = require("src.core.GameVersion").forSha1(opts.sha1) or "firered"
+  local leafgreen = game == "leafgreen"
   local data = romBytes(rom)
   local meta = {
     version = 3,
@@ -358,33 +360,6 @@ function ExtractIntro.run(rom, cache, opts)
     assets = {},
     has_rom = data ~= nil,
   }
-
-  local oakSpeech = [[
-return {
-  -- ROM-sourced intro strings (FireRed USA 1.0 / pret new_game_intro.inc)
-  welcome = "Hello, there!\nGlad to meet you!\fWelcome to the world of POKéMON!\fMy name is OAK.\fPeople affectionately refer to me\nas the POKéMON PROFESSOR.",
-  this_world = "This world…",
-  inhabited = "…is inhabited far and wide by\ncreatures called POKéMON.",
-  study = "For some people, POKéMON are pets.\nOthers use them for battling.\fAs for myself…\fI study POKéMON as a profession.",
-  tell_me = "But first, tell me a little about\nyourself.",
-  ask_gender = "Now tell me. Are you a boy?\nOr are you a girl?",
-  your_name = "Let's begin with your name.\nWhat is it?",
-  confirm_player = "Right…\nSo your name is {PLAYER}.",
-  rival_intro = "This is my grandson.\fHe's been your rival since you both\nwere babies.\f…Erm, what was his name now?",
-  rival_name_ask = "Your rival's name, what was it now?",
-  confirm_rival = "…Er, was it {RIVAL}?",
-  remember_rival = "That's right! I remember now!\nHis name is {RIVAL}!",
-  lets_go = "{PLAYER}!\fYour very own POKéMON legend is\nabout to unfold!\fA world of dreams and adventures\nwith POKéMON awaits! Let's go!",
-  maleNames = { "RED", "FIRE", "ASH", "KENE", "GEKI", "JAK", "JANNE", "JONN", "KAMON", "KARL", "TAYLOR", "OSCAR", "HIRO", "MAX", "JON", "RALPH", "KAY", "TOSH", "ROAK" },
-  femaleNames = { "RED", "FIRE", "OMI", "JODI", "AMANDA", "HILLARY", "MAKEY", "MICHI", "PAULA", "JUNE", "CASSIE", "REY", "SEDA", "KIKO", "MINA", "NORIE", "SAI", "MOMO", "SUZI" },
-  rivalNames = { "GREEN", "GARY", "KAZ", "TORU" },
-}
-]]
-  write(cache, root .. "/oak_speech.lua", oakSpeech)
-  write(cache, root .. "/title_text.lua",
-    'return { title = "POKeMON FireRed", press_start = "Press Start" }\n')
-  write(cache, root .. "/menu.lua",
-    'return { "CONTINUE", "NEW GAME", "OPTION" }\n')
 
   if not data then
     write(cache, root .. "/meta.json",
@@ -792,7 +767,12 @@ return {
         local pal = readPal(get, T.flames_pal, 16)
         local tiles = decompress(get, T.flames_tiles)
         -- 0x500 = 40 tiles → 10 frames of 16×16 (2×20)
-        saveAsset("title_flames.png", bake4bppSheetPng(tiles, pal, 2, 20, true))
+        saveAsset("title_flames.png", bake4bppSheetPng(tiles, pal, 2, leafgreen and 22 or 20, true))
+      end
+      if leafgreen then
+        local pal = readPal(get, T.flames_pal, 16)
+        local tiles = decompress(get, T.blank_flames_tiles)
+        saveAsset("title_streak.png", bake4bppSheetPng(tiles, pal, 4, 2, true))
       end
       if T.flames_pal and T.slash_tiles then
         local pal = readPal(get, T.flames_pal, 16)
@@ -848,6 +828,7 @@ return {
     { "copyrightPressStart", "copyright_press_start.png" },
     { "titleBorder", "title_border_bg.png" },
     { "titleFlames", "title_flames.png" },
+    { "titleStreak", "title_streak.png" },
     { "titleSlash", "title_slash.png" },
     -- Intro Cutscene Assets
     { "introCopyright", "intro_copyright.png" },
@@ -877,7 +858,7 @@ return {
   local lines = {
     "return {\n",
     "  generation = 3,\n",
-    '  version = "firered",\n',
+    string.format('  version = %q,\n', game),
     '  source = "ROM:title_screen + oak_speech",\n',
   }
   if opts.sha1 then
@@ -889,7 +870,6 @@ return {
       lines[#lines + 1] = string.format("  %s = %q,\n", key, root .. "/" .. file)
     end
   end
-  lines[#lines + 1] = string.format('  oakSpeech = %q,\n', root .. "/oak_speech.lua")
   lines[#lines + 1] = "}\n"
   write(cache, indexPath, table.concat(lines))
   meta.introIndex = indexPath

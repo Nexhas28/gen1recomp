@@ -1,5 +1,6 @@
 -- Test suite for ItemUse and Oak's Lab parcel delivery scene.
 
+require("tests.game3_cache").requireData("game3_item_use_and_parcel_test")
 local GameVersion = require("src.core.GameVersion")
 GameVersion.set("firered")
 local ItemUse = require("src.core.game3.item_use")
@@ -268,7 +269,25 @@ local Adapters = require("src.core.game3.scripting.adapters")
 local adapters = Adapters.host(nil, nil, nil)
 Space.vm = Vm.new({
   store = Space.store,
-  scripts = { test_item_ball = testItemScript },
+  scripts = {
+    test_item_ball = testItemScript,
+    -- data/scripts/obtain_item.inc:106
+    ["std:1"] = {
+      { op = "copyvar", [1] = 0x8004, [2] = 0x8000 },
+      { op = "copyvar", [1] = 0x8005, [2] = 0x8001 },
+      { op = "checkitemspace", [1] = 0x8000, [2] = 0x8001 },
+      { op = "copyvar", [1] = 0x8007, [2] = 0x800D },
+      { op = "compare_var_to_value", var = 0x8007, value = 1 },
+      { op = "call_if", cond = 1, target = "EventScript_PickUpItem" },
+      { op = "return" },
+    },
+    -- data/scripts/obtain_item.inc:122
+    EventScript_PickUpItem = {
+      { op = "removeobject", [1] = 0x800F },
+      { op = "additem", [1] = 0x8004, [2] = 0x8005 },
+      { op = "return" },
+    },
+  },
   adapters = adapters,
 })
 

@@ -14876,6 +14876,14 @@
       32,
       22265
     ],
+    "BuenasPasswordChannelName": [
+      46,
+      20849
+    ],
+    "BuenasPasswordTable": [
+      46,
+      20473
+    ],
     "BugCatchingContestantEventFlagTable": [
       4,
       31230
@@ -18292,6 +18300,10 @@
       110,
       19608
     ],
+    "OutdoorSprites": [
+      5,
+      17592
+    ],
     "OverworldSprites": [
       5,
       18230
@@ -19711,6 +19723,10 @@
     "Tilesets": [
       19,
       21910
+    ],
+    "TimeCapsule_CatchRateItems": [
+      10,
+      18309
     ],
     "TimeFishGroups": [
       36,

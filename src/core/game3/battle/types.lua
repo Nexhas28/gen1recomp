@@ -10,10 +10,14 @@ Types.ID = {
   ICE = 15, DRAGON = 16, DARK = 17,
 }
 
-Types.NAME = {}
-for name, id in pairs(Types.ID) do
-  Types.NAME[id] = name
+local RomText = require("src.core.game3.rom_text")
+
+-- src/battle_main.c:428
+local TYPE_NAME_KEYS = {}
+for _, id in pairs(Types.ID) do
+  TYPE_NAME_KEYS[id] = RomText.key("gTypeNames", id)
 end
+Types.NAME = RomText.lazy(TYPE_NAME_KEYS)
 
 -- Gen3 physical/special split by type (before move category override).
 Types.PHYSICAL = {
@@ -21,8 +25,24 @@ Types.PHYSICAL = {
   [5] = true, [6] = true, [7] = true, [8] = true,
 }
 
+local nativeTypeSource, nativeTypeNames
 function Types.name(id)
-  return Types.NAME[tonumber(id) or -1] or "NORMAL"
+  id = assert(tonumber(id), "type id")
+  local profile = require("src.core.game3.profile").forSession()
+  if profile.id == "ruby" or profile.id == "sapphire" then
+    local Pokemon = require("src.core.game3.pokemon")
+    local cache = Pokemon._cache or require("src.core.game3.dataset").cache()
+    local path = "data/generated/gba/pokemon/type_names.lua"
+    local source = assert(cache:read(path), "native RS type names missing")
+    if source ~= nativeTypeSource then
+      local chunk = assert(load(source, "@" .. path, "t", {}))
+      nativeTypeNames = assert(chunk(), "native RS type names invalid")
+      assert(type(nativeTypeNames) == "table", "native RS type names invalid")
+      nativeTypeSource = source
+    end
+    return assert(nativeTypeNames[id], "native RS type name missing: " .. id)
+  end
+  return RomText.at("gTypeNames", id)
 end
 
 -- Alias used by battle menus / effects.

@@ -61,13 +61,12 @@ end
 
 local function find_pack()
   local env = os.getenv("POKEPORT_ANIM_PACK")
-  local home = os.getenv("HOME") or ""
+  local root = require("tests.game3_cache").root("pokemon/battle_anims/pack.lua")
   local cands = {
     env,
-    home .. "/Library/Application Support/LOVE/firered-sep18fx/firered/data/generated/gba/pokemon/battle_anims/pack.lua",
-    home .. "/.local/share/love/firered-sep18fx/firered/data/generated/gba/pokemon/battle_anims/pack.lua",
+    root and (root .. "/pokemon/battle_anims/pack.lua"),
   }
-  for ci = 1, 3 do
+  for ci = 1, 2 do
     local p = cands[ci]
     if p then
       local f = io.open(p, "r")
@@ -87,6 +86,7 @@ if not pack then
   print(string.format("g1 anim port: %d passed, %d failed", passed, failed))
   os.exit(failed == 0 and 0 or 1)
 end
+require("tests.game3_cache").mount("pokemon/battle_anims/pack.lua")
 
 Anim.loadPack(pack)
 

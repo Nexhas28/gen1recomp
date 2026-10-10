@@ -1,5 +1,13 @@
 #!/usr/bin/env luajit
 package.path = "./?.lua;./?/init.lua;" .. package.path
+package.loaded["src.core.game3.rom_text"] = {
+  plain = function(key) return key end, box = function(key) return key end,
+  ascii = function(key) return key end, has = function() return true end,
+  key = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+  at = function(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end,
+  count = function() return 0 end, list = function() return {} end,
+  lazy = function(map) return setmetatable({}, { __index = function(_, k) return map[k] end }) end,
+}
 
 local failed = 0
 local function check(cond, msg)
@@ -131,13 +139,13 @@ local adapters5 = {
 local ctx5 = newCtx()
 Flags.setVar(store, ctx5, 0x8005, 8)
 Elevator.HANDLERS[Std.SPECIAL.DrawElevatorCurrentFloorWindow](ctx5, adapters5)
-eq(shown, "5F", "floor 8 draws the 5F window")
+eq(shown, "sFloorNamePointers[8]", "floor 8 draws the 5F window")
 Flags.setVar(store, ctx5, 0x8005, 0)
 Elevator.HANDLERS[Std.SPECIAL.DrawElevatorCurrentFloorWindow](ctx5, adapters5)
-eq(shown, "B4F", "floor 0 draws the B4F window")
+eq(shown, "sFloorNamePointers[0]", "floor 0 draws the B4F window")
 Flags.setVar(store, ctx5, 0x8005, 15)
 Elevator.HANDLERS[Std.SPECIAL.DrawElevatorCurrentFloorWindow](ctx5, adapters5)
-eq(shown, "ROOFTOP", "floor 15 draws the ROOFTOP window")
+eq(shown, "sFloorNamePointers[15]", "floor 15 draws the ROOFTOP window")
 Elevator.HANDLERS[Std.SPECIAL.CloseElevatorCurrentFloorWindow](ctx5, adapters5)
 eq(closed, 1, "CloseElevatorCurrentFloorWindow closes it")
 local okSeamless = pcall(function()
@@ -309,6 +317,21 @@ for _, name in ipairs({ "AnimateTeleporterHousing", "AnimateTeleporterCable" }) 
   eq(Cutscene.HANDLERS[Std.SPECIAL[name]](ctx, {}), false, name .. " does not yield")
   eq(result(ctx), 0, name .. " leaves VAR_RESULT at 0")
 end
+
+local Task = require("src.core.game3.task")
+local realSpawn, realSet = Task.spawn, Field.setMetatile
+for _, name in ipairs({ "AnimateTeleporterHousing", "AnimateTeleporterCable" }) do
+  local fn
+  Task.spawn = function(f) fn = f end
+  local tw = {}
+  Field.setMetatile = function(x, y, mid, impassable) tw[#tw + 1] = impassable end
+  Cutscene.HANDLERS[Std.SPECIAL[name]](newCtx(), {})
+  for _ = 1, 1000 do if not fn or fn() then break end end
+  local allSolid = #tw > 0
+  for _, v in ipairs(tw) do if v ~= true then allSolid = false end end
+  check(allSolid, name .. " writes every metatile with MAPGRID_COLLISION_MASK")
+end
+Task.spawn, Field.setMetatile = realSpawn, realSet
 
 if failed > 0 then
   print("[test] FAILED " .. failed)

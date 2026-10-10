@@ -81,7 +81,17 @@ function love.conf(t)
   local osName = love._os
   local mobile = osName == "Android" or osName == "iOS"
   local nx = osName == "NX"
-  if nx then
+  local ps4 = osName == "PS4"
+  if ps4 then
+    -- PS4 (love-ps4): scan-out is fixed at 1920x1080 and the EGL surface allows
+    -- a single live instance -- recreating it leaves video dead without an
+    -- error -- so the window is requested once and never changed.
+    t.window.width = 1920
+    t.window.height = 1080
+    t.window.fullscreen = false
+    t.window.resizable = false
+    t.window.highdpi = false
+  elseif nx then
     -- Switch (love-nx): hint handheld 720p. SDL auto-switches portable↔dock
     -- (720p↔1080p) only when the window is resizable and not exclusive
     -- fullscreen; NxDisplay.sync also applies the size on boot and dock change.
@@ -132,5 +142,16 @@ function love.conf(t)
     t.accelerometerjoystick = false
   else
     t.window.resizable = true
+    pcall(function() require("src.core.PadHints").apply(osName) end)
+    if os.getenv("POKEPORT_BACKGROUND") == "1" and osName == "OS X" then
+      pcall(function()
+        local ffi = require("ffi")
+        ffi.cdef("int SDL_SetHint(const char *name, const char *value);")
+        ffi.C.SDL_SetHint("SDL_MAC_BACKGROUND_APP", "1")
+      end)
+      t.window.borderless = true
+      t.window.x = -30000
+      t.window.y = -30000
+    end
   end
 end

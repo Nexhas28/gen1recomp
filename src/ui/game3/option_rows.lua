@@ -2,6 +2,7 @@
 
 local Options = require("src.core.game3.options")
 local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local Rows = {}
 
@@ -17,12 +18,16 @@ local function cartCycle(ctx, key, n, dir)
   return true
 end
 
--- The option key is the Strings() context, so a mod can tell apart values that
--- share an English word (the "SHIFT" battle style from other uses).
-local function cartLabel(ctx, key, values)
-  local o = cart(ctx)
-  local label = values[(tonumber(o[key]) or 0) + 1]
-  return label and Strings(label, "option." .. key) or "?"
+-- src/option_menu.c:478
+local function cartLabel(ctx, key, tbl)
+  local cur = tonumber(cart(ctx)[key]) or 0
+  if cur < 0 or cur >= RomText.count(tbl) then return "?" end
+  return RomText.at(tbl, cur)
+end
+
+-- src/option_menu.c:136
+local function cartName(item)
+  return RomText.at("sOptionMenuItemsNames", item)
 end
 
 local function volLabel(v)
@@ -55,40 +60,45 @@ local function speedRow(id, label, key)
   }
 end
 
-function Rows.build(ctx)
+function Rows.build(ctx, skip)
   local rows = {}
   local function add(row) rows[#rows + 1] = row end
+  local function addCart(id, make)
+    local swap = skip and skip[id]
+    if type(swap) == "table" then add(swap)
+    elseif not swap then add(make()) end
+  end
 
-  add({
-    id = "textSpeed", label = Strings("TEXT SPEED"),
-    value = function(c) return cartLabel(c, "textSpeed", { "SLOW", "MID", "FAST" }) end,
-    step = function(c, dir) return cartCycle(c, "textSpeed", 3, dir) end,
-  })
+  addCart("textSpeed", function() return {
+      id = "textSpeed", label = cartName(0),
+      value = function(c) return cartLabel(c, "textSpeed", "sTextSpeedOptions") end,
+      step = function(c, dir) return cartCycle(c, "textSpeed", 3, dir) end,
+    } end)
   add(speedRow("speedOverworld", "OVERWORLD SPEED", "speedOverworld"))
   add(speedRow("speedBattle", "BATTLE SPEED", "speedBattle"))
   add(speedRow("speedMenu", "MENU SPEED", "speedMenu"))
 
-  add({
-    id = "battleScene", label = Strings("BATTLE SCENE"),
-    value = function(c) return cartLabel(c, "battleScene", { "ON", "OFF" }) end,
-    step = function(c, dir) return cartCycle(c, "battleScene", 2, dir) end,
-  })
-  add({
-    id = "battleStyle", label = Strings("BATTLE STYLE"),
-    value = function(c) return cartLabel(c, "battleStyle", { "SHIFT", "SET" }) end,
-    step = function(c, dir) return cartCycle(c, "battleStyle", 2, dir) end,
-  })
+  addCart("battleScene", function() return {
+      id = "battleScene", label = cartName(1),
+      value = function(c) return cartLabel(c, "battleScene", "sBattleSceneOptions") end,
+      step = function(c, dir) return cartCycle(c, "battleScene", 2, dir) end,
+    } end)
+  addCart("battleStyle", function() return {
+      id = "battleStyle", label = cartName(2),
+      value = function(c) return cartLabel(c, "battleStyle", "sBattleStyleOptions") end,
+      step = function(c, dir) return cartCycle(c, "battleStyle", 2, dir) end,
+    } end)
 
-  add({
-    id = "sound", label = Strings("SOUND"),
-    value = function(c) return cartLabel(c, "sound", { "MONO", "STEREO" }) end,
-    step = function(c, dir)
-      cartCycle(c, "sound", 2, dir)
-      local Audio = require("src.core.game3.audio")
-      Audio.applyOptions({ options = cart(c) })
-      return true
-    end,
-  })
+  addCart("sound", function() return {
+      id = "sound", label = cartName(3),
+      value = function(c) return cartLabel(c, "sound", "sSoundOptions") end,
+      step = function(c, dir)
+        cartCycle(c, "sound", 2, dir)
+        local Audio = require("src.core.game3.audio")
+        Audio.applyOptions({ options = cart(c) })
+        return true
+      end,
+    } end)
   add({
     id = "musicVol", label = Strings("MUSIC VOL"),
     value = function(c) return volLabel(c.options.musicVol) end,
@@ -119,26 +129,60 @@ function Rows.build(ctx)
       return true
     end,
   })
-
+  local AUDIO_MODES = {
+    { "both", "BOTH" },
+    { "external_only", "EXT. ONLY" },
+    { "game_only", "GAME ONLY" },
+  }
   add({
-    id = "buttonMode", label = Strings("BUTTON MODE"),
-    value = function(c) return cartLabel(c, "buttonMode", { "HELP", "LR", "L=A" }) end,
-    step = function(c, dir) return cartCycle(c, "buttonMode", 3, dir) end,
-  })
-  add({
-    id = "frameType", label = Strings("FRAME"),
+    id = "audioMode", label = Strings("AUDIO MODE"),
     value = function(c)
-      return Strings("TYPE") .. string.format("%2d", (tonumber(cart(c).frameType) or 0) + 1) -- src/option_menu.c:496
+      local cur = c.options.audioMode or "both"
+      for _, m in ipairs(AUDIO_MODES) do
+        if m[1] == cur then return Strings(m[2]) end
+      end
+      return Strings("BOTH")
     end,
     step = function(c, dir)
-      cartCycle(c, "frameType", 10, dir)
-      local okC, Chrome = pcall(require, "src.ui.game3.chrome")
-      if okC and Chrome and Chrome.setFrameType then
-        Chrome.setFrameType(cart(c).frameType)
+      local cur = c.options.audioMode or "both"
+      local idx = 1
+      for i, m in ipairs(AUDIO_MODES) do
+        if m[1] == cur then idx = i break end
       end
+      idx = ((idx - 1 + (dir < 0 and -1 or 1)) % #AUDIO_MODES) + 1
+      c.options.audioMode = AUDIO_MODES[idx][1]
+      require("src.core.game3.audio").applyEngineOptions(c.options)
       return true
     end,
   })
+
+  addCart("buttonMode", function() return {
+      id = "buttonMode", label = cartName(4),
+      value = function(c) return cartLabel(c, "buttonMode", "sButtonTypeOptions") end,
+      step = function(c, dir) return cartCycle(c, "buttonMode", 3, dir) end,
+    } end)
+  add({
+    id = "controls", label = Strings("CONTROLS"),
+    activate = function(c)
+      require("src.ui.game3.screens").get("controls", c.session)
+        .show({ game = c.game, session = c.session, options = c.options })
+    end,
+  })
+  addCart("frameType", function() return {
+      id = "frameType", label = cartName(5),
+      value = function(c)
+        return RomText.plain("gText_FrameType") .. string.format("%2d", (tonumber(cart(c).frameType) or 0) + 1) -- src/option_menu.c:496
+      end,
+      step = function(c, dir)
+        local okC, Chrome = pcall(require, "src.ui.game3.chrome")
+        -- pokeemerald/src/option_menu.c:518
+        cartCycle(c, "frameType", (okC and Chrome and Chrome.userFrameCount) and Chrome.userFrameCount() or 10, dir)
+        if okC and Chrome and Chrome.setFrameType then
+          Chrome.setFrameType(cart(c).frameType)
+        end
+        return true
+      end,
+    } end)
 
   add({
     id = "uiLayout", label = Strings("UI LAYOUT"),
@@ -163,6 +207,35 @@ function Rows.build(ctx)
       return true
     end,
   })
+  for _, slot in ipairs({ "main", "secondary" }) do
+    add({
+      id = slot == "main" and "shaderfx" or "shaderfx2",
+      label = Strings(slot == "main" and "SHADER FX" or "SHADER FX 2"),
+      value = function()
+        return require("src.ui.game3.shaderfx_menu").slotLabel(slot, 64)
+      end,
+      activate = function(c)
+        require("src.ui.game3.shaderfx_menu").show({ game = c.game, slot = slot })
+      end,
+    })
+  end
+  local Pipelines = require("src.render.Pipelines")
+  for _, entry in ipairs(Pipelines.list()) do
+    local id = entry.id
+    if entry.def.present then
+      add({
+        id = "pipeline:" .. id,
+        label = Strings(entry.def.label or id:upper()),
+        value = function() return Strings(Pipelines.levelLabel(id)) end,
+        step = function(c, dir)
+          Pipelines.cycle(id, dir)
+          Pipelines.syncOptions(c.options)
+          require("src.render.Tilt").setLevel(tonumber(c.options.tilt) or 0)
+          return true
+        end,
+      })
+    end
+  end
   add({
     id = "videoMode", label = Strings("VIDEO MODE"),
     value = function(c)
@@ -312,6 +385,8 @@ function Rows.build(ctx)
       return true
     end,
   })
+  local EventIslands = require("src.core.game3.rse.event_islands")
+  if EventIslands.available() then add(EventIslands.optionRow()) end
 
   add({
     id = "touchControls", label = Strings("TOUCH PAD"),
@@ -342,6 +417,20 @@ function Rows.build(ctx)
       TouchControls:applyOptions(c.options)
       TouchControls.buzz(c.options.haptics)
       return true
+    end,
+  })
+  -- Manager discoverable home (18-mod-manager-ux), same contract as Gen 1
+  -- OptionsMenu: always listed with an installed count, activate opens the
+  -- manager. Inert until A; costs a vanilla install a single row.
+  add({
+    id = "mods", label = Strings("MODS"),
+    value = function(c)
+      local status = (c.game and c.game.modStatus) or {}
+      return Strings("%d INSTALLED", #(status.available or {}))
+    end,
+    activate = function(c)
+      local ModManager = require("src.ui.game3.mod_manager")
+      ModManager.show({ game = c.game, session = c.session })
     end,
   })
   add({
@@ -383,18 +472,18 @@ Rows.GROUPS = {
     members = { "uiLayout", "videoMode", "orientation", "faithfulRes",
                 "screenPos", "fpsCap", "vsync", "logicClock" } },
   { id = "group.graphics", label = "GRAPHICS",
-    members = { "uiLetterbox", "frameType" } },
+    members = { "uiLetterbox", "frameType", "shaderfx", "shaderfx2" } },
   { id = "group.audio", label = "AUDIO",
     members = { "sound", "musicVol", "sfxVol", "musicFilter" } },
   { id = "group.battle", label = "BATTLE OPTIONS",
     members = { "battleScene", "battleStyle" } },
   { id = "group.extras", label = "EXTRAS",
-    members = { "tilt", "zoom", "voidFill" } },
+    members = { "tilt", "zoom", "voidFill", "eventTickets" } },
 }
 
 Rows.ORDER = {
   "group.speed", "group.video", "group.graphics", "group.audio",
-  "performance", "group.battle", "group.extras", "buttonMode",
+  "performance", "group.battle", "group.extras", "buttonMode", "controls", "mods",
 }
 
 function Rows.group(rows, openPage)
@@ -434,6 +523,14 @@ function Rows.group(rows, openPage)
     if not (id and (owner[id] or taken[id])) then view[#view + 1] = row end
   end
   return view
+end
+
+function Rows.withCart(ctx, cartRows, openPage, exclude)
+  local rows = {}
+  for _, r in ipairs(Rows.build(ctx, cartRows)) do
+    if not (exclude and exclude[r.id]) then rows[#rows + 1] = r end
+  end
+  return Rows.group(rows, openPage)
 end
 
 return Rows

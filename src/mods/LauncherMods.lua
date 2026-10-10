@@ -39,6 +39,7 @@ local SaveData = require("src.core.SaveData")
 local GameVersion = require("src.core.GameVersion")
 local CacheFs = require("src.import.CacheFs")
 local RequiredImports = require("src.mods.RequiredImports")
+local LoadOrder = require("src.mods.LoadOrder")
 
 local LauncherMods = {}
 
@@ -113,9 +114,9 @@ end
 -- Resolves the best-known GitHub owner/repo string for a dependency spec, if any.
 function LauncherMods.resolveDependencyRepo(depId, parentManifest, installedDep)
   if not depId or depId == "" then return nil end
-  -- 1. Check spec hint if parentManifest dependencySpecs carries it
-  if parentManifest and parentManifest.dependencySpecs then
-    for _, spec in ipairs(parentManifest.dependencySpecs) do
+  for _, specs in ipairs({ parentManifest and parentManifest.dependencySpecs or {},
+      parentManifest and parentManifest.optionalSpecs or {} }) do
+    for _, spec in ipairs(specs) do
       if spec.id == depId and spec.github then
         return spec.github
       end
@@ -168,10 +169,16 @@ function LauncherMods.checkDependencies(manifest, options, version, installedMan
   local depsResult = {}
   local hasIssues = false
 
-  -- 1. Hard Dependencies (dependencySpecs)
-  if type(manifest.dependencySpecs) == "table" then
-    for _, spec in ipairs(manifest.dependencySpecs) do
-      if not version or ModTargets.specApplies(spec, version) then
+  local depIdsSeen = {}
+  for _, group in ipairs({
+    { specs = manifest.dependencySpecs, kind = "dependency" },
+    { specs = manifest.optionalSpecs, kind = "optional" },
+  }) do
+    for _, spec in ipairs(type(group.specs) == "table" and group.specs or {}) do
+      if not depIdsSeen[spec.id]
+          and (not version or ModTargets.specApplies(spec, version)) then
+        depIdsSeen[spec.id] = true
+        local required = group.kind == "dependency"
         local depId = spec.id
         local range = spec.range
         local installedDep = installedMap[depId]
@@ -180,10 +187,10 @@ function LauncherMods.checkDependencies(manifest, options, version, installedMan
 
         if not installedDep then
           status = "missing"
-          hasIssues = true
+          if required then hasIssues = true end
         elseif range and not Semver.satisfies(installedDep.version, range) then
           status = "incompatible"
-          hasIssues = true
+          if required then hasIssues = true end
         end
 
         local ghRepo = LauncherMods.resolveDependencyRepo(depId, manifest, installedDep)
@@ -194,7 +201,8 @@ function LauncherMods.checkDependencies(manifest, options, version, installedMan
           name = (installedDep and installedDep.name) or depId,
           range = range,
           status = status,
-          kind = "dependency",
+          kind = group.kind,
+          optional = not required,
           installedVersion = installedVersion,
           github = ghRepo,
           safeUrl = safeUrl,
@@ -358,7 +366,49 @@ function LauncherMods.deriveList(manifests, options, version)
       safeMode = safeMode,
     }
   end
+  local full = LoadOrder.materialize(SaveData.modOrder(options), ordered)
+  local rank = LoadOrder.rank(full)
+  local generation = version and GameVersion.generation(version) or nil
+  for _, row in ipairs(out) do
+    row.loadRank = rank[row.id] or (#full + 1)
+    local m = byId[row.id]
+    local after
+    local seen, names = {}, { required = {}, optional = {} }
+    local function consider(spec, group)
+      local dep = spec and spec.id
+      if dep and dep ~= row.id and not seen[dep] and rank[dep]
+          and rank[dep] > row.loadRank
+          and ModTargets.specApplies(spec, version, generation) then
+        seen[dep] = true
+        local list = names[group]
+        list[#list + 1] = tostring(byId[dep] and byId[dep].name or dep)
+        if not after or rank[dep] > rank[after] then after = dep end
+      end
+    end
+    for _, spec in ipairs(m.dependencySpecs or {}) do consider(spec, "required") end
+    for _, spec in ipairs(m.optionalSpecs or {}) do consider(spec, "optional") end
+    if after then
+      local parts = {}
+      if #names.required > 0 then
+        parts[#parts + 1] = table.concat(names.required, ", ") .. " (required)"
+      end
+      if #names.optional > 0 then
+        parts[#parts + 1] = table.concat(names.optional, ", ") .. " (optional)"
+      end
+      row.orderAfter = after
+      row.orderNote = "Loads after " .. table.concat(parts, "; ")
+      row.orderNoteOptional = #names.required == 0
+    end
+  end
   return out
+end
+
+function LauncherMods.orderedIds(rows, options)
+  return LoadOrder.materialize(SaveData.modOrder(options), rows)
+end
+
+function LauncherMods.moveInOrder(list, id, delta)
+  return (LoadOrder.move(list, id, delta))
 end
 
 -- locateRoot(paths) -> the mod-root prefix inside a mounted archive, pure.
@@ -557,15 +607,7 @@ local function readStringsCatalog(path)
   local fs = love and love.filesystem
   if not (fs and fs.read) then return nil end
   local rel = path .. "/" .. STRINGS_CATALOG
-  local raw = fs.read(rel)
-  if type(raw) ~= "string" or raw == "" then return nil end
-  local chunk = loadstring(raw, "@" .. rel)
-  if not chunk then return nil end
-  -- Lua 5.1/LuaJIT: no _ENV, so setfenv is the sandbox.
-  if setfenv then setfenv(chunk, {}) end
-  local ok, result = pcall(chunk)
-  if not ok or type(result) ~= "table" then return nil end
-  return result
+  return require("src.mods.Sandbox").evalData(fs.read(rel), "@" .. rel)
 end
 
 -- deriveStrings(rows, byId, read) -> the merged catalog, pure.
@@ -664,6 +706,44 @@ function LauncherMods.setAllEnabled(ids, enabled, version)
       SaveData.setModEnabled(options, id, enabled)
     end
   end
+  SaveData.saveOptions(options)
+  LauncherMods.syncActiveProfile(options)
+  return true
+end
+
+function LauncherMods.moveMod(id, delta, visible)
+  if type(id) ~= "string" or id == "" then return false end
+  local options = SaveData.loadOptions()
+  if SaveData.isSafeMode(options) then return false end
+  local manifests = discover()
+  local known = false
+  for _, m in ipairs(manifests) do
+    if m.id == id then known = true break end
+  end
+  if not known then return false end
+  local full = LoadOrder.materialize(SaveData.modOrder(options), manifests)
+  local list, changed = LoadOrder.moveWithin(full, visible, id, delta)
+  if not changed then return false end
+  SaveData.setModOrder(options, list)
+  SaveData.saveOptions(options)
+  LauncherMods.syncActiveProfile(options)
+  local shown = {}
+  for _, v in ipairs(visible or list) do shown[v] = true end
+  local n = 0
+  for _, v in ipairs(list) do
+    if shown[v] then
+      n = n + 1
+      if v == id then return true, n end
+    end
+  end
+  return true, n
+end
+
+function LauncherMods.resetOrder()
+  local options = SaveData.loadOptions()
+  if SaveData.isSafeMode(options) then return false end
+  if #SaveData.modOrder(options) == 0 then return false end
+  SaveData.setModOrder(options, {})
   SaveData.saveOptions(options)
   LauncherMods.syncActiveProfile(options)
   return true
@@ -1246,6 +1326,7 @@ function LauncherMods.applyProfile(profileName, options)
   end
   if not targetProfile then return false end
   ModProfile.restoreVersions(targetProfile, options)
+  ModProfile.restoreOrder(targetProfile, options)
   options.activeProfile = profileName
   SaveData.saveOptions(options)
   return true
@@ -1255,7 +1336,8 @@ function LauncherMods.saveProfile(profileName, options)
   options = options or SaveData.loadOptions()
   local manifests = discover()
   options.modProfiles = options.modProfiles or {}
-  local snap = ModProfile.capture(manifests, options.modOptions, options.modsByVersion)
+  local snap = ModProfile.capture(manifests, options.modOptions,
+    options.modsByVersion, options.modOrder)
   snap.name = profileName
   local existingIdx
   for i, p in ipairs(options.modProfiles) do
@@ -1285,7 +1367,8 @@ function LauncherMods.syncActiveProfile(options)
   local activeName = options.activeProfile or "PROFILE 1"
   local profiles = options.modProfiles or {}
   local manifests = discover()
-  local snap = ModProfile.capture(manifests, options.modOptions, options.modsByVersion)
+  local snap = ModProfile.capture(manifests, options.modOptions,
+    options.modsByVersion, options.modOrder)
   snap.name = activeName
 
   local found = false
@@ -1330,6 +1413,7 @@ function LauncherMods.duplicateProfile(sourceName, options)
     options = copyTable(sourceProfile.options),
     slots = copyTable(sourceProfile.slots),
     enabledByVersion = copyTable(sourceProfile.enabledByVersion),
+    order = copyTable(sourceProfile.order),
   }
   profiles[#profiles + 1] = snap
   options.modProfiles = profiles

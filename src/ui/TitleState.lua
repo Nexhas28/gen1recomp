@@ -9,6 +9,8 @@ local GameVersion = require("src.core.GameVersion")
 local Strings = require("src.core.Strings")
 local Runtime = require("src.mods.Runtime")
 local Logger = require("src.core.Logger")
+local FaithfulRes = require("src.core.FaithfulRes")
+local TouchSkin = require("src.core.TouchSkin")
 
 local TitleState = {}
 TitleState.__index = TitleState
@@ -18,7 +20,11 @@ TitleState.isOpaque = true
 -- at the fixed integer scale.  The title screen is a full-bleed picture with no
 -- world behind it, so a small centred box in a large window is just wasted
 -- glass -- and unlike the overworld it has no zoom the player chose to respect.
-function TitleState:wantsFillScale() return true end
+function TitleState:wantsFillScale()
+  if FaithfulRes.locked then return false end
+  if TouchSkin.drawable() then return false end
+  return true
+end
 
 -- SGB title zones (PalPacket_Titlescreen): the logo rows get LOGO2,
 -- the version-ribbon band LOGO1, the rest MEWMON.
@@ -477,6 +483,8 @@ local function sameItems(_, items) return items end
 -- CONTINUE.  A confirms and loads the game, B returns to the main menu.
 local ContinueInfo = {}
 ContinueInfo.__index = ContinueInfo
+-- pokeyellow engine/menus/main_menu.asm:106-112, :171; pokered engine/menus/main_menu.asm:105-111, :336
+ContinueInfo.HOLD_FRAMES = 3 + 10 + 20
 
 function ContinueInfo.new(title, save)
   -- box at (4,7), 16x10 tiles -- see ContinueInfo:draw / DisplayContinueGameInfo
@@ -490,7 +498,11 @@ function ContinueInfo:update(dt)
   local input = self.game.input
   if input:wasPressed("a") then
     self.game.stack:pop()
-    if self.title.onContinue then self.title.onContinue() end
+    local title = self.title
+    self.game.stack:push(require("src.render.Transition").whiteFlash(
+      self.game, ContinueInfo.HOLD_FRAMES, function()
+        if title.onContinue then title.onContinue() end
+      end))
   elseif input:wasPressed("b") then
     -- the CONTINUE / NEW GAME menu is still open underneath (main_menu.asm:91-92)
     self.game.stack:pop()
@@ -510,13 +522,15 @@ function ContinueInfo:draw()
     math.max(96, 40 + (#Font.split(playerLabel) + 1) * 8), 72)
   local badges = require("src.inventory.Badges").count(self.game.data, save)
   Font.draw(Strings("BADGES"), 40, 88)
-  Font.draw(("%2d"):format(badges), 128, 88)
+  -- engine/menus/main_menu.asm:370
+  Font.draw(("%2d"):format(badges), 17 * 8, 11 * 8)
   local owned = 0
   for _ in pairs(save.pokedex and save.pokedex.owned or {}) do
     owned = owned + 1
   end
   Font.draw(Strings("POKéDEX"), 40, 104)
-  Font.draw(("%3d"):format(owned), 120, 104)
+  -- engine/menus/main_menu.asm:372
+  Font.draw(("%3d"):format(owned), 16 * 8, 13 * 8)
   local t = math.floor(save.playTime or 0)
   Font.draw(Strings("TIME"), 40, 120)
   Font.draw(("%3d:%02d"):format(math.floor(t / 3600),

@@ -2396,19 +2396,21 @@ local function sellItem(id)
       qtyTo(top().max or 1) -- the whole stack
       press("a")
       U.wait(6)
+      pressUntil(function() return isChoice() or isList() end, "a", 60)
     end
     if isChoice() then
       cursorTo("index", 1) -- YES
       press("a")
       U.wait(10)
     end
-    pressUntil(isList, "a", 20)
-    sold = ((G.save.inventory or {})[id] or 0) == 0
+    pressUntil(function() return isList() or isMenu() end, "a", 20)
+    sold =((G.save.inventory or {})[id] or 0) == 0
   end
   -- back out of the sell list to the BUY/SELL menu
-  for _ = 1, 10 do
+  for _ = 1, 60 do
     if isMenu() then break end
-    press("b")
+    local t = top()
+    if not (t and t.stay) then press("b") end
     U.wait(6)
   end
   return sold
@@ -2498,6 +2500,7 @@ local function buyItem(id, qty, where)
   end
   press("a")
   U.wait(6)
+  pressUntil(function() return isChoice() or isList() end, "a", 60)
   if isChoice() then
     if not cursorTo("index", 1) then return false end -- YES
     press("a")
@@ -2524,10 +2527,16 @@ end
 -- shopping spree that empties the wallet and then sits on the "not enough
 -- money" footer forever. B is the only safe key once a shop screen is up.
 local function closeShop()
-  for _ = 1, 40 do
-    if not (isList() or isQty() or isChoice() or isMenu()) then return true end
-    press("b")
-    U.wait(6)
+  for _ = 1, 80 do
+    local t = top()
+    if t and t.stay then
+      U.wait(6)
+    elseif not (isList() or isQty() or isChoice() or isMenu()) then
+      return true
+    else
+      press("b")
+      U.wait(6)
+    end
   end
   return false
 end

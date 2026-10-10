@@ -141,9 +141,9 @@ check(picker:find("Johto Lite", 1, true) == nil,
 check(picker:find("v1.2.0", 1, true) ~= nil, "a cart row carries its version")
 check(picker:find("sealed", 1, true) ~= nil, "a cart row carries its seal state")
 check(picker:find("open", 1, true) ~= nil, "including an open one")
-check(picker:find("Import a cart", 1, true) ~= nil
-    or picker:find("Get more carts", 1, true) ~= nil,
-  "the last row imports a cart, by picker or by folder")
+check(picker:find("Import .g1rcart", 1, true) ~= nil
+    or picker:find("Scan again", 1, true) ~= nil,
+  "the last row imports a .g1rcart, by picker or by inbox scan")
 
 imp._cartPopup = nil
 local vanillaColors = drawColors(imp)
@@ -1112,10 +1112,10 @@ for _, size in ipairs(SIZES) do
     Kit.audit = ok and Kit.audit or nil
     check(ok, ("%dx%d picker draws: %s"):format(W, H, tostring(err)))
     if ok then
-      auditFrame(("%dx%d picker"):format(W, H), "Kanto Plus")
+      auditFrame(("%dx%d picker"):format(W, H), "Export")
       for _, r in ipairs(Kit.audit or {}) do
         local label = tostring(r.label)
-        if label == "Get more carts" or label == "Close" then
+        if label == "Import .g1rcart" or label == "Scan again" or label == "Close" then
           check(r.y >= -0.5 and r.y + r.h <= H + 0.5,
             ("%dx%d picker: %q stays inside the window"):format(W, H, label))
         end
@@ -1229,6 +1229,7 @@ check(find.findBase == nil, "with no base-game filter armed")
 find.tab = "find"
 find.modScope = nil
 find.findLoaded = true
+find._findFetch = nil
 find.findSources = { { feed = "https://example.test/data/index.json",
                        base = "https://example.test/",
                        label = "example/index" } }
@@ -1277,6 +1278,46 @@ find:_setFindGame("red")
 eq(find:_findRows()[1].id, "rare_soda", "a single game reads its generation")
 find:_setFindGame(nil)
 eq(#find:_findRows(), 2, "clearing it restores the whole index")
+
+do
+  local originalIndex = find.findIndex
+  find.findIndex = {
+    mods = {
+      originalIndex.mods[1], originalIndex.mods[2],
+      { id = "unknown_game", title = "Unknown Game", categories = { "ART" } },
+      { id = "empty_games", title = "Empty Games", games = {}, categories = { "ART" } },
+      { id = "unknown_category", title = "Unknown Category", games = { "gen2" } },
+    },
+    carts = originalIndex.carts,
+    categories = originalIndex.categories,
+    baseGames = originalIndex.baseGames,
+  }
+  find:_setFindGame("emerald")
+  eq(#find:_findRows(), 0, "a game with no known matches leaves the launcher empty")
+  local emptyGame = drawAndCapture(find)
+  check(emptyGame:find("No mods match", 1, true) ~= nil,
+    "an unmatched game renders the existing empty state")
+  check(emptyGame:find("Unknown Game", 1, true) == nil,
+    "the empty game view does not render unknown compatibility")
+  find:_setFindGame("gen2")
+  find.findCategory = "GAMEPLAY"
+  eq(#find:_findRows(), 0, "a disjoint game and category remains empty")
+  check(drawAndCapture(find):find("No mods match", 1, true) ~= nil,
+    "an empty filter intersection renders the empty state")
+  find.findCategory = "ART"
+  eq(#find:_findRows(), 1, "combined filters exclude missing game and category metadata")
+  eq(find:_findRows()[1].id, "true_colour", "only the declared intersection is listed")
+  find:_setFindGame(nil)
+  find.findCategory = "AUDIO"
+  eq(#find:_findRows(), 0, "an unmatched category leaves the launcher empty")
+  check(drawAndCapture(find):find("No mods match", 1, true) ~= nil,
+    "an unmatched category renders the empty state")
+  find.findCategory = nil
+  eq(#find:_findRows(), 5, "clearing both filters restores unknown listings")
+  find.findIndex = originalIndex
+  find._findRowsCache = nil
+  find._findSortCache = nil
+end
 
 find:_setFindKind("carts")
 eq(find.findKind, "carts", "the switch flips to carts")

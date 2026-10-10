@@ -2,6 +2,7 @@
 -- Game3 bag: pret ItemSlot pockets, items pack, checkitem APIs, save migrate.
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_bag_test")
 
 local failed = 0
 local function check(cond, msg)
@@ -19,7 +20,6 @@ local Schema = require("src.core.game3.save_schema_firered")
 local Flags = require("src.core.game3.scripting.flags")
 local Ops = require("src.core.game3.scripting.ops_a")
 local Vm = require("src.core.game3.scripting.vm")
-local Std = require("src.core.game3.scripting.stdscripts")
 
 print("[test] 1. Items pack load")
 ItemsData.install(nil)
@@ -99,8 +99,6 @@ local vm = Vm.new({
       { op = "end" },
     },
   },
-  text = Std.TEXT,
-  stdscripts = Std.SCRIPTS,
 })
 
 vm:start("t_check")

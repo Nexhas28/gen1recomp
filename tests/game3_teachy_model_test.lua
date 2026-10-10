@@ -2,6 +2,7 @@
 -- pokefirered/src/teachy_tv.c:420 InitTeachyTvController
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_teachy_model_test")
 
 local failed = 0
 local function check(cond, msg)
@@ -27,6 +28,8 @@ local Bag = require("src.core.game3.bag")
 local Schema = require("src.core.game3.save_schema_firered")
 local ItemUse = require("src.core.game3.item_use")
 local ItemsData = require("src.core.game3.items_data")
+
+local RomText = require("src.core.game3.rom_text")
 
 local S = TeachyTv.SCRIPT
 
@@ -64,11 +67,9 @@ do
   for _, id in ipairs(TeachyTv.ORDER) do
     local lesson = TeachyTv.lesson(id)
     check(lesson ~= nil, "lesson " .. id .. " exists")
-    eq(lesson.label, labels[id], "row label for lesson " .. id)
-    check(type(lesson.intro) == "string" and #lesson.intro > 0,
-      lesson.key .. " has a Script1 string")
-    check(type(lesson.outro) == "string" and #lesson.outro > 0,
-      lesson.key .. " has a Script2 string")
+    eq(RomText.plain(lesson.labelKey), labels[id], "row label for lesson " .. id)
+    check(RomText.has(lesson.introKey), lesson.key .. " has a Script1 string")
+    check(RomText.has(lesson.outroKey), lesson.key .. " has a Script2 string")
   end
 end
 
@@ -109,7 +110,7 @@ do
   check(#tmDesc >= 5, "gPokedudeText_ReadTMDescription pages=" .. #tmDesc)
 end
 
-print("[test] 5. pokefirered/src/teachy_tv.c:553 the TM CASE gate")
+print("[test] 5. pokefirered/src/teachy_tv.c:554 the TM CASE gate")
 do
   local s = newSession()
   check(not TeachyTv.hasTmCase(s), "no TM CASE on a fresh bag")

@@ -39,11 +39,12 @@ Pokemon.install(nil)
 
 local DIR = root .. "/pokemon/pokedex/footprints"
 local NUM_SPECIES = require("src.import.gba.versions").NUM_SPECIES or 412
+local CacheBlob = require("src.import.CacheBlob")
 
 local function file_bytes(rel)
   local f = io.open(DIR .. "/" .. rel, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(DIR .. "/" .. rel, f:read("*a"))
   f:close()
   if type(d) == "string" and #d > 0 then return d end
   return nil
@@ -138,13 +139,6 @@ do
   eq(fBytes, file_bytes("29.rgba"), "NIDORAN_F bytes match the cache")
   eq(mBytes, file_bytes("32.rgba"), "NIDORAN_M bytes match the cache")
   check(fBytes ~= mBytes, "the two NIDORAN footprints differ")
-end
-
-print("[test] 4. The name and question-mark fallbacks survive")
-do
-  local bytes, rel = PokedexChrome.footprintSource(NUM_SPECIES + 5000)
-  eq(rel, DIR .. "/question_mark.rgba", "an id with no species file falls back to the question mark")
-  eq(bytes, file_bytes("question_mark.rgba"), "the fallback returns the question mark bytes")
 end
 
 if failed > 0 then

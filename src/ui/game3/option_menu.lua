@@ -2,9 +2,10 @@ local Stack = require("src.ui.game3.stack")
 local Window = require("src.ui.game3.window")
 local Options = require("src.core.game3.options")
 local Rows = require("src.ui.game3.option_rows")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
+local ShaderFXMenu = require("src.ui.game3.shaderfx_menu")
 
-local OptionMenu = {}
+local OptionMenu = { isMenu = true }
 
 OptionMenu.open = false
 OptionMenu.cursor = 1
@@ -17,7 +18,6 @@ local ROW_H = 14
 local LABEL_X = WIN_X + 8
 local VALUE_X = WIN_X + 0x82
 local HELP_BG = { 0 / 255, 123 / 255, 197 / 255, 1 }
-local HELP_TEXT = "{DPAD_UPDOWN}PICK {DPAD_LEFTRIGHT}SWITCH {A_BUTTON}{B_BUTTON}CANCEL"
 
 local function ctx()
   return OptionMenu._ctx
@@ -45,6 +45,8 @@ end
 
 function OptionMenu.show(opts)
   opts = opts or {}
+  local other = require("src.ui.game3.screens").redirect("option", OptionMenu, opts.session)
+  if other then return other.show(opts) end
   OptionMenu.open = true
   OptionMenu._session = opts.session
   OptionMenu._onClose = opts.onClose
@@ -61,12 +63,13 @@ function OptionMenu.show(opts)
     options = engine,
   }
   OptionMenu._pages = {}
-  pushPage(Strings("OPTION"), buildTop())
+  pushPage(RomText.plain("gText_MenuOption"), buildTop()) -- src/option_menu.c:537
   OptionMenu.cursor = 1
-  Stack.push("option", OptionMenu, { hideBelow = true })
+  Stack.push("option", OptionMenu, { hideBelow = true, fullscreen = true })
 end
 
 function OptionMenu.close()
+  ShaderFXMenu.close()
   OptionMenu.open = false
   OptionMenu._pages = nil
   Stack.pop("option")
@@ -147,6 +150,7 @@ end
 
 function OptionMenu.handleInput(input)
   if not input then return end
+  if ShaderFXMenu.isOpen() then return ShaderFXMenu.handleInput(input) end
   if input:wasPressed("up") then OptionMenu.move(-1)
   elseif input:wasPressed("down") then OptionMenu.move(1)
   elseif input:wasPressed("left") then OptionMenu.adjust(-1)
@@ -157,6 +161,7 @@ function OptionMenu.handleInput(input)
 end
 
 function OptionMenu.update()
+  ShaderFXMenu.update()
   if OptionMenu.open then
     OptionMenu._arrowK = (OptionMenu._arrowK or 0) + 1
   end
@@ -191,11 +196,12 @@ local function drawHelpBar()
   love.graphics.rectangle("fill", 0, 0, 240, 16)
   love.graphics.setColor(1, 1, 1, 1)
   local PokedexChrome = require("src.ui.game3.pokedex_chrome")
-  PokedexChrome.drawControlInfo(Strings(HELP_TEXT), 0xE4, 0)
+  PokedexChrome.drawControlInfo(RomText.plain("gText_PickSwitchCancel"), 0xE4, 0)
 end
 
 function OptionMenu.draw()
   if not OptionMenu.open then return end
+  if ShaderFXMenu.isOpen() then return ShaderFXMenu.draw() end
   local p = page()
   if not p then return end
   local c = ctx()
@@ -208,7 +214,7 @@ function OptionMenu.draw()
   drawHelpBar()
 
   Chrome.fixedStdFrame(2, 3, 26, 2) -- src/option_menu.c:537
-  Window.printPx(p.title or "OPTION", 16 + 8, 24 + 1, { colors = FrlgFont.COLOR.NORMAL })
+  Window.printPx(p.title, 16 + 8, 24 + 1, { colors = FrlgFont.COLOR.NORMAL })
 
   local frameType = tonumber(Options.block(c.options).frameType) or 0
   Window.userFrame(Window.template(2, 7, 26, 12), frameType)
@@ -221,7 +227,7 @@ function OptionMenu.draw()
     if idx <= total then
       local y = ROW_Y0 + (slot - 1) * ROW_STEP -- src/option_menu.c:563
       if idx > #p.rows then
-        Window.printPx(Strings("CANCEL"), LABEL_X, y, { colors = FrlgFont.COLOR.NORMAL })
+        Window.printPx(RomText.at("sOptionMenuItemsNames", 6), LABEL_X, y, { colors = FrlgFont.COLOR.NORMAL })
       else
         local row = p.rows[idx]
         Window.printPx(row.label or "?", LABEL_X, y, { colors = FrlgFont.COLOR.NORMAL })

@@ -34,18 +34,19 @@ local function starterBall(askText, species, choseFlag, ownBall,
       { species = species, forceOwned = true } }, -- 5
     { "ask", askText },                           -- 6
     { "jump_if_false", "end" },                   -- 7
-    -- scripts/OaksLab.asm:919
-    { "show_text", "_OaksLabMonEnergeticText" },  -- 8
+    -- scripts/OaksLab.asm:918
+    { "hide_object", "OAKS_LAB", ownBall },       -- 8
+    -- scripts/OaksLab.asm:921
+    { "show_text", "_OaksLabMonEnergeticText" },  -- 9
     -- OaksLab.asm: ReceivedMon (sound_get_key_item) then AddPartyMon; the
     -- jingle fires once the box has typed and holds it (#668)
-    { "text_sound", "Get_Key_Item" },                              -- 9
-    { "show_text", "_OaksLabReceivedMonText", { RAM = species } }, -- 10
-    { "give_pokemon", species, 5 },               -- 11
-    { "set_flag", "EVENT_GOT_STARTER" },          -- 12
-    { "set_flag", choseFlag },                    -- 13
+    { "text_sound", "Get_Key_Item" },                              -- 10
+    { "show_text", "_OaksLabReceivedMonText", { RAM = species } }, -- 11
+    { "give_pokemon", species, 5 },               -- 12
+    { "set_flag", "EVENT_GOT_STARTER" },          -- 13
     -- POKé BALLs come later, at OaksLabOak1Text's .give_poke_balls beat
     -- once the Route 22 rival is beaten (see TEXT_OAKSLAB_OAK1 below)
-    { "hide_object", "OAKS_LAB", ownBall },       -- 14
+    { "set_flag", choseFlag },                    -- 14
     -- the rival walks to the countering ball (around the furniture)
     { "move_npc_to", 1, rivalBallX, 4 },          -- 15
     { "face_object", 1, "up" },                   -- 16
@@ -61,7 +62,7 @@ local function starterBall(askText, species, choseFlag, ownBall,
     -- leftover ball: Oak reads the last-mon line (scripts/OaksLab.asm
     -- OaksLabSelectedPokeBallScript -> OaksLabLastMonScript, #601)
     { "face_object", 5, "down" },                 -- 23
-    { "show_text", "That's PROF.OAK's\nlast Pokémon!" }, -- 24
+    { "show_text", "_OaksLabLastMonText" },           -- 24
     -- OaksLabLastMonScript ends at TextScriptEnd; the port used to fall
     -- through into the pre-pick line below (#601 remnant, reported on #600)
     { "jump", "end" },                            -- 25

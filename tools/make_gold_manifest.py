@@ -643,9 +643,9 @@ REQUIRED_SYMBOLS = {
     "LavaBubbleTileFrames",
     # data/sprites/emotes.asm:22 `emote GrassRustleGFX, 1, $fe`, the one tile
     # ShakeGrass' SPRITEMOVEDATA_GRASS object draws.
-    "GrassRustleGFX",
+    "GrassRustleGFX", "CutGrassGFX", "JumpShadowGFX",
     "PokemonCries", "SFX",
-    "OverworldSprites", "ChrisSpriteGFX", "Moves", "EvosAttacksPointers",
+    "OverworldSprites", "OutdoorSprites", "ChrisSpriteGFX", "Moves", "EvosAttacksPointers",
     # data/sprites/sprite_mons.asm: one species byte per SPRITE_POKEMON id,
     # which GetMonSprite's .Icon arm feeds to LoadOverworldMonIcon
     "SpriteMons",
@@ -705,6 +705,7 @@ REQUIRED_SYMBOLS = {
     # Battle + pokemon runtime data
     "MoveNames", "TypeNames", "TypeMatchups", "TMHMMoves", "GrowthRates",
     "ItemAttributes", "MoveDescriptions", "ItemDescriptions",
+    "TimeCapsule_CatchRateItems",
     # Wild encounters (data/wild/*)
     "JohtoGrassWildMons", "JohtoWaterWildMons",
     "KantoGrassWildMons", "KantoWaterWildMons",

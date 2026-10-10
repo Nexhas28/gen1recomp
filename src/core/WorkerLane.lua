@@ -268,9 +268,6 @@ function WorkerLane.newWorker(opts)
     lanes = {},
     state = nil, -- nil = untried, true = running, false = off
   }, Worker)
-  require("src.core.SessionLifecycle").registerProcessShutdown(function()
-    worker:shutdown()
-  end)
   return worker
 end
 
@@ -307,6 +304,14 @@ function Worker:ensure()
   if not pcall(function() thread:start() end) then return false end
   self.thread, self.cmd, self.out = thread, cmd, out
   self.state = true
+  -- a worker that never started has nothing to end at exit; registering here
+  -- (not in newWorker) keeps SessionLifecycle out of Assets' load-time graph
+  if not self.registered then
+    self.registered = true
+    require("src.core.SessionLifecycle").registerProcessShutdown(function()
+      self:shutdown()
+    end)
+  end
   return true
 end
 
