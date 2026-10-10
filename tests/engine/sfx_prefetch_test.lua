@@ -506,5 +506,20 @@ do
   eq(renderOrder[3], "cry:DERIVED", "then the player lead cry")
 end
 
+-- ---- a throwing worker config turns prefetch off, never crashes the frame ---
+do
+  reset()
+  local data = newData()
+  local realCfg = ChipAudio.effectWorkerConfig
+  ChipAudio.effectWorkerConfig = function() error("boom") end
+  local ok = pcall(Sound.prefetchSfx, data, "Foo")
+  check(ok, "prefetchSfx does not raise when the config throws")
+  check(pcall(Sound.update), "Sound.update does not raise")
+  check(pcall(Sound.update), "and stays quiet afterwards")
+  ChipAudio.effectWorkerConfig = realCfg
+  check(Sound.play(data, "Foo") ~= nil, "a play still returns a Source (sync fallback)")
+  reset()
+end
+
 Sound.shutdown()
 T.finish()

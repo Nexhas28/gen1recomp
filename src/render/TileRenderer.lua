@@ -377,6 +377,32 @@ local function buildAnim(spec, tilesetImagePath, perRow, quads, gbc)
   return nil
 end
 
+-- True while building this tileset's animated tiles (outside RED++, no gbc
+-- key) would still read the sheet's pixels: an hshift tile whose 8 shifted
+-- variants, or a toggle whose patched atlas clone, is not built yet.  The
+-- image-decode hint uses it to avoid skipping a sheet that is still needed
+-- (conservative: unbuilt means pending).
+function TileRenderer.pixelReadsPending(imagePath, tileset)
+  if not (imagePath and tileset) then return false end
+  local declared = tileset.animatedTiles or TileRenderer.defaultAnimatedTiles(tileset)
+  for _, spec in ipairs(declared) do
+    if spec.kind == "hshift" then
+      local tile = spec.tiles and spec.tiles[1] or spec.tile
+      if tile ~= nil and spec.offsets and #spec.offsets > 0
+         and shiftVariants[imagePath .. "#" .. tile] == nil then
+        return true
+      end
+    elseif spec.kind == "toggle" then
+      if toggleImages[imagePath .. "#" .. tostring(spec.image)] == nil then
+        return true
+      end
+    end
+  end
+  return false
+end
+-- test hook (the cache table is replaced by invalidate)
+function TileRenderer._shiftVariantsForTest() return shiftVariants end
+
 -- True GBC overworld coloring (COLORS=RED++): recolor the WHOLE tileset
 -- atlas once, per (tileset image, map), rather than trying to retrofit the
 -- SGB zone/shade-remap-shader post-process (built for a handful of coarse

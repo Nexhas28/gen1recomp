@@ -251,3 +251,49 @@ do
   P.out = nil
   P.WARMUP = 60
 end
+
+-- 9. frame total is work time: the vsync wait in `present` is excluded
+do
+  fresh({ POKEPORT_GAME_PROF_OVERLAY = "1" })
+  P.beginFrame(true)
+  P.push("update"); adv(2); P.pop("update")
+  P.push("present"); adv(30); P.pop("present")
+  P.endFrame()
+  near(P.stats("frame").mean, 2, "frame total excludes present")
+  near(P.stats("present").mean, 30, "present section still recorded")
+  local o16, o33 = P.spikeCounts()
+  eq(o16, 0, "present-heavy frame is not >16")
+  eq(o33, 0, "present-heavy frame is not >33")
+  eq(#P.spikeList(), 0, "present-heavy frame is not a spike")
+  P.beginFrame(true)
+  P.push("update"); adv(20); P.pop("update")
+  P.push("present"); adv(5); P.pop("present")
+  P.endFrame()
+  o16 = P.spikeCounts()
+  eq(o16, 1, "heavy update is >16")
+  eq(#P.spikeList(), 1, "heavy update is a spike")
+  near(P.spikeList()[1].total, 20, "spike total is work time")
+end
+
+-- 10. hiding the overlay mid-bench leaves bench state alone
+do
+  local out, quits = {}, 0
+  P.out = function(x) out[#out + 1] = x end
+  P.WARMUP = 0
+  love = love or {}
+  local oldEvent = love.event
+  love.event = { quit = function() quits = quits + 1 end }
+  fresh({ POKEPORT_GAME_PROF = "5", POKEPORT_GAME_PROF_OVERLAY = "1" })
+  for _ = 1, 2 do P.beginFrame(true); adv(1); P.endFrame() end
+  P.setEnabled(false)
+  eq(#out, 0, "hiding overlay emits nothing in bench mode")
+  for _ = 1, 3 do P.beginFrame(true); adv(1); P.endFrame() end
+  eq(#out, 1, "bench summary emitted once at N")
+  eq(quits, 1, "quit once")
+  check(out[1]:find("PROF frame mean=", 1, true), "bench summary content")
+  P.finish()
+  eq(#out, 1, "no second summary")
+  love.event = oldEvent
+  P.out = nil
+  P.WARMUP = 60
+end

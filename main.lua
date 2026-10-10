@@ -1635,7 +1635,8 @@ function love.run()
 
     PresentSync.applyFixedStepPeriod()
 
-    -- before the pacing sleep, so the frame total is work time only
+    -- before the pacing sleep; the profiler's frame total also excludes the
+    -- vsync wait in `present`, so it is work time only
     FrameProfiler.endFrame()
 
     if love.timer then
