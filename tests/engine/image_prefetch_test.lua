@@ -497,9 +497,9 @@ do
   AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
   PaletteFX.mode = "gbc"
   local S1 = "assets/generated/sprites/s1.png"
-  Assets.image(S1)
+  SpriteRenderer.new({ image = S1 }) -- caches the sheet by its raw path
   SpriteRenderer.obpImage(S1, { {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0} }, 1)
-  check(Assets.isCached(S1) and SpriteRenderer.hasObp(S1), "Image and OBJ bake are held")
+  check(SpriteRenderer.isBaked(S1), "Image and OBJ bake are held")
   channel("atlas_cmd"):clear()
   ow:prefetchAtlases("M4", false)
   AtlasPrefetch.update()

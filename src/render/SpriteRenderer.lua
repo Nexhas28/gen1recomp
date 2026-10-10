@@ -68,6 +68,12 @@ SpriteRenderer.obpImage = getObpImage
 
 function SpriteRenderer.hasObp(path) return obpPaths[path] == true end
 
+-- the sheet's Image and an OBJ bake are both held, keyed by the RAW def.image
+-- path (no Assets.resolve, so mod overrides / derived paths still match)
+function SpriteRenderer.isBaked(path)
+  return obpPaths[path] == true and imageCache[path] ~= nil
+end
+
 -- hot reload drops the sheets; live instances hold their own image, so
 -- the world rebuilds them (MapLoader.invalidateAll) rather than this
 function SpriteRenderer.invalidate()

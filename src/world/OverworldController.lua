@@ -769,8 +769,7 @@ local function prefetchMapImages(mapId, front, budget, seen)
   local function want(path, sprite)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
-    if sprite and skipDone and Assets.isCached(path)
-       and SpriteRenderer.hasObp(path) then return end
+    if sprite and skipDone and SpriteRenderer.isBaked(path) then return end
     if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
   local ts = data.tilesets and data.tilesets[def.tileset]

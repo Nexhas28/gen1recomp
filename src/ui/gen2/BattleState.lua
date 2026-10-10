@@ -405,8 +405,11 @@ function BattleState.new(game, opts)
   pcall(function()
     local battle = self.battle
     if not (battle and data.audio) then return end
-    require("src.core.Sound").prefetchMons(data,
-      { battle.enemy, battle.player }, { front = true })
+    local Sound, front = require("src.core.Sound"), { front = true }
+    -- leads first, then both benches (a trainer's later switch-ins)
+    Sound.prefetchMons(data, { battle.enemy, battle.player }, front)
+    Sound.prefetchMons(data, battle.enemyParty, front)
+    Sound.prefetchMons(data, battle.party, front)
   end)
   self.queue = {}
   self.message = nil
