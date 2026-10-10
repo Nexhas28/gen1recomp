@@ -250,6 +250,8 @@ end
 
 -- Wraps love.graphics.present so the profiler can time it and close the frame
 -- (hooks in main.lua's "Frame profiler hooks" block; love.run is untouched).
+-- PresentSync.waitBeforePresent is timed as "present" too: on X11 the vblank
+-- wait happens there (PresentProbe's GLX wait), just before present.
 local presentWrapped = false
 local function wrapPresent()
   local g = love.graphics
@@ -261,6 +263,13 @@ local function wrapPresent()
     present(...)
     FrameProfiler.pop("present")
     FrameProfiler.endFrame()
+  end
+  local PresentSync = require("src.core.PresentSync")
+  local waitBeforePresent = PresentSync.waitBeforePresent
+  PresentSync.waitBeforePresent = function(...)
+    FrameProfiler.push("present")
+    waitBeforePresent(...)
+    FrameProfiler.pop("present")
   end
 end
 
@@ -1694,6 +1703,7 @@ function love.quit()
   end
   local osName = love.system and love.system.getOS and love.system.getOS()
   if osName == "NX" then
+    FrameProfiler.finish()
     endProcessOnce()
     return
   end
@@ -1714,7 +1724,8 @@ function love.quit()
   -- path import) keep the plain exit so they terminate as before.  Nothing
   -- is saved here on purpose: a window close never wrote the save, and the
   -- restart path must be no worse than that, not quietly better.
-  local scripted = os.getenv("POKEPORT_AUTOPILOT") or os.getenv("POKEPORT_DRIVER") or os.getenv("POKEPORT_GAME_PROF")
+  local scripted = os.getenv("POKEPORT_AUTOPILOT") or os.getenv("POKEPORT_DRIVER")
+    or FrameProfiler.benchRequested()
     or os.getenv("POKEPORT_IMPORT_ONLY") == "1" or os.getenv("POKEPORT_IMPORT_ROM")
   -- #887: a shortcut session (--game / POKEPORT_GAME) has no launcher to go
   -- back to and the restart would re-read the shortcut, so it exits instead.
@@ -1785,8 +1796,8 @@ end
 -- changed loop is a new shell, see tests/engine/love_run_shell_matrix.lua), and
 -- the profiler must not change it.  The frame is bracketed update-start to
 -- present-end, before the pacing sleep, so its total is work time only (it
--- also excludes the vsync wait inside `present`).  A frame that never presents
--- (hidden window) is simply dropped by the next beginFrame.
+-- also excludes the vsync wait in and just before `present`).  A frame that
+-- never presents (hidden window) is simply dropped by the next beginFrame.
 do
   local gameUpdate, gameDraw = love.update, love.draw
   function love.update(dt)

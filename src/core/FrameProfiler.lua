@@ -102,18 +102,27 @@ local function now()
   return c()
 end
 
+-- POKEPORT_GAME_PROF -> frames to record (nil: no bench), and whether it
+-- is `all`
+local function benchSetting(getenv)
+  local pv = (getenv or os.getenv)("POKEPORT_GAME_PROF")
+  if pv == "all" then return FrameProfiler.ALL_CAP, true end
+  local n = tonumber(pv)
+  if n and n >= 1 then return math.floor(n), false end
+  return nil, false
+end
+
+-- true when the environment asks for a bench run (love.quit's scripted check)
+function FrameProfiler.benchRequested(getenv)
+  return benchSetting(getenv) ~= nil
+end
+
 -- Reads env (or the supplied getenv) and resets all recorded data.
 function FrameProfiler.init(getenv)
   getenv = getenv or os.getenv
   inited = true
-  benchTarget, benchSeen, benchDone, benchAll = nil, 0, false, false
-  local pv = getenv("POKEPORT_GAME_PROF")
-  if pv == "all" then
-    benchAll, benchTarget = true, FrameProfiler.ALL_CAP
-  else
-    local n = tonumber(pv)
-    if n and n >= 1 then benchTarget = math.floor(n) end
-  end
+  benchSeen, benchDone = 0, false
+  benchTarget, benchAll = benchSetting(getenv)
   gcProbe = getenv("POKEPORT_GC_PROBE") == "1"
   local ov = getenv("POKEPORT_GAME_PROF_OVERLAY")
   FrameProfiler.enabled = (ov ~= nil and ov ~= "" and ov ~= "0") or false
@@ -160,11 +169,6 @@ function FrameProfiler.keypressed(key, game, input) -- key is "f3"
   if game then game:keypressed(key) end
   if free then FrameProfiler.toggle() end
   return free
-end
-
--- True when the overlay should be drawn this frame.
-function FrameProfiler.visible()
-  return FrameProfiler.enabled and inFrame
 end
 
 local function active()

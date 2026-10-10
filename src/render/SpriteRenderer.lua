@@ -40,7 +40,6 @@ end
 -- hardware, where sprite palette index 0 is unconditionally transparent
 -- (same rule TileRenderer's getColor0KeyShader documents for tall grass).
 local obpCache = {}
-local obpPaths = {}   -- path -> true once any OBJ-palette bake exists for it
 -- obpCache is keyed by the string `path .. "#obp" .. group`; this indexes the
 -- same entries by path then group, so a draw that hits the cache (every draw
 -- after the first) builds no key string.  A numeric group is looked up by
@@ -72,7 +71,6 @@ local function getObpImage(path, colors, group)
       img = getImage(path) -- headless stub: no pixel access
     end
     obpCache[key] = img
-    obpPaths[path] = true
   end
   local img = obpCache[key]
   -- only string/number groups get here: concatenating anything else raised
@@ -96,12 +94,13 @@ end
 
 SpriteRenderer.obpImage = getObpImage
 
-function SpriteRenderer.hasObp(path) return obpPaths[path] == true end
+-- any OBJ-palette bake exists for the sheet (obpByPath indexes every one)
+function SpriteRenderer.hasObp(path) return obpByPath[path] ~= nil end
 
 -- the sheet's Image and an OBJ bake are both held, keyed by the RAW def.image
 -- path (no Assets.resolve, so mod overrides / derived paths still match)
 function SpriteRenderer.isBaked(path)
-  return obpPaths[path] == true and imageCache[path] ~= nil
+  return obpByPath[path] ~= nil and imageCache[path] ~= nil
 end
 
 -- hot reload drops the sheets; live instances hold their own image, so
@@ -109,7 +108,6 @@ end
 function SpriteRenderer.invalidate()
   imageCache = {}
   obpCache = {}
-  obpPaths = {}
   obpByPath = {}
 end
 

@@ -25,10 +25,9 @@
 --   Store   a bounded LRU map for finished results.
 --
 -- Epochs.  Lane:bump() makes everything the lane has pending obsolete: queued
--- entries are dropped (or, requeue = true, kept to be sent again), results
--- still being produced are discarded when they arrive (Lane:complete checks
--- the epoch the job was sent under), and the worker's inbox is cleared so
--- obsolete jobs do not run.  Clearing the inbox also loses the jobs of the
+-- entries are dropped, results still being produced are discarded when they
+-- arrive (Lane:complete checks the epoch the job was sent under), and the
+-- worker's inbox is cleared so obsolete jobs do not run.  Clearing the inbox also loses the jobs of the
 -- OTHER lanes on that worker, so those lanes requeue what they had in flight;
 -- a bump of one lane never strands another.
 --
@@ -220,13 +219,11 @@ function Lane:requeueInflight()
   self.inflight, self.inflightCount = {}, 0
 end
 
--- Obsolete everything this lane has pending (see the header).  requeue: keep
--- the not-yet-delivered jobs and send them again under the new epoch;
--- otherwise drop them.
-function Lane:bump(requeue)
+-- Obsolete and drop everything this lane has pending (see the header).
+function Lane:bump()
   self.epoch = self.epoch + 1
   self.worker:clearInbox(self)
-  if requeue then self:requeueInflight() else self:clear() end
+  self:clear()
 end
 
 -- nothing queued, nothing out at the worker

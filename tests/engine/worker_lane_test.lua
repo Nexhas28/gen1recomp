@@ -201,28 +201,22 @@ do
   local cmdCh = channel("t_cmd")
   eq(cmdCh:getCount(), 4, "four jobs at the worker")
 
-  -- requeue: the lane keeps its jobs and sends them again under the new epoch
+  -- a bump drops this lane's jobs; the OTHER lane re-sends what it lost
   local e = a.epoch
-  a:bump(true)
+  a:bump()
   check(a.epoch == e + 1, "bump advances the lane epoch")
   eq(b.epoch, 0, "...and only that lane's")
   eq(cmdCh:getCount(), 0, "the inbox is cleared")
-  eq(a.inflightCount, 0, "requeued jobs are not in flight")
-  eq((a:pending()), 3, "a's jobs and its queued entry are all queued again")
-  eq(b.inflightCount, 0, "the OTHER lane's lost jobs are queued again too")
-  eq((b:pending()), 2, "so a bump never strands them")
-  check(a:complete("a1", e) == nil, "a result under the old epoch is dropped")
-
-  a:pump(send(a)); b:pump(send(b))
-  eq(cmdCh:getCount(), 5, "everything is re-sent")
-  check(cmdCh.queue[1].epoch == a.epoch or cmdCh.queue[1].epoch == b.epoch, "under the lanes' current epochs")
-
-  -- drop: nothing of this lane survives, the other lane still re-sends
-  a:bump(false)
-  eq((a:pending()), 0, "bump(false) drops queued entries")
+  eq((a:pending()), 0, "bump drops queued entries")
   eq(a.inflightCount, 0, "and in-flight ones")
   check(a:idle(), "lane is idle")
-  eq((b:pending()), 2, "the other lane's jobs are requeued")
+  check(a:complete("a1", e) == nil, "a result under the old epoch is dropped")
+  eq(b.inflightCount, 0, "the OTHER lane's lost jobs are queued again")
+  eq((b:pending()), 2, "so a bump never strands them")
+
+  a:pump(send(a)); b:pump(send(b))
+  eq(cmdCh:getCount(), 2, "the other lane re-sends them")
+  eq(cmdCh.queue[1].epoch, b.epoch, "under its current epoch")
 end
 
 -- ---- Worker drain, fail, shutdown ---------------------------------------------

@@ -806,13 +806,6 @@ end
 -- Then, in the order the battle needs them (the worker renders FIFO): both
 -- leads' move sounds, the hit sounds, the rest of both parties' cries and the
 -- generic battle SFX.
-local BATTLE_HIT_SOUNDS = {
-  -- PlayApplyingAttackSound (engine/battle/core.asm); same pitch bytes as
-  -- src/battle/EffectRegistry.lua, which plays them through Sound.playMove
-  { sound = "Damage", pitch = 0x20 },
-  { sound = "Super_Effective", pitch = 0xe0 },
-  { sound = "Not_Very_Effective", pitch = 0x50 },
-}
 local BATTLE_SFX = {
   "Level_Up", "Faint_Fall", "Faint_Thud", "Ball_Toss", "Ball_Poof", "Run",
   "Caught_Mon",
@@ -837,8 +830,10 @@ local function prewarmCries(self)
       if mdef then pcall(Sound.prewarmMove, data, mdef.anim) end
     end
   end
-  for _, anim in ipairs(BATTLE_HIT_SOUNDS) do
-    pcall(Sound.prewarmMove, data, anim)
+  -- the hit sounds, as EffectRegistry plays them through Sound.playMove
+  local hits = EffectRegistry.HIT_SOUNDS
+  for _, kind in ipairs({ "neutral", "superEffective", "notVeryEffective" }) do
+    pcall(Sound.prewarmMove, data, hits[kind])
   end
   for _, party in ipairs({ self.enemyParty or {}, self:playerPartyView() or {} }) do
     for _, mon in ipairs(party) do

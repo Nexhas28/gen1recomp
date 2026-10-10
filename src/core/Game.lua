@@ -1454,7 +1454,6 @@ function Game:writeOptions()
   SaveData.saveLiveOptions(self.save)
 end
 
--- Push the live options table into audio + display subsystems.
 -- sounds menus and the overworld play first and most often
 Game.COMMON_SFX = {
   "Press_AB", "Start_Menu", "Collision", "Save", "Go_Inside", "Go_Outside",
@@ -1479,6 +1478,7 @@ function Game:prewarmCommonAudio()
   end
 end
 
+-- Push the live options table into audio + display subsystems.
 function Game:applyOptions(opts)
   opts = opts or (self.save and self.save.options) or {}
   local Music = require("src.core.Music")

@@ -522,6 +522,8 @@ function TileRenderer.prefetchAtlas(data, mapId, front)
     return false
   end
   local imagePath, perRow = ts.image, ts.tilesPerRow
+  -- a composed sheet (UnionCenters) exists only as its build callback
+  if Assets.isComposed(imagePath) then return false end
   local key = imagePath .. gbcKeyFor(mapId)
   if gbcAtlasCache[key] ~= nil or AtlasPrefetch.known(key) then return false end
   local dark = PaletteFX.darkKey()

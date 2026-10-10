@@ -63,6 +63,10 @@ function Assets.compose(path, build)
   cache[path] = nil
 end
 
+-- true when `path` is built by an Assets.compose callback (never read from a
+-- file, so a background decode / bake must not open it)
+function Assets.isComposed(path) return composed[path] ~= nil end
+
 -- Only plain PNG paths use a background decode: newImage(path) derives a
 -- dpiscale from an "@2x" style suffix and handles compressed formats, neither
 -- of which newImage(ImageData) reproduces.
@@ -77,8 +81,7 @@ Assets.prefetchable = prefetchable
 -- no-op without a worker or for a non-PNG / "@2x" name).  The path is resolved
 -- when the request is sent.
 function Assets.prefetchImage(path, front)
-  -- a composed path is built by its callback, never decoded from a file
-  if composed[path] or not prefetchable(path) then return false end
+  if Assets.isComposed(path) or not prefetchable(path) then return false end
   return AtlasPrefetch.requestDecode(path, front)
 end
 

@@ -334,4 +334,13 @@ do
   P.WARMUP = 60
 end
 
+-- 11. the bench request love.quit's scripted check reads
+do
+  local function env(v) return function() return v end end
+  check(P.benchRequested(env("120")), "a frame count is a bench run")
+  check(P.benchRequested(env("all")), "`all` is a bench run")
+  check(not P.benchRequested(env("0")), "0 is not")
+  check(not P.benchRequested(env(nil)), "unset is not")
+end
+
 T.finish("frame_profiler_test")

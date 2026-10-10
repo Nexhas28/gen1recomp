@@ -575,6 +575,17 @@ do
   GameVersion.set(savedVersion)
 end
 
+-- a composed tileset sheet (UnionCenters) is never baked off a file
+do
+  reset()
+  Assets.compose("gfx/ts.png", function() return sources["gfx/ts.png"] end)
+  check(not TileRenderer.prefetchAtlas(newData(), "M1", false),
+    "composed sheet: no background bake")
+  check(AtlasPrefetch.idle(), "composed sheet: nothing queued")
+  Assets.compose("gfx/ts.png", nil)
+  check(TileRenderer.prefetchAtlas(newData(), "M1", false), "plain sheet: queued")
+end
+
 reset()
 AtlasPrefetch.shutdown()
 T.finish()

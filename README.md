@@ -178,8 +178,8 @@ measurement set `POKEPORT_GAME_PROF=<frames>`: after a 60-frame warmup and
 `POKEPORT_GAME_PROF=all` records until the game quits and then prints the
 summary, which also lists the worst spikes (over 16.7 ms) with the
 per-section cost and the screen/map they happened on. The `frame` figure and
-the spike threshold are work time: the vsync wait inside `present` (up to one
-display refresh) is excluded, so an idle frame reads well under a millisecond
+the spike threshold are work time: the vsync wait in or just before `present`
+(up to one display refresh) is excluded, so an idle frame reads well under a millisecond
 while a GPU stall in `present` still counts. The launcher is never profiled.
 
 `POKEPORT_JIT=0` turns the LuaJIT compiler off (prints `[info] jit off`), to
