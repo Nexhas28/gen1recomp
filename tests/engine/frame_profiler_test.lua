@@ -256,9 +256,15 @@ do
   local oldLove = love
   love = love or {}
   local oldWindow = love.window
-  love.window = { getMode = function() return 800, 600, { refreshrate = 120 } end }
+  local oldRR = package.loaded["src.core.RefreshRate"]
+  local rr = { measured = nil, hz = function() return 120 end }
+  rr.measuredHz = function() return rr.measured end
+  package.loaded["src.core.RefreshRate"] = rr
   local vs = 1000 / 120
-  near(P.vsyncMs(), vs, "vsyncMs from window refresh rate")
+  near(P.vsyncMs(), vs, "vsyncMs from the advertised refresh rate")
+  rr.measured = 30 -- half-rate vsync: the measured cadence wins
+  near(P.vsyncMs(), 1000 / 30, "vsyncMs prefers the measured cadence")
+  rr.measured = nil
 
   fresh({ POKEPORT_GAME_PROF_OVERLAY = "1" })
   P.beginFrame(true)
@@ -295,10 +301,11 @@ do
   near(P.spikeList()[1].total, 20, "spike total is work time")
 
   -- no window API: 60 Hz default
-  love.window = nil
-  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz without love.window")
-  love.window = { getMode = function() error("unavailable") end }
-  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz when getMode fails")
+  rr.hz = function() return nil end
+  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz without a known rate")
+  package.loaded["src.core.RefreshRate"] = nil
+  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz without RefreshRate")
+  package.loaded["src.core.RefreshRate"] = oldRR
 
   love.window = oldWindow
   love = oldLove

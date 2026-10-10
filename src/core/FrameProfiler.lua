@@ -322,11 +322,12 @@ end
 
 -- One display refresh in ms (the most of `present` that is vsync wait);
 -- 60 Hz when the window reports no rate.
+-- Prefers RefreshRate's MEASURED swap cadence (half-rate vsync, VRR) over the
+-- advertised mode rate; both are cached there, so this allocates nothing.
 function FrameProfiler.vsyncMs()
-  local w = love and love.window
-  local ok, _, _, flags = pcall(function() return w.getMode() end)
-  local hz = ok and flags and tonumber(flags.refreshrate) or 0
-  return 1000 / (hz > 0 and hz or 60)
+  local RR = package.loaded["src.core.RefreshRate"]
+  local hz = RR and ((RR.measuredHz and RR.measuredHz()) or RR.hz())
+  return 1000 / ((hz and hz > 0) and hz or 60)
 end
 
 function FrameProfiler.endFrame()
