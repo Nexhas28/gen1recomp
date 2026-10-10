@@ -72,6 +72,9 @@ local function getImage(path)
   return imageCache[path]
 end
 
+-- the tileset Image is already held (raw path, no resolve)
+function TileRenderer.hasImage(path) return imageCache[path] ~= nil end
+
 -- ------------------------------------------------------------------
 -- Tile animation (home/vcopy.asm): tilesets with TILEANIM_WATER[_FLOWER]
 -- rotate water tile $14 one pixel every 20 frames (4 steps right, 4

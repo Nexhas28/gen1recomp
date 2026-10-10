@@ -761,7 +761,8 @@ local function prefetchMapImages(mapId, front, budget, seen)
   local NPC = require("src.world.NPC")
   local queued = 0
   local SpriteRenderer = require("src.render.SpriteRenderer")
-  -- Tileset hints stay even when cached (RED++ atlas bakes reuse the decode).
+  -- Under RED++ tileset hints stay even when cached (atlas bakes reuse the
+  -- decode); otherwise a cached tileset is skipped (see want).
   -- Outside RED++ a sheet has one OBJ palette, so once its Image and OBJ bake
   -- exist the pixels are never read again and it is skipped.  RED++ colours
   -- the same sheet per sprite/instance, so a new group may still need them.
@@ -770,6 +771,9 @@ local function prefetchMapImages(mapId, front, budget, seen)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
     if sprite and skipDone and SpriteRenderer.isBaked(path) then return end
+    -- outside RED++ a tileset's pixels are read once, by its Image upload
+    if not sprite and skipDone
+       and require("src.render.TileRenderer").hasImage(path) then return end
     if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
   local ts = data.tilesets and data.tilesets[def.tileset]
@@ -789,11 +793,12 @@ end
 -- become neighbors after the NEXT crossing, i.e. the neighbors of each
 -- current neighbor.  Heading for `rootId` (a warp, front=true): the
 -- destination, then its neighbors, ahead of any queued hints.
+local prefetchWarned = false
 function OverworldState:prefetchAtlases(rootId, front)
   if not (Game.data and require("src.render.AtlasPrefetch").available()) then
     return
   end
-  pcall(function()
+  local ok, err = pcall(function()
     local TileRenderer = require("src.render.TileRenderer")
     local gbc = PaletteFX.usesGbcPack()
     local maps = Game.data.maps
@@ -829,6 +834,10 @@ function OverworldState:prefetchAtlases(rootId, front)
       end
     end
   end)
+  if not ok and not prefetchWarned then
+    prefetchWarned = true -- once: a data-shape bug would repeat every setMap
+    Logger.warn("prefetch hints failed: %s", tostring(err))
+  end
 end
 
 function OverworldState:liveMaps()
