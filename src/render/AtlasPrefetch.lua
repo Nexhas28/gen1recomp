@@ -30,7 +30,6 @@ local AtlasPrefetch = {}
 
 local DRAIN_CAP = 2       -- bake results accepted per update
 
-local sources = {}        -- image path -> source ImageData
 local ready = WorkerLane.newStore(24)   -- bake key -> ImageData
 local dready = WorkerLane.newStore(64)  -- resolved path -> decoded ImageData
 
@@ -41,7 +40,6 @@ local worker = WorkerLane.newWorker({
   onStop = function()
     ready:clear()
     dready:clear()
-    sources = {}
   end,
 })
 local bakes = worker:newLane({ inflight = 2, sendCap = 1 })
@@ -65,7 +63,6 @@ function AtlasPrefetch.bump()
   decodes:bump()
   ready:clear()
   dready:clear()
-  sources = {}
 end
 
 -- Only the palette changed: baked atlases (queued, finished, running) were
@@ -84,17 +81,6 @@ function AtlasPrefetch.epoch() return bakes.epoch end
 -- queued one is not "known": request() promotes it when asked for the front)
 function AtlasPrefetch.known(key)
   return bakes.inflight[key] ~= nil or ready:get(key) ~= nil
-end
-
--- Source ImageData for an image path, decoded once per epoch.  loader is
--- Assets.imageData; the object is only read afterwards (the worker shares it).
-function AtlasPrefetch.source(path, loader)
-  local src = sources[path]
-  if not src then
-    src = loader(path)
-    sources[path] = src
-  end
-  return src
 end
 
 -- true when a worker is (or can be) running; callers skip building hints

@@ -760,19 +760,21 @@ local function prefetchMapImages(mapId, front, budget, seen)
   if not def then return 0 end
   local NPC = require("src.world.NPC")
   local queued = 0
-  -- No skip for sheets whose Image is already cached: the sprite OBJ palette
-  -- bake (SpriteRenderer.getObpImage, every COLORS mode) re-reads the pixels
-  -- through Assets.imageData, which the decode store serves.
-  local function want(path)
+  local SpriteRenderer = require("src.render.SpriteRenderer")
+  -- Tileset hints stay even when cached (RED++ atlas bakes reuse the decode).
+  -- A sprite sheet whose Image is cached and OBJ bake exists never reads the
+  -- pixels again, so it is skipped.
+  local function want(path, sprite)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
+    if sprite and Assets.isCached(path) and SpriteRenderer.hasObp(path) then return end
     if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
   local ts = data.tilesets and data.tilesets[def.tileset]
   want(ts and ts.image)
   for _, obj in ipairs(def.objects or {}) do
     if objectVisible(Game.save, mapId, obj) then
-      want(NPC.spriteImagePath(data, obj))
+      want(NPC.spriteImagePath(data, obj), true)
     end
   end
   return queued

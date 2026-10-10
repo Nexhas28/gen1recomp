@@ -937,6 +937,7 @@ local PREFETCH_DRAIN_CAP = 4  -- Sources built per Sound.update
 local badKeys = {}            -- keys that failed to render this epoch
 local audioRef                -- data.audio the queue was built from
 local sentEpoch, sentAudio    -- what the worker was last configured with
+local sentMix                 -- the mix / stereo / rate of that configuration
 
 -- A separate thread from the music worker (chip_worker): a long effect render
 -- must never delay music buffers.
@@ -945,7 +946,7 @@ local fxWorker = WorkerLane.newWorker({
   cmd = "sfx_cmd", out = "sfx_out",
   capable = function() return love.audio and love.audio.newSource end,
   onStop = function()
-    sentEpoch, sentAudio, audioRef = nil, nil, nil
+    sentEpoch, sentAudio, audioRef, sentMix = nil, nil, nil, nil
     badKeys = {}
   end,
 })
@@ -960,7 +961,7 @@ local function bumpEpoch(requeue)
   -- renders still waiting in the worker's inbox are obsolete (Lane:bump
   -- clears it); sentEpoch is invalidated so the next request re-sends config
   -- before any render
-  sentEpoch = nil
+  sentEpoch, sentMix = nil, nil
   fxLane:bump(requeue)
 end
 
@@ -968,6 +969,19 @@ end
 -- rendered under the old settings must not be filed, but nothing already cached
 -- is evicted (it never was).
 function Sound.bumpRenderEpoch()
+  -- never configured: nothing rendered, so nothing can be stale.  Configured
+  -- with exactly the current mix (a setter re-applying the same values, as the
+  -- options screen does on every load): in-flight renders are still right.
+  local m = sentMix
+  if not m then return end
+  local ChipSynth = require("src.core.ChipSynth")
+  local vols, pits = ChipSynth.getChannelVolumes(), ChipSynth.getChannelPitches()
+  local same = m.stereo == ChipSynth.getStereo()
+    and m.sampleRate == ChipSynth.SAMPLE_RATE
+  for hw = 1, 4 do
+    if m.volumes[hw] ~= vols[hw] or m.pitches[hw] ~= pits[hw] then same = false end
+  end
+  if same then return end
   bumpEpoch(true)
 end
 
@@ -984,6 +998,8 @@ local function sendRender(entry)
       return false
     end
     sentEpoch, sentAudio = epoch, entry.audio
+    sentMix = { volumes = config.volumes, pitches = config.pitches,
+                stereo = config.stereo, sampleRate = config.sampleRate }
   end
   if fxWorker:push({
     cmd = "render", epoch = epoch, key = entry.key,

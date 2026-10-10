@@ -40,6 +40,7 @@ end
 -- hardware, where sprite palette index 0 is unconditionally transparent
 -- (same rule TileRenderer's getColor0KeyShader documents for tall grass).
 local obpCache = {}
+local obpPaths = {}   -- path -> true once any OBJ-palette bake exists for it
 
 local function getObpImage(path, colors, group)
   local key = path .. "#obp" .. group
@@ -58,17 +59,21 @@ local function getObpImage(path, colors, group)
       img = getImage(path) -- headless stub: no pixel access
     end
     obpCache[key] = img
+    obpPaths[path] = true
   end
   return obpCache[key]
 end
 
 SpriteRenderer.obpImage = getObpImage
 
+function SpriteRenderer.hasObp(path) return obpPaths[path] == true end
+
 -- hot reload drops the sheets; live instances hold their own image, so
 -- the world rebuilds them (MapLoader.invalidateAll) rather than this
 function SpriteRenderer.invalidate()
   imageCache = {}
   obpCache = {}
+  obpPaths = {}
 end
 
 Assets.register(SpriteRenderer.invalidate)

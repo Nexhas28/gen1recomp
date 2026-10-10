@@ -30,6 +30,7 @@ function ID:clone()
   return c
 end
 function ID:typeOf() return false end
+function ID:mapPixel() end
 
 local decodes = {}  -- path -> times decoded
 love.image = love.image or {}
@@ -489,6 +490,25 @@ do
   AtlasPrefetch.update()
   check(table.concat(decodeKeys(), ","):find("s1.png", 1, true) ~= nil,
     "gbc: a cached Image's sheet is still decoded for the OBJ bake")
+
+  -- Image cached AND an OBJ-palette bake exists: the pixels are never read
+  -- again, so no decode is queued (the tileset hint stays)
+  reset()
+  AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
+  PaletteFX.mode = "gbc"
+  local S1 = "assets/generated/sprites/s1.png"
+  Assets.image(S1)
+  SpriteRenderer.obpImage(S1, { {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0} }, 1)
+  check(Assets.isCached(S1) and SpriteRenderer.hasObp(S1), "Image and OBJ bake are held")
+  channel("atlas_cmd"):clear()
+  ow:prefetchAtlases("M4", false)
+  AtlasPrefetch.update()
+  local skipKeys = table.concat(decodeKeys(), ",")
+  check(not skipKeys:find("s1.png", 1, true), "cached Image + OBJ bake: sheet not decoded")
+  check(skipKeys:find("s7.png", 1, true) and skipKeys:find("ts.png", 1, true),
+    "other sheets and the tileset are still decoded")
+  SpriteRenderer.invalidate()
+  check(not SpriteRenderer.hasObp(S1), "invalidate forgets the OBJ bakes")
 
   -- warp: destination first
   reset()
