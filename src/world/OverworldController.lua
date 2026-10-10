@@ -767,16 +767,21 @@ local function prefetchMapImages(mapId, front, budget, seen)
   -- exist the pixels are never read again and it is skipped.  RED++ colours
   -- the same sheet per sprite/instance, so a new group may still need them.
   local skipDone = not PaletteFX.usesGbcPack()
+  local ts = data.tilesets and data.tilesets[def.tileset]
   local function want(path, sprite)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
     if sprite and skipDone and SpriteRenderer.isBaked(path) then return end
-    -- outside RED++ a tileset's pixels are read once, by its Image upload
-    if not sprite and skipDone
-       and require("src.render.TileRenderer").hasImage(path) then return end
+    -- outside RED++ a tileset's pixels are read once, by its Image upload,
+    -- unless animated-tile variants (shifted tiles, spinner clone) still
+    -- have to be built from them
+    if not sprite and skipDone then
+      local TileRenderer = require("src.render.TileRenderer")
+      if TileRenderer.hasImage(path)
+         and not TileRenderer.pixelReadsPending(path, ts) then return end
+    end
     if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
-  local ts = data.tilesets and data.tilesets[def.tileset]
   want(ts and ts.image)
   for _, obj in ipairs(def.objects or {}) do
     if objectVisible(Game.save, mapId, obj) then

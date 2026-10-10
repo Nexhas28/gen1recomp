@@ -123,7 +123,10 @@ end
 function FrameProfiler.setEnabled(b)
   if not inited then FrameProfiler.init() end
   -- hiding the F3 box logs its numbers first (see finish)
-  if not b and FrameProfiler.enabled then FrameProfiler.finish() end
+  -- (overlay line only: bench state is never touched)
+  if not b and FrameProfiler.enabled and not benchTarget then
+    FrameProfiler.emitOverlayLine()
+  end
   FrameProfiler.enabled = b and true or false
   if FrameProfiler.enabled then
     -- fresh window so stale numbers from before the toggle don't linger
@@ -294,18 +297,22 @@ local function recordSpike(total)
   while #spikes > FrameProfiler.SPIKE_KEEP do spikes[#spikes] = nil end
 end
 
+-- overlay session: one line of what the F3 box showed (last WINDOW frames);
+-- handheld builds log stderr to the launch-failure log.txt
+function FrameProfiler.emitOverlayLine()
+  if FrameProfiler.enabled and frameRing and frameRing.n > 0 then
+    local f = ringStats(frameRing, FrameProfiler.WINDOW)
+    local w = FrameProfiler.out or function(s) io.stderr:write(s) end
+    w(("PROF overlay fps=%.1f frame mean=%.3fms p95=%.3fms worst=%.3fms over16=%d over33=%d\n")
+      :format(FrameProfiler.fps(FrameProfiler.WINDOW), f.mean, f.p95, f.worst, over16, over33))
+  end
+end
+
 -- Emit the bench summary now if bench mode is on and not yet emitted
 -- (love.quit, so `all` mode and early exits still report).  No quit call.
 function FrameProfiler.finish()
   if not benchTarget then
-    -- overlay session: one line of what the F3 box showed (last WINDOW
-    -- frames); handheld builds log stderr to the launch-failure log.txt
-    if FrameProfiler.enabled and frameRing and frameRing.n > 0 then
-      local f = ringStats(frameRing, FrameProfiler.WINDOW)
-      local w = FrameProfiler.out or function(s) io.stderr:write(s) end
-      w(("PROF overlay fps=%.1f frame mean=%.3fms p95=%.3fms worst=%.3fms over16=%d over33=%d\n")
-        :format(FrameProfiler.fps(FrameProfiler.WINDOW),f.mean, f.p95, f.worst, over16, over33))
-    end
+    FrameProfiler.emitOverlayLine()
     return
   end
   if benchDone or recorded == 0 then return end
@@ -317,7 +324,9 @@ function FrameProfiler.endFrame()
   if not inFrame then return end
   inFrame = false
   local t = now()
-  local total = (t - frameStart) * 1000
+  -- work time: wall time minus the vsync wait inside `present`
+  local total = (t - frameStart) * 1000 - (cur["present"] or 0)
+  if total < 0 then total = 0 end
   local interval = lastEnd and (t - lastEnd) or nil
   lastEnd = t
 

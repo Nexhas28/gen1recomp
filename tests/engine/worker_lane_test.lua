@@ -304,4 +304,26 @@ do
   channel("t_cmd").reject = nil
 end
 
+-- ---- requeueInflight keeps the original send order ------------------------------
+do
+  local w = newWorker()
+  w:ensure()
+  local lane = w:newLane({ inflight = 10 })
+  local function send() return true end
+  lane:push("l1", {}, false)
+  lane:push("f1", {}, true)
+  lane:push("l2", {}, false)
+  lane:push("f2", {}, true)
+  lane:pump(send) -- f1, f2, l1, l2 go out in that order
+  lane:push("queued", {}, false)
+  lane:requeueInflight()
+  local function keys(q)
+    local t = {}
+    for _, e in ipairs(q) do t[#t + 1] = e.key end
+    return table.concat(t, ",")
+  end
+  eq(keys(lane.high), "f1,f2", "front entries return to high in send order")
+  eq(keys(lane.low), "l1,l2,queued", "others return ahead of newer low work, in order")
+end
+
 T.finish()

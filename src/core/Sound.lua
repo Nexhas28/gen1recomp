@@ -1012,8 +1012,12 @@ local function sendRender(entry)
 end
 
 -- Hand queued entries to the worker, keeping the in-flight budget full.
+-- Runs inside the frame (Sound.update, enqueue) with no caller-side pcall: a
+-- throw (e.g. building the worker config) turns prefetch off, and plays fall
+-- back to the synchronous path.
 local function pump()
-  fxLane:pump(sendRender)
+  local ok, err = pcall(fxLane.pump, fxLane, sendRender)
+  if not ok then fxWorker:fail(err) end
 end
 
 -- A top-level metatable is dropped when a table crosses the channel, so copy

@@ -510,6 +510,36 @@ do
   SpriteRenderer.invalidate()
   check(not SpriteRenderer.hasObp(S1), "invalidate forgets the OBJ bakes")
 
+  -- non-RED++: a cached tileset Image is skipped, unless an animated tile's
+  -- variants still have to be built from its pixels
+  do
+    local TR = require("src.render.TileRenderer")
+    local TS = "assets/generated/ts.png"
+    local tsDef = data.tilesets.OVERWORLD
+    local realHas = TR.hasImage
+    TR.hasImage = function(path) return path == TS or realHas(path) end
+    tsDef.animatedTiles = { { tile = 5, kind = "hshift", offsets = { 0, 1 } } }
+    local function tsDecoded()
+      return table.concat(decodeKeys(), ","):find("ts.png", 1, true) ~= nil
+    end
+    reset()
+    AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
+    PaletteFX.mode = "gbc"
+    ow:prefetchAtlases("M4", false)
+    AtlasPrefetch.update()
+    check(tsDecoded(), "cached tileset with an unbuilt animated variant: hint still queued")
+    reset()
+    AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)
+    PaletteFX.mode = "gbc"
+    TR._shiftVariantsForTest()[TS .. "#5"] = {}
+    ow:prefetchAtlases("M4", false)
+    AtlasPrefetch.update()
+    check(not tsDecoded(), "cached tileset with everything built: hint skipped")
+    TR._shiftVariantsForTest()[TS .. "#5"] = nil
+    tsDef.animatedTiles = nil
+    TR.hasImage = realHas
+  end
+
   -- warp: destination first
   reset()
   AtlasPrefetch._setDecodeLimitsForTest(64, 64, 64)

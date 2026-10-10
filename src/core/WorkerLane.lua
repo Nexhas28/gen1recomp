@@ -136,9 +136,13 @@ function Lane:promote(key, front)
 end
 
 -- Queue `entry` (a table) under `key`; front puts it ahead of the hints.
+local pushSeq = 0
+
 function Lane:push(key, entry, front)
   entry.key = key
   entry.front = front and true or nil
+  pushSeq = pushSeq + 1
+  entry.seq = pushSeq -- send order, for requeueInflight
   self.byKey[key] = entry
   table.insert(front and self.high or self.low, entry)
   return entry
@@ -206,7 +210,11 @@ function Lane:clear() resetQueues(self) end
 function Lane:requeueInflight()
   -- back to the head of the queue it came from: a background hint must not
   -- overtake front requests queued since
-  for _, entry in pairs(self.inflight) do
+  -- newest first, each inserted at the head, so the oldest ends up first
+  local list = {}
+  for _, entry in pairs(self.inflight) do list[#list + 1] = entry end
+  table.sort(list, function(a, b) return (a.seq or 0) > (b.seq or 0) end)
+  for _, entry in ipairs(list) do
     table.insert(entry.front and self.high or self.low, 1, entry)
     self.byKey[entry.key] = entry
   end
