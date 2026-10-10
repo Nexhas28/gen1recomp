@@ -132,6 +132,29 @@ function FrameProfiler.toggle()
   FrameProfiler.setEnabled(not FrameProfiler.enabled)
 end
 
+-- F3 gate + dispatch.  The key is always delivered to game:keypressed first
+-- (raw-key capture states, mod key hooks and player bindings see it), and the
+-- overlay toggles only if nothing wanted it: no state on top of the game's
+-- stack owns raw keys (onKeyPressed) and F3 is not bound to an action.
+-- `input` is the Input module (keyBindings); both lookups are pcall-guarded so
+-- a Gen 1/2/3 game without the field simply counts as "free".
+function FrameProfiler.keypressed(key, game, input) -- key is "f3"
+  local free = true
+  local okTop, top = pcall(function()
+    local stack = game and game.stack
+    return stack and stack:top() or nil
+  end)
+  if okTop and top and top.onKeyPressed then free = false end
+  local okBind, bound = pcall(function()
+    local kb = input and input.keyBindings
+    return kb and kb.f3 ~= nil
+  end)
+  if okBind and bound then free = false end
+  if game then game:keypressed(key) end
+  if free then FrameProfiler.toggle() end
+  return free
+end
+
 -- True when the overlay should be drawn this frame.
 function FrameProfiler.visible()
   return FrameProfiler.enabled and inFrame

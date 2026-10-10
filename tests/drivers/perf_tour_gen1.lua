@@ -12,19 +12,9 @@ return function(game)
   local BattleState = require("src.battle.BattleState")
   local PaletteFX = require("src.render.PaletteFX")
   local Screens = require("src.ui.Screens")
-  local now = love.timer.getTime
 
-  local function tour(name, ms)
-    print(("TOUR %s call=%.2fms"):format(name, ms))
-  end
-  -- times fn(), prints the TOUR line, then lets `settle` frames run
-  local function step(name, fn, settle)
-    local t0 = now()
-    local ok, err = pcall(fn)
-    tour(name, (now() - t0) * 1000)
-    if not ok then print("TOUR " .. name .. " ERROR " .. tostring(err)) end
-    U.wait(settle or 60)
-  end
+  local P = dofile("tests/drivers/perf_util.lua")
+  local function step(name, fn, settle) P.step(U, name, fn, settle) end
 
   local bootSpecies = game.save.party and game.save.party[1]
     and game.save.party[1].species

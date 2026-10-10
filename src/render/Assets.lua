@@ -68,17 +68,16 @@ Assets.prefetchable = prefetchable
 
 -- Queue the file decode of an asset path on the worker (fire and forget; a
 -- no-op without a worker or for a non-PNG / "@2x" name).  The path is resolved
--- when the request is sent.  skipCached: not needed if the Image is cached.
-function Assets.prefetchImage(path, front, skipCached)
+-- when the request is sent.
+function Assets.prefetchImage(path, front)
   if not prefetchable(path) then return false end
-  return AtlasPrefetch.requestDecode(path, front, skipCached)
+  return AtlasPrefetch.requestDecode(path, front)
 end
 
 AtlasPrefetch.resolveDecodable = function(path)
   local resolved = Assets.resolve(path)
   return prefetchable(resolved) and resolved or nil
 end
-AtlasPrefetch.imageCached = function(resolved) return cache[resolved] ~= nil end
 
 -- The path a background worker must open for a resolved path.  The NX asset
 -- overlay wraps the MAIN thread's loaders only; a worker is a fresh Lua state,
@@ -115,12 +114,9 @@ function Assets.image(path)
     local decoded = prefetchable(resolved) and AtlasPrefetch.peekDecoded(resolved)
     image = love.graphics.newImage(decoded or resolved)
     cache[resolved] = image
-    if decoded then
-      -- only RED++'s OBJ / atlas recolours re-read the pixels; otherwise do
-      -- not keep a CPU copy next to the GPU one
-      local fx = package.loaded["src.render.PaletteFX"]
-      if not (fx and fx.usesGbcPack()) then AtlasPrefetch.dropDecoded(resolved) end
-    end
+    -- The stored decode STAYS (bounded LRU in AtlasPrefetch): the sprite OBJ
+    -- palette bakes (SpriteRenderer.getObpImage, every COLORS mode) and the
+    -- RED++ atlas recolour re-read the sheet's pixels through imageData.
   end
   return image
 end

@@ -234,6 +234,38 @@ do
   ChipAudio.setSampleRate(rate)
 end
 
+-- ---- a setter that changes nothing leaves in-flight renders alone ----------
+do
+  reset()
+  local data = newData()
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+  Sound.prefetchSfx(data, "Foo")
+  local e = Sound.renderEpoch()
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+  ChipAudio.setChannelVolume(2, 1)
+  ChipAudio.setChannelPitches({ 1, 1, 1, 1 })
+  ChipAudio.setChannelPitch(3, 1)
+  ChipAudio.setNoiseVolume(1)
+  eq(Sound.renderEpoch(), e, "re-applying the same mix keeps the epoch")
+  runWorker(); Sound.update()
+  check(Sound.prefetchIdle() and Sound.play(data, "Foo") ~= nil,
+    "so the in-flight render was delivered")
+  eq(rendersDuring(function() Sound.play(data, "Foo") end), 0, "and not re-rendered")
+
+  ChipAudio.setChannelVolumes({ 1, 0.5, 1, 1 })
+  check(Sound.renderEpoch() > e, "a real volume change bumps the epoch")
+  e = Sound.renderEpoch()
+  ChipAudio.setChannelVolumes({ 1, 0.5, 1, 1 })
+  eq(Sound.renderEpoch(), e, "repeating it does not")
+  ChipAudio.setNoiseVolume(0.25)
+  check(Sound.renderEpoch() > e, "a noise volume change bumps the epoch")
+  e = Sound.renderEpoch()
+  ChipAudio.setChannelPitches({ 1, 1.5, 1, 1 })
+  check(Sound.renderEpoch() > e, "a real pitch change bumps the epoch")
+  ChipAudio.setChannelVolumes({ 1, 1, 1, 1 })
+  ChipAudio.setChannelPitches({ 1, 1, 1, 1 })
+end
+
 -- ---- never replaces an existing cached Source ------------------------------
 do
   reset()

@@ -760,13 +760,13 @@ local function prefetchMapImages(mapId, front, budget, seen)
   if not def then return 0 end
   local NPC = require("src.world.NPC")
   local queued = 0
-  -- RED++ re-reads the sheet as ImageData for its OBJ palette bake, so an
-  -- Image already cached still benefits; other modes only need the Image
-  local skipCached = not PaletteFX.usesGbcPack()
+  -- No skip for sheets whose Image is already cached: the sprite OBJ palette
+  -- bake (SpriteRenderer.getObpImage, every COLORS mode) re-reads the pixels
+  -- through Assets.imageData, which the decode store serves.
   local function want(path)
     if not path or seen[path] or (not front and queued >= budget) then return end
     seen[path] = true -- many objects share a sheet: queue each path once
-    if Assets.prefetchImage(path, front, skipCached) then queued = queued + 1 end
+    if Assets.prefetchImage(path, front) then queued = queued + 1 end
   end
   local ts = data.tilesets and data.tilesets[def.tileset]
   want(ts and ts.image)
