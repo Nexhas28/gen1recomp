@@ -220,13 +220,6 @@ function Lane:requeueInflight()
   self.inflight, self.inflightCount = {}, 0
 end
 
--- Everything queued becomes low priority, old high-priority entries first.
-function Lane:demoteAll()
-  for _, entry in ipairs(self.low) do self.high[#self.high + 1] = entry end
-  self.low, self.high = self.high, {}
-  for _, entry in ipairs(self.low) do entry.front = nil end
-end
-
 -- Obsolete everything this lane has pending (see the header).  requeue: keep
 -- the not-yet-delivered jobs and send them again under the new epoch;
 -- otherwise drop them.

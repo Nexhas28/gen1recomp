@@ -77,7 +77,8 @@ Assets.prefetchable = prefetchable
 -- no-op without a worker or for a non-PNG / "@2x" name).  The path is resolved
 -- when the request is sent.
 function Assets.prefetchImage(path, front)
-  if not prefetchable(path) then return false end
+  -- a composed path is built by its callback, never decoded from a file
+  if composed[path] or not prefetchable(path) then return false end
   return AtlasPrefetch.requestDecode(path, front)
 end
 

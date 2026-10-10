@@ -183,24 +183,6 @@ do
   eq((lane3:pending()), 0, "and is not kept queued")
 end
 
--- ---- demoteAll ---------------------------------------------------------------
-do
-  local w = newWorker()
-  w:ensure()
-  local lane = w:newLane({ inflight = 1 })
-  lane:push("low1", {}, false); lane:push("high1", {}, true)
-  lane:push("low2", {}, false); lane:push("high2", {}, true)
-  lane:demoteAll()
-  lane:push("new", {}, true)
-  local order = {}
-  for _ = 1, 5 do
-    lane:pump(function(entry) order[#order + 1] = entry.key return true end)
-    lane:complete(order[#order], lane.epoch)
-  end
-  eq(table.concat(order, ","), "new,high1,high2,low1,low2",
-    "demoted entries keep old-high-then-old-low order behind new front work")
-end
-
 -- ---- epochs -------------------------------------------------------------------
 do
   local w = newWorker()
