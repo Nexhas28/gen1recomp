@@ -8,6 +8,7 @@
 return function(game)
   local U = dofile("tests/drivers/util.lua")
   local Sound = require("src.core.Sound")
+  local ChipAudio = require("src.core.ChipAudio")
   local Pokemon = require("src.pokemon.Pokemon")
   local BattleState = require("src.battle.BattleState")
   local PaletteFX = require("src.render.PaletteFX")
@@ -75,9 +76,9 @@ return function(game)
     end
   end
 
-  -- 4a. boot prefetch probe: nothing has played these yet and nothing has
+  -- 4a. boot prewarm probe: nothing has played these yet and nothing has
   -- invalidated the cache since game load, so ~0.03ms means the load-time
-  -- Sound.prefetchCommon hint survived; ~40-100ms means it did not.
+  -- Game:prewarmCommonAudio prewarm survived; ~40-100ms means it did not.
   do
     local s0 = (game.data.audio or {}).sfx or {}
     for _, n in ipairs({ "Heal_HP", "Get_Item1" }) do
@@ -91,8 +92,8 @@ return function(game)
     end
   end
 
-  -- 4. audio.  Sound.invalidate() empties the cache so every variant starts
-  -- cold (the boot-time prefetch would otherwise have warmed these already).
+  -- 4. audio.  Sound + ChipAudio invalidate empty the caches so every variant starts
+  -- cold (the boot-time prewarm would otherwise have warmed these already).
   local sfx = (game.data.audio or {}).sfx or {}
   local sfxNames = {}
   for _, n in ipairs({ "Start_Menu", "Press_AB", "Collision", "Level_Up",
@@ -108,41 +109,44 @@ return function(game)
       step("cry_" .. tag .. "_" .. sp, function() Sound.playCry(game.data, sp) end, 30)
     end
   end
-  -- waits (in frames, ticking Music.update which drains the worker) for the
-  -- prefetch queue to go idle
-  local function waitPrefetchIdle(label)
+  -- waits (in frames) for the chip worker's prewarm queue to go idle
+  local function waitPrewarmIdle(label)
     local frames = 0
-    while not Sound.prefetchIdle() and frames < 1800 do
+    local function busy()
+      local st = ChipAudio._effectStateForTest()
+      return st.queued + st.inFlight > 0
+    end
+    while busy() and frames < 1800 do
       U.wait(1)
       frames = frames + 1
     end
-    print(("TOUR %s prefetch_idle_after=%d frames idle=%s"):format(
-      label, frames, tostring(Sound.prefetchIdle())))
+    print(("TOUR %s prewarm_idle_after=%d frames idle=%s"):format(
+      label, frames, tostring(not busy())))
   end
 
-  -- (b) no prefetch: today's synchronous first-play cost
-  Sound.invalidate()
-  playAll("nopref")
-  -- (a) prefetch, wait for the worker, then first play
-  Sound.invalidate()
-  for _, n in ipairs(sfxNames) do Sound.prefetchSfx(game.data, n) end
-  for _, sp in ipairs(cries) do Sound.prefetchCry(game.data, sp) end
-  waitPrefetchIdle("audio")
-  playAll("prefetched")
+  -- (b) no prewarm: today's synchronous first-play cost
+  Sound.invalidate(); ChipAudio.invalidate()
+  playAll("noprewarm")
+  -- (a) prewarm, wait for the worker, then first play
+  Sound.invalidate(); ChipAudio.invalidate()
+  for _, n in ipairs(sfxNames) do Sound.prewarmSfx(game.data, n) end
+  for _, sp in ipairs(cries) do Sound.prewarmCry(game.data, sp) end
+  waitPrewarmIdle("audio")
+  playAll("prewarmed")
   -- cached replays for reference
   playAll("cached")
 
-  -- battle-creation prefetch: create the battle (do NOT push it, or the
+  -- battle-creation prewarm: create the battle (do NOT push it, or the
   -- intro would play the cry itself), wait a normal transition length, then
   -- time the first cry and move sound
   local function battleAudio(tag, make, transitionFrames)
-    Sound.invalidate()
+    Sound.invalidate(); ChipAudio.invalidate()
     local battle
     step("battle_create_" .. tag, function() battle = make() end, 0)
     U.wait(transitionFrames)
-    local queued, flying = Sound.prefetchPending()
-    print(("TOUR battle_%s after %d frames: queued=%d inflight=%d"):format(
-      tag, transitionFrames, queued, flying))
+    local st = ChipAudio._effectStateForTest()
+    print(("TOUR battle_%s after %d frames: queued=%d inflight=%d ready=%d"):format(
+      tag, transitionFrames, st.queued, st.inFlight, st.ready))
     local enemy = battle.enemy and battle.enemy.mon
     local species = enemy and enemy.species
     local moveId = enemy and enemy.moves and enemy.moves[1]

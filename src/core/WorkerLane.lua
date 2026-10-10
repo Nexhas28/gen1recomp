@@ -1,7 +1,6 @@
 -- Shared machinery for the background workers (love.thread) that pre-render
--- things the main thread would otherwise build inside a frame: the SFX / cry
--- renderer (src/core/Sound.lua, sfx_worker.lua) and the RED++ atlas bake +
--- PNG decode worker (src/render/AtlasPrefetch.lua, atlas_worker.lua).
+-- things the main thread would otherwise build inside a frame: the RED++ atlas
+-- bake + PNG decode worker (src/render/AtlasPrefetch.lua, atlas_worker.lua).
 --
 -- Three pieces:
 --

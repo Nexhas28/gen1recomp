@@ -800,31 +800,57 @@ function BattleState:playerPartyView()
   return self.playerParty or self.game.save.party
 end
 
--- Ask the SFX worker to pre-render this battle's sounds NOW, while the
--- transition animation plays, so the first cry / move sound is a cache hit
--- instead of a main-thread synthesis.  Purely a hint: it never throws and
--- changes nothing if there is no worker (Sound.prefetch*).
-local function prefetchBattleAudio(self, enemyMons)
-  pcall(function()
-    local Sound = require("src.core.Sound")
-    if Sound.prefetchBattle then
-      Sound.prefetchBattle(self.data, self:playerPartyView(), enemyMons,
-        self.enemy and self.enemy.mon, self.player and self.player.mon)
-    end
-  end)
-end
-
 -- Queue the battle's first two cries on the chip audio worker while the
 -- transition runs, so the entrance cries don't render on the frame they
 -- play.  A no-op without a worker; playCry renders as before on a miss.
+-- Then, in the order the battle needs them (the worker renders FIFO): both
+-- leads' move sounds, the hit sounds, the rest of both parties' cries and the
+-- generic battle SFX.
+local BATTLE_HIT_SOUNDS = {
+  -- PlayApplyingAttackSound (engine/battle/core.asm); same pitch bytes as
+  -- src/battle/EffectRegistry.lua, which plays them through Sound.playMove
+  { sound = "Damage", pitch = 0x20 },
+  { sound = "Super_Effective", pitch = 0xe0 },
+  { sound = "Not_Very_Effective", pitch = 0x50 },
+}
+local BATTLE_SFX = {
+  "Level_Up", "Faint_Fall", "Faint_Thud", "Ball_Toss", "Ball_Poof", "Run",
+  "Caught_Mon",
+}
+
 local function prewarmCries(self)
   local Sound = package.loaded["src.core.Sound"]
   if not (Sound and Sound.prewarmCry) then return end
+  local data = self.data
+  local leads = {}
   for _, battler in ipairs({ self.enemy, self.player }) do
     local mon = battler and battler.mon
-    if mon and mon.species then pcall(Sound.prewarmCry, self.data, mon.species) end
+    if mon and mon.species then
+      leads[#leads + 1] = mon
+      pcall(Sound.prewarmCry, data, mon.species)
+    end
   end
+  local moves = data and data.moves
+  for _, mon in ipairs(leads) do
+    for _, move in ipairs(mon.moves or {}) do
+      local mdef = moves and moves[type(move) == "table" and move.id or move]
+      if mdef then pcall(Sound.prewarmMove, data, mdef.anim) end
+    end
+  end
+  for _, anim in ipairs(BATTLE_HIT_SOUNDS) do
+    pcall(Sound.prewarmMove, data, anim)
+  end
+  for _, party in ipairs({ self.enemyParty or {}, self:playerPartyView() or {} }) do
+    for _, mon in ipairs(party) do
+      if type(mon) == "table" and mon.species then
+        pcall(Sound.prewarmCry, data, mon.species)
+      end
+    end
+  end
+  for _, name in ipairs(BATTLE_SFX) do pcall(Sound.prewarmSfx, data, name) end
 end
+BattleState.prewarmCries = prewarmCries -- test hook
+
 -- opts.hooked: rod encounter, announced with _HookedMonAttackedText
 function BattleState.newWild(game, species, level, opts)
   local self = newBattle(game)
@@ -843,7 +869,6 @@ function BattleState.newWild(game, species, level, opts)
   else
     self.introText = self:romText("_WildMonAppearedText", "Wild %s\nappeared!", self.enemy.name)
   end
-  prefetchBattleAudio(self, { self.enemy.mon })
   prewarmCries(self)
   return self
 end
@@ -978,7 +1003,6 @@ function BattleState.newTrainer(game, oppClass, partyIndex, opts)
   self.trainerPic = BattleState.trainerSprite(
     game.data, self.trainer, oppClass, partyIndex)
   self.introText = Strings("%s wants\nto fight!", self.trainer.name)
-  prefetchBattleAudio(self, self.enemyParty)
   prewarmCries(self)
   return self
 end

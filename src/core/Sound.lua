@@ -7,7 +7,6 @@
 
 local Assets = require("src.render.Assets")
 local Logger = require("src.core.Logger")
-local WorkerLane = require("src.core.WorkerLane")
 local Runtime = require("src.mods.Runtime")
 local bit = require("bit")
 
@@ -678,14 +677,6 @@ local function plainMoveFrames(data, def, channels)
   return plain
 end
 
--- the cache key a move sound lives under; playMove and prefetchMove share it
--- so a prefetched entry is exactly the one the play call looks up
-local function moveKey(name, pitch, tempo, plain)
-  local key = ("%s@%02x%02x"):format(name, pitch, tempo)
-  if plain and plain > 0 then key = ("%s~%d"):format(key, plain) end
-  return key
-end
-
 function Sound.playMove(data, anim)
   if not anim or not anim.sound then return end
   local sfx = data.audio and data.audio.sfx
@@ -704,10 +695,11 @@ function Sound.playMove(data, anim)
       local channels = require("src.core.ChipSynth").effectChannels(data, def)
       plain = plainMoveFrames(data, def, channels)
     end
-    local key = moveKey(name, pitch, tempo, plain)
+    local key = ("%s@%02x%02x"):format(name, pitch, tempo)
+    if plain > 0 then key = ("%s~%d"):format(key, plain) end
     src = playPath(data, key, def, pitch, tempo, plain)
   else
-    local key = moveKey(name, pitch, tempo)
+    local key = ("%s@%02x%02x"):format(name, pitch, tempo)
     if (pitch ~= 0 or tempo ~= 0x80) and sfx[key] then
       src = playPath(data, key, sfx[key])
     else
@@ -874,6 +866,24 @@ function Sound.prewarmSfx(data, name)
   return ok and queued or false
 end
 
+-- the move-sound variant playMove builds when no other move sound overlaps it
+-- (plain == 0, the only case knowable ahead of time).  Same def, pitch, tempo
+-- and plainFrames=0 as that play, so ChipAudio's prewarm key matches it.
+function Sound.prewarmMove(data, anim)
+  if not love.audio or deviceSuspended() then return false end
+  if not (anim and anim.sound) then return false end
+  local sfx = data and data.audio and data.audio.sfx
+  local def = sfx and sfx[anim.sound]
+  if not isChipDef(def) then return false end
+  local pitch, tempo = anim.pitch or 0, anim.tempo or 0x80
+  if cache[("%s@%02x%02x"):format(anim.sound, pitch, tempo)] ~= nil then
+    return true
+  end
+  local ok, queued = pcall(require("src.core.ChipAudio").prewarmSfx,
+    data, anim.sound, pitch, tempo, def, 0)
+  return ok and queued or false
+end
+
 -- GROWL/ROAR are the only two moves that play a cry (IsCryMove checks
 -- wAnimationID); GetMoveSound still adds their own MoveSoundTable pitch/
 -- tempo bytes on top of the cry's species modifiers before the tempo
@@ -993,329 +1003,9 @@ function Sound.setPikaVolumeLevel(level)
   reapplyVolumes()
 end
 
--- ---------------------------------------------------------------------------
--- Background pre-render (prefetch)
---
--- The first play of a chip SFX / cry synthesizes it on the calling thread
--- (ChipAudio.newSfx/newCry).  prefetch* asks src/core/sfx_worker.lua to render
--- the SoundData ahead of time; Sound.update (60 Hz, from Music.update) turns the
--- finished SoundData into a Source and files it in `cache` ONLY when that slot
--- is still empty.  A play that arrives first just renders synchronously as it
--- always did, so a play call never returns nil where it returned a Source, and
--- a Source already in the cache (tracked by curSfx / moveSfxChannels / callers
--- timing on it) is never replaced.
---
--- Without love.thread, with POKEPORT_NO_THREAD=1, or if the worker fails to
--- start, every prefetch* is a no-op and nothing changes.
---
--- Worker, queues, epoch and shutdown come from src/core/WorkerLane.lua: at
--- most one lane's in-flight budget of requests sits in the worker at once, so
--- a front-of-queue request overtakes everything not yet sent.
--- ---------------------------------------------------------------------------
-local PREFETCH_DRAIN_CAP = 4  -- Sources built per Sound.update
-
-local badKeys = {}            -- keys that failed to render this epoch
-local audioRef                -- data.audio the queue was built from
-local sentEpoch, sentAudio    -- what the worker was last configured with
-local sentMix                 -- the mix / stereo / rate of that configuration
-
--- A separate thread from the music worker (chip_worker): a long effect render
--- must never delay music buffers.
-local fxWorker = WorkerLane.newWorker({
-  name = "sfx", script = "src/core/sfx_worker.lua",
-  cmd = "sfx_cmd", out = "sfx_out",
-  capable = function() return love.audio and love.audio.newSource end,
-  onStop = function()
-    sentEpoch, sentAudio, audioRef, sentMix = nil, nil, nil, nil
-    badKeys = {}
-  end,
-})
-local fxLane = fxWorker:newLane({ inflight = 2 })
-
--- A render finished (or still running) for the old epoch is discarded when it
--- arrives.  requeue: keep the not-yet-delivered requests and send them again
--- under the new epoch (a mix/rate change); otherwise drop every hint (the
--- cache was invalidated, so the hints may name defs that no longer exist).
-local function bumpEpoch(requeue)
-  badKeys = {}
-  -- renders still waiting in the worker's inbox are obsolete (Lane:bump
-  -- clears it); sentEpoch is invalidated so the next request re-sends config
-  -- before any render
-  sentEpoch, sentMix = nil, nil
-  fxLane:bump(requeue)
-end
-
--- ChipAudio calls this when the sample rate, pan or channel mix changes: audio
--- rendered under the old settings must not be filed, but nothing already cached
--- is evicted (it never was).
-function Sound.bumpRenderEpoch()
-  -- never configured: nothing rendered, so nothing can be stale.  Configured
-  -- with exactly the current mix (a setter re-applying the same values, as the
-  -- options screen does on every load): in-flight renders are still right.
-  local m = sentMix
-  if not m then return end
-  local ChipSynth = require("src.core.ChipSynth")
-  local vols, pits = ChipSynth.getChannelVolumes(), ChipSynth.getChannelPitches()
-  local same = m.stereo == ChipSynth.getStereo()
-    and m.sampleRate == ChipSynth.SAMPLE_RATE
-  for hw = 1, 4 do
-    if m.volumes[hw] ~= vols[hw] or m.pitches[hw] ~= pits[hw] then same = false end
-  end
-  if same then return end
-  bumpEpoch(true)
-end
-
-function Sound.renderEpoch() return fxLane.epoch end
-
-local function sendRender(entry)
-  if cache[entry.key] ~= nil then return false end -- a sync play filled it
-  local epoch = fxLane.epoch
-  if sentEpoch ~= epoch or sentAudio ~= entry.audio then
-    local config = require("src.core.ChipAudio").effectWorkerConfig(entry.data)
-    config.cmd, config.epoch = "config", epoch
-    if not fxWorker:push(config) then
-      fxWorker:fail("config not transferable")
-      return false
-    end
-    sentEpoch, sentAudio = epoch, entry.audio
-    sentMix = { volumes = config.volumes, pitches = config.pitches,
-                stereo = config.stereo, sampleRate = config.sampleRate }
-  end
-  if fxWorker:push({
-    cmd = "render", epoch = epoch, key = entry.key,
-    header = entry.header, options = entry.options,
-  }) then
-    return true
-  end
-  badKeys[entry.key] = true -- e.g. a def carrying a function
-  return false
-end
-
--- Hand queued entries to the worker, keeping the in-flight budget full.
--- Runs inside the frame (Sound.update, enqueue) with no caller-side pcall: a
--- throw (e.g. building the worker config) turns prefetch off, and plays fall
--- back to the synchronous path.
-local function pump()
-  local ok, err = pcall(fxLane.pump, fxLane, sendRender)
-  if not ok then fxWorker:fail(err) end
-end
-
--- A top-level metatable is dropped when a table crosses the channel, so copy
--- the visible (pairs) fields first.  This cannot flatten __index proxies whose
--- fields are not reachable through pairs; such a def would arrive empty and
--- fail to render, leaving the sync path to handle it.
-local function plainDef(def)
-  if getmetatable(def) == nil then return def end
-  local copy = {}
-  for k, v in pairs(def) do copy[k] = v end
-  return copy
-end
-
--- header/options come from ChipAudio's shared builders, so the worker renders
--- with exactly the arguments the synchronous path would use.
-local function enqueue(data, key, header, options, front)
-  if not (love.audio and fxWorker:ensure()) then return false end
-  if cache[key] ~= nil or badKeys[key] then return false end
-  if fxLane.inflight[key] then return true end
-  local audio = data.audio
-  if audioRef and audioRef ~= audio then bumpEpoch(false) end -- other dataset
-  audioRef = audio
-  if fxLane:promote(key, front) then return true end -- queued: maybe promoted
-  fxLane:push(key, { header = plainDef(header), options = options,
-                     data = data, audio = audio }, front)
-  pump()
-  return true
-end
-
--- Pre-render a chip SFX by name.  opts.front puts it ahead of queued hints.
--- Returns true when a request is pending (queued or newly queued).
-function Sound.prefetchSfx(data, name, opts)
-  local sfx = data and data.audio and data.audio.sfx
-  if not sfx then return false end
-  name = Sound.resolve(data, name)
-  local def = sfx[name]
-  if not isChipDef(def) then return false end -- file defs are already cheap
-  local header, options = require("src.core.ChipAudio").sfxRenderArgs(
-    data, name, nil, nil, def, nil)
-  return enqueue(data, name, header, options, opts and opts.front)
-end
-
--- Pre-render a move sound (anim = { sound, pitch, tempo }).  Only the
--- unmodified-by-channel-overlap key (plain == 0) can be known ahead of time:
--- plainMoveFrames depends on OTHER move sounds still playing on software
--- channels 5/8 when the play call happens (moveSfxChannels), and then `plain`
--- is their remaining frame count -- a timing-dependent number, a different
--- '~N' key (and render) on nearly every overlap.  Not on the battle song, so
--- there is nothing to compute once the music is known.  Measured over real
--- battles (6 wild fights): 81 move plays, 8 sync renders, 6 of them '~N'
--- overlaps (N = 3..20 frames), 2 plain keys the worker had not delivered yet.
--- Overlaps are the minority, so prefetching the plain key is kept; the '~N'
--- variants cannot be predicted and are left to the sync path.
-function Sound.prefetchMove(data, anim, opts)
-  if not anim or not anim.sound then return false end
-  local sfx = data and data.audio and data.audio.sfx
-  local def = sfx and sfx[anim.sound]
-  if not isChipDef(def) then return false end
-  local pitch, tempo = anim.pitch or 0, anim.tempo or 0x80
-  local header, options = require("src.core.ChipAudio").sfxRenderArgs(
-    data, anim.sound, pitch, tempo, def, 0)
-  return enqueue(data, moveKey(anim.sound, pitch, tempo), header, options,
-    opts and opts.front)
-end
-
--- Pre-render a species' chip cry.
-function Sound.prefetchCry(data, species, opts)
-  local audio = data and data.audio
-  local cries = audio and audio.cries
-  local def = cries and cries[species]
-  if not def then return false end
-  -- Yellow voices Pikachu with PCM clips; the chip cry is never used there
-  if species == "PIKACHU" and audio.pikaCries then return false end
-  local resolved = resolveCry(data, def, 0)
-  if type(resolved) ~= "table" or not (resolved.header or resolved.chip) then
-    return false
-  end
-  local header, options = require("src.core.ChipAudio").cryRenderArgs(
-    data, species, resolved)
-  return enqueue(data, "cry:" .. tostring(species), header, options,
-    opts and opts.front)
-end
-
--- Cries (and optionally their moves' sounds) for a list of party mons.
-function Sound.prefetchMons(data, mons, opts)
-  if not mons then return end
-  for _, mon in ipairs(mons) do
-    if type(mon) == "table" and mon.species then
-      Sound.prefetchCry(data, mon.species, opts)
-    end
-  end
-  if not (opts and opts.moves) then return end
-  local moves = data and data.moves
-  for _, mon in ipairs(mons) do
-    for _, move in ipairs(type(mon) == "table" and mon.moves or {}) do
-      local mdef = moves and moves[type(move) == "table" and move.id or move]
-      if mdef then Sound.prefetchMove(data, mdef.anim, opts) end
-    end
-  end
-end
-
--- sounds menus and the overworld play first and most often (Gen 1 names, then
--- Gen 2's pokecrystal labels; a name the dataset lacks is skipped)
-Sound.COMMON_SFX = {
-  "Press_AB", "Start_Menu", "Collision", "Save", "Go_Inside", "Go_Outside",
-  "Heal_HP", "Get_Item1", "Get_Item2", "Level_Up", "Tink", "Ledge_Jump",
-  "Withdraw_Deposit", "Ball_Toss", "Ball_Poof", "Faint_Fall", "Faint_Thud",
-  "Run", "Caught_Mon",
-  "Sfx_ReadText2", "Sfx_Wrong", "Sfx_SwitchPokemon", "Sfx_Transaction",
-  "Sfx_Potion", "Sfx_CaughtMon",
-}
-
--- sounds a battle plays that are not tied to a mon
-Sound.BATTLE_SFX = {
-  "Level_Up", "Faint_Fall", "Faint_Thud", "Ball_Toss", "Ball_Poof", "Run",
-  "Caught_Mon",
-}
--- PlayApplyingAttackSound (engine/battle/core.asm); same pitch bytes as
--- src/battle/EffectRegistry.lua, which plays them through Sound.playMove
-Sound.BATTLE_HIT_SOUNDS = {
-  { sound = "Damage", pitch = 0x20 },
-  { sound = "Super_Effective", pitch = 0xe0 },
-  { sound = "Not_Very_Effective", pitch = 0x50 },
-}
-
--- Shortly after a game loads: the common SFX at low priority, then the
--- party's cries.
-function Sound.prefetchCommon(data, party)
-  Sound.prefetchMons(data, party)
-  for _, name in ipairs(Sound.COMMON_SFX) do Sound.prefetchSfx(data, name) end
-end
-
--- A battle was just created, before its transition.  Everything is queued
--- ahead of the boot hints, in the order the battle needs it (a slow device
--- will not finish it all inside the transition): the two leads' cries, the
--- leads' move sounds, the hit sounds, then the rest of both parties (cries,
--- then moves) and the generic battle SFX.  enemyLead / playerLead are the
--- mons that open the battle; the party lists may include them again (dedupe).
-function Sound.prefetchBattle(data, playerParty, enemyParty, enemyLead,
-                              playerLead)
-  -- an earlier battle's leftovers must not delay this one's leads
-  fxLane:demoteAll()
-  local front = { front = true }
-  local movesToo = { front = true, moves = true }
-  local leads = {}
-  if enemyLead then leads[#leads + 1] = enemyLead end
-  if playerLead then leads[#leads + 1] = playerLead end
-  Sound.prefetchMons(data, leads, front)
-  Sound.prefetchMons(data, leads, movesToo)
-  for _, anim in ipairs(Sound.BATTLE_HIT_SOUNDS) do
-    Sound.prefetchMove(data, anim, front)
-  end
-  Sound.prefetchMons(data, enemyParty, front)
-  Sound.prefetchMons(data, playerParty, front)
-  Sound.prefetchMons(data, enemyParty, movesToo)
-  Sound.prefetchMons(data, playerParty, movesToo)
-  for _, name in ipairs(Sound.BATTLE_SFX) do
-    Sound.prefetchSfx(data, name, front)
-  end
-end
-
--- nothing queued, nothing out at the worker (always true without a thread)
-function Sound.prefetchIdle()
-  if not fxWorker.state then return true end
-  return fxLane:idle()
-end
-
--- test/debug: how many requests are waiting or at the worker
-function Sound.prefetchPending()
-  return fxLane:pending()
-end
-
--- Per-frame drain, called from Music.update (both Game and Game2 tick it at
--- 60 Hz).  Fills EMPTY cache slots only.
-function Sound.update()
-  if not fxWorker.state then return end
-  if deviceSuspended() then return end
-  local drained = fxWorker:drain(PREFETCH_DRAIN_CAP, function(result)
-    local key = result.key
-    -- a result is current only if it answers the request still in flight
-    -- under this epoch; anything else (invalidated, superseded) is dropped
-    if not fxLane:complete(key, result.epoch) then return false end
-    if result.sd and cache[key] == nil then
-      local ok, src = pcall(love.audio.newSource, result.sd, "static")
-      if ok and src then
-        pcall(src.setVolume, src, volumeFor(key))
-        cache[key] = src
-        return true -- only Sources actually built count against the cap
-      end
-    elseif not result.sd then
-      badKeys[key] = true -- the sync path will reproduce and log it
-    end
-    return false
-  end)
-  if drained then pump() end
-end
-
--- End the worker thread (LOVE waits for live threads at exit).  Safe to call
--- repeatedly; the next prefetch starts a fresh worker.  (Also registered with
--- SessionLifecycle by WorkerLane.)
-function Sound.shutdown()
-  fxWorker:shutdown()
-end
-
-function Sound._setNoThreadEnvForTest(value)
-  fxWorker.noThread = value
-  fxWorker.state = nil -- test reset: also clears a fatal "off"
-end
-
-function Sound._setPrefetchLimitsForTest(inflightMax, drainCap)
-  fxLane.inflightMax = inflightMax or 2
-  PREFETCH_DRAIN_CAP = drainCap or 4
-end
-
 -- hot reload / jukebox A-B: drop one key's sources (its pitch-tempo
 -- variants included) or all of them, so the next play re-resolves the def
 function Sound.invalidate(name)
-  bumpEpoch(false) -- in-flight renders were built from the old defs
   moveSfxChannels = {} -- their sources are about to be dropped or stopped
   -- Same for wCurSFX, and a reloaded table can repoint the id order.
   curSfx = nil
