@@ -95,6 +95,9 @@ function RefreshRate.hz()
   return hz
 end
 
+-- the swap cadence measured from frame dts (nil until it settles)
+function RefreshRate.measuredHz() return measured end
+
 function RefreshRate.period()
   local hz = RefreshRate.hz()
   return hz and 1 / hz or nil
