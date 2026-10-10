@@ -221,8 +221,6 @@ do
   P.WARMUP = 60
 end
 
-T.finish("frame_profiler_test")
-
 -- 8. GC probe: alloc_kb ring + heap min/max, only with POKEPORT_GC_PROBE=1
 do
   local out = {}
@@ -252,19 +250,41 @@ do
   P.WARMUP = 60
 end
 
--- 9. frame total is work time: the vsync wait in `present` is excluded
+-- 9. frame total is work time: at most one refresh period of `present` (the
+-- vsync wait) is excluded, so a GPU stall inside present still counts
 do
+  local oldLove = love
+  love = love or {}
+  local oldWindow = love.window
+  love.window = { getMode = function() return 800, 600, { refreshrate = 120 } end }
+  local vs = 1000 / 120
+  near(P.vsyncMs(), vs, "vsyncMs from window refresh rate")
+
+  fresh({ POKEPORT_GAME_PROF_OVERLAY = "1" })
+  P.beginFrame(true)
+  P.push("update"); adv(2); P.pop("update")
+  P.push("present"); adv(8); P.pop("present")
+  P.endFrame()
+  near(P.stats("frame").mean, 2, "vsync wait fully excluded")
+  near(P.stats("present").mean, 8, "present section still recorded")
+  local o16, o33 = P.spikeCounts()
+  eq(o16, 0, "vsync-wait frame is not >16")
+  eq(o33, 0, "vsync-wait frame is not >33")
+  eq(#P.spikeList(), 0, "vsync-wait frame is not a spike")
+
+  -- GPU stall: only one refresh period is excluded
   fresh({ POKEPORT_GAME_PROF_OVERLAY = "1" })
   P.beginFrame(true)
   P.push("update"); adv(2); P.pop("update")
   P.push("present"); adv(30); P.pop("present")
   P.endFrame()
-  near(P.stats("frame").mean, 2, "frame total excludes present")
-  near(P.stats("present").mean, 30, "present section still recorded")
-  local o16, o33 = P.spikeCounts()
-  eq(o16, 0, "present-heavy frame is not >16")
-  eq(o33, 0, "present-heavy frame is not >33")
-  eq(#P.spikeList(), 0, "present-heavy frame is not a spike")
+  near(P.stats("frame").mean, 2 + 30 - vs, "present stall beyond a refresh counts")
+  o16 = P.spikeCounts()
+  eq(o16, 1, "present stall is >16")
+  eq(#P.spikeList(), 1, "present stall is a spike")
+
+  -- heavy update
+  fresh({ POKEPORT_GAME_PROF_OVERLAY = "1" })
   P.beginFrame(true)
   P.push("update"); adv(20); P.pop("update")
   P.push("present"); adv(5); P.pop("present")
@@ -273,6 +293,15 @@ do
   eq(o16, 1, "heavy update is >16")
   eq(#P.spikeList(), 1, "heavy update is a spike")
   near(P.spikeList()[1].total, 20, "spike total is work time")
+
+  -- no window API: 60 Hz default
+  love.window = nil
+  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz without love.window")
+  love.window = { getMode = function() error("unavailable") end }
+  near(P.vsyncMs(), 1000 / 60, "vsyncMs defaults to 60 Hz when getMode fails")
+
+  love.window = oldWindow
+  love = oldLove
 end
 
 -- 10. hiding the overlay mid-bench leaves bench state alone
@@ -297,3 +326,5 @@ do
   P.out = nil
   P.WARMUP = 60
 end
+
+T.finish("frame_profiler_test")
