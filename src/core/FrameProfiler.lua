@@ -320,12 +320,23 @@ function FrameProfiler.finish()
   emitBench()
 end
 
+-- One display refresh in ms (the most of `present` that is vsync wait);
+-- 60 Hz when the window reports no rate.
+function FrameProfiler.vsyncMs()
+  local w = love and love.window
+  local ok, _, _, flags = pcall(function() return w.getMode() end)
+  local hz = ok and flags and tonumber(flags.refreshrate) or 0
+  return 1000 / (hz > 0 and hz or 60)
+end
+
 function FrameProfiler.endFrame()
   if not inFrame then return end
   inFrame = false
   local t = now()
-  -- work time: wall time minus the vsync wait inside `present`
-  local total = (t - frameStart) * 1000 - (cur["present"] or 0)
+  -- work time: wall time minus the vsync wait inside `present` -- at most one
+  -- refresh period, so a GPU/driver stall in present still counts
+  local total = (t - frameStart) * 1000
+    - math.min(cur["present"] or 0, FrameProfiler.vsyncMs())
   if total < 0 then total = 0 end
   local interval = lastEnd and (t - lastEnd) or nil
   lastEnd = t

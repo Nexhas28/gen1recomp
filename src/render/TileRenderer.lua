@@ -384,6 +384,11 @@ end
 -- (conservative: unbuilt means pending).
 function TileRenderer.pixelReadsPending(imagePath, tileset)
   if not (imagePath and tileset) then return false end
+  -- the WATER void fill (ensureWaterBorderFill) shifts tile $14 of OVERWORLD
+  if TileRenderer.voidFill == "water" and tileset.id == "OVERWORLD"
+     and shiftVariants[imagePath .. "#" .. WATER_TILE] == nil then
+    return true
+  end
   local declared = tileset.animatedTiles or TileRenderer.defaultAnimatedTiles(tileset)
   for _, spec in ipairs(declared) do
     if spec.kind == "hshift" then
