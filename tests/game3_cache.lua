@@ -1,3 +1,4 @@
+local CacheBlob = require("src.import.CacheBlob")
 local M = {}
 
 local function readable(path)
@@ -17,10 +18,9 @@ local function push(list, seen, path)
 end
 
 local SUFFIX = "/firered/data/generated/gba"
-local OWNER_IDENTITY = "pokemon-love2d"
 
 local function candidates()
-  local list, seen, last = {}, {}, {}
+  local list, seen = {}, {}
   local home = os.getenv("HOME")
   local saveRoots = home and {
     home .. "/Library/Application Support/LOVE",
@@ -28,33 +28,20 @@ local function candidates()
   } or {}
 
   local identity = os.getenv("POKEPORT_IDENTITY")
-  if identity and identity ~= "" and identity ~= OWNER_IDENTITY then
+  if identity and identity ~= "" then
     for _, saveRoot in ipairs(saveRoots) do
       push(list, seen, saveRoot .. "/" .. identity .. SUFFIX)
     end
   end
   push(list, seen, os.getenv("POKEPORT_GBA_CACHE"))
   push(list, seen, "data/generated/gba")
-
-  for _, saveRoot in ipairs(saveRoots) do
-    local owner = saveRoot .. "/" .. OWNER_IDENTITY .. SUFFIX
-    local pipe = io.popen('ls -1t "' .. saveRoot .. '"/*' .. SUFFIX .. '/meta.json 2>/dev/null')
-    if pipe then
-      for line in pipe:lines() do
-        local root = line:match("^(.*)/meta%.json$")
-        if root and root ~= owner then push(list, seen, root) end
-      end
-      pipe:close()
-    end
-    last[#last + 1] = owner
-  end
-  return list, last
+  return list
 end
 
 local function metaVersions(root)
   local f = io.open(root .. "/meta.json", "rb")
   if not f then return nil end
-  local src = f:read("*a") or ""
+  local src = CacheBlob.decode(root .. "/meta.json", f:read("*a")) or ""
   f:close()
   return tonumber(src:match('"cache_version"%s*:%s*(%d+)')) or 0,
     tonumber(src:match('"native_version"%s*:%s*(%d+)')) or 0
@@ -85,7 +72,6 @@ function M.root(marker, opts)
     if memo == false then return nil end
     return memo
   end
-  local list, last = candidates()
   local stale = 0
   local function pick(roots)
     for _, root in ipairs(roots) do
@@ -96,7 +82,7 @@ function M.root(marker, opts)
     end
     return nil
   end
-  local root = pick(list) or pick(last)
+  local root = pick(candidates())
   if root then
     M._roots[memoKey] = root
     M.reason = nil
@@ -119,7 +105,7 @@ function M.cache()
     read = function(_, rel)
       local f = io.open(rel, "rb")
       if not f then return nil end
-      local data = f:read("*a")
+      local data = CacheBlob.decode(rel, f:read("*a"))
       f:close()
       if type(data) == "string" and #data > 0 then return data end
       return nil
@@ -128,6 +114,15 @@ function M.cache()
       return readable(rel)
     end,
   }
+end
+
+function M.rootOrSkip(label, marker, opts)
+  local root = M.root(marker, opts)
+  if not root then
+    print("[skip] " .. tostring(label) .. ": " .. tostring(M.reason))
+    os.exit(0)
+  end
+  return root
 end
 
 function M.mount(marker, opts)
@@ -147,6 +142,34 @@ function M.mountOrSkip(label, marker, opts)
   end
   print("[info] FireRed cache at " .. root)
   return root
+end
+
+local function datasetRoots()
+  local roots = { "." }
+  local home = os.getenv("HOME")
+  local identity = os.getenv("POKEPORT_IDENTITY") or ""
+  if home and identity ~= "" then
+    roots[#roots + 1] = home .. "/Library/Application Support/LOVE/" .. identity .. "/firered"
+    roots[#roots + 1] = home .. "/.local/share/love/" .. identity .. "/firered"
+  end
+  return roots
+end
+
+function M.requireData(label, marker)
+  marker = marker or "meta.json"
+  if M.mount(marker) then return end
+  for _, root in ipairs(datasetRoots()) do
+    if readable(root .. "/data/generated/gba/" .. marker) then return end
+  end
+  print("[skip] " .. tostring(label) .. ": " .. tostring(M.reason or "no imported FireRed cache found"))
+  os.exit(0)
+end
+
+function M.stubSpeciesNames()
+  if M.mount() then return false end
+  local Pokemon = require("src.core.game3.pokemon")
+  Pokemon.name = function(species) return "SPECIES " .. tostring(species) end
+  return true
 end
 
 function M.bundle(marker, opts)

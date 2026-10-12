@@ -1,6 +1,8 @@
 #!/usr/bin/env luajit
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").mountOrSkip("game3_stitchuif_naming_pc_test")
+require("tests.fixture_data.game3_items").install()
 
 local failed = 0
 local function check(cond, msg)
@@ -21,7 +23,7 @@ require("src.core.GameVersion").set("firered")
 local gfx = setmetatable({}, { __index = function() return function() end end })
 gfx.newQuad = function() return {} end
 gfx.newImage = function() return { setFilter = function() end, getDimensions = function() return 8, 8 end } end
-_G.love = { graphics = gfx }
+_G.love = { graphics = gfx, image = require("tests.love_stub").image }
 
 local Storage = require("src.core.game3.storage")
 local Flags = require("src.core.game3.scripting.flags")
@@ -29,7 +31,18 @@ local Dex = require("src.core.game3.dex")
 local Runtime = require("src.core.game3.runtime")
 local Catching = require("src.core.game3.battle.catching")
 local CatchSeq = require("src.core.game3.battle.catch_seq")
+local romTextReal = package.loaded["src.core.game3.rom_text"]
+local ROM_TEXT = { gText_PkmnsNickname = "'s nickname?", gText_YourName = "YOUR NAME?" }
+local function romTextKey(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end
+local function romTextPlain(key, ctx) return ((ROM_TEXT[key] or key):gsub("{PLAYER}", ctx and ctx.playerName or "")) end
+package.loaded["src.core.game3.rom_text"] = {
+  plain = romTextPlain, box = romTextPlain, ascii = romTextPlain, has = function() return true end,
+  key = romTextKey, at = function(n, i, j, ctx) return romTextPlain(romTextKey(n, i, j), ctx) end,
+  count = function() return 0 end, list = function() return {} end,
+  lazy = function(map) return setmetatable({}, { __index = function(_, k) return map[k] end }) end,
+}
 local Naming = require("src.ui.game3.naming")
+package.loaded["src.core.game3.rom_text"] = romTextReal
 
 -- pokefirered/include/constants/vars.h:105
 local VAR_PC_BOX_TO_SEND_MON = 0x4037
@@ -41,7 +54,9 @@ local input = { wasPressed = function(_, k) return key == k end }
 
 local function press(k)
   key = k
-  Naming.update(input, 1 / 60)
+  -- src/naming_screen.c:559-572
+  Naming.handleInput(input)
+  Naming.update(1 / 60)
   key = nil
 end
 

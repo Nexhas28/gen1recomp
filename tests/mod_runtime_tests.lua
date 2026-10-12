@@ -56,6 +56,12 @@ check(pcall(function() events:emit("boom") end), "emit survives a throwing liste
 check(reached == 1, "later listeners run after a failure")
 check(logged("[bad_mod]", "boom"), "listener failure logged with mod id")
 
+-- a mod logging nil where the format wants a number gets a line, not a crash
+check(pcall(Logger.info, "[%s] topUp %d/%d", "nil_count", nil, 3),
+  "log call survives arguments that don't fit the format")
+check(logged("[nil_count] topUp nil/3", "bad log format"),
+  "mismatched log arguments still logged")
+
 -- rollback support: removeOwner drops every subscription a mod made
 events:removeOwner("good_mod")
 events:emit("boom")
@@ -220,6 +226,7 @@ else
   setVar = function(name, value) ffi.C.setenv(name, value, 1) end
   unsetVar = function(name) ffi.C.unsetenv(name) end
 end
+local originalDataDir = os.getenv("POKEPORT_DATA_DIR")
 setVar("POKEPORT_DATA_DIR", "tests/fixture_data")
 local Data = require("src.core.Data")
 local fixture = setmetatable({}, { __index = Data })
@@ -231,5 +238,11 @@ check(okLoad and fixture.pokemon ~= nil and fixture.pokemon.FIXMON_A ~= nil,
 check(okLoad and fixture.pokemon.PIDGEY == nil, "and not the generated one")
 check(okLoad and fixture.constants.partyMax == 6,
   "fixture constants pass through seedDefaults")
+
+if originalDataDir and originalDataDir ~= "" then
+  setVar("POKEPORT_DATA_DIR", originalDataDir)
+else
+  unsetVar("POKEPORT_DATA_DIR")
+end
 
 S.finish()

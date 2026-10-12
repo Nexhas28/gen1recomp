@@ -488,32 +488,11 @@ local function clip1(x)
   return x
 end
 
-local function s8_at(pcm, idx)
-  local i = math.floor(idx)
-  if i < 0 or i >= #pcm then return 0 end
-  local b = pcm:byte(i + 1)
-  return (b >= 128 and (b - 256) or b) / 128
-end
-
---- Linear interpolate s8 PCM (reduces stair-step harshness on upsample).
-local function s8_lerp(pcm, pos, size, loop, loopStart)
-  if pos < 0 then return 0 end
-  local i0 = math.floor(pos)
-  if i0 >= size then return 0 end
-  local frac = pos - i0
-  local s0 = s8_at(pcm, i0)
-  if frac < 1e-6 then return s0 end
-  local i1 = i0 + 1
-  if i1 >= size then
-    if loop and loopStart and loopStart < size then
-      i1 = loopStart
-    else
-      return s0
-    end
-  end
-  local s1 = s8_at(pcm, i1)
-  return s0 + (s1 - s0) * frac
-end
+-- byte -> signed-8 / 128 lookup (same values as decoding per sample).
+local S8 = {}
+for b = 0, 255 do S8[b] = (b >= 128 and (b - 256) or b) / 128 end
+local str_byte = string.byte
+local math_floor = math.floor
 
 -- GB channel-1 hardware sweep (~128 Hz clock).
 local function tick_sweep_sample(v)
@@ -553,7 +532,9 @@ local function render_voice(v, n, outL, outR)
     n = math.min(n, math.max(0, math.ceil(v.lengthRemaining)))
     v.lengthRemaining = v.lengthRemaining - n
   end
-  if v.kind == "ds" then
+  if n <= 0 then
+    -- Length exhausted: nothing to render, and kind-specific fields may be unset.
+  elseif v.kind == "ds" then
     local pcm = v.pcm
     local size = v.size or #pcm
     local loop = v.loop and true or false
@@ -565,6 +546,9 @@ local function render_voice(v, n, outL, outR)
     local e = math.floor(13 * (v.envVol or 255) / 16)
     local volL = math.floor((v.volL or 0.5) * e) / 256
     local volR = math.floor((v.volR or 0.5) * e) / 256
+    local plen = #pcm
+    -- Last decoded byte, reused when the next sample starts on the same index.
+    local ci, cs = -1, 0
     for i = 1, n do
       if pos >= size then
         if loop and loopLen > 0 then
@@ -574,7 +558,48 @@ local function render_voice(v, n, outL, outR)
           break
         end
       end
-      local s = s8_lerp(pcm, pos, size, loop, loopStart)
+      local s
+      if pos < 0 then
+        s = 0
+      else
+        local i0 = math_floor(pos)
+        local s0
+        if i0 == ci then
+          s0 = cs
+        elseif i0 >= plen then
+          s0 = 0
+        else
+          s0 = S8[str_byte(pcm, i0 + 1)]
+          ci, cs = i0, s0
+        end
+        local frac = pos - i0
+        if frac < 1e-6 then
+          s = s0
+        else
+          local i1 = i0 + 1
+          if i1 >= size then
+            if loop and loopStart and loopStart < size then
+              i1 = loopStart
+            else
+              i1 = nil
+            end
+          end
+          if i1 == nil then
+            s = s0
+          else
+            local s1
+            if i1 == ci then
+              s1 = cs
+            elseif i1 >= plen then
+              s1 = 0
+            else
+              s1 = S8[str_byte(pcm, i1 + 1)]
+              ci, cs = i1, s1
+            end
+            s = s0 + (s1 - s0) * frac
+          end
+        end
+      end
       outL[i] = outL[i] + s * volL
       outR[i] = outR[i] + s * volR
       pos = pos + step
@@ -583,54 +608,71 @@ local function render_voice(v, n, outL, outR)
   elseif v.kind == "cgb_pulse" then
     local duty = DUTY[v.duty] or DUTY[2]
     local thresh, hi, lo = duty[1], duty[2], duty[3]
+    local sr = Mix.SAMPLE_RATE
+    local sweep = v.sweepEnabled
+    local rl, rr = v.routeL ~= false, v.routeR ~= false
+    local ev = v.envVol or 15
+    local phase = v.phase
+    local inc = v.freq / sr
     for i = 1, n do
-      tick_sweep_sample(v)
-      if not v.alive then break end
-      local inc = v.freq / Mix.SAMPLE_RATE
-      local s = (v.phase < thresh) and hi or lo
+      if sweep then
+        tick_sweep_sample(v)
+        if not v.alive then break end
+        inc = v.freq / sr
+      end
+      local s = (phase < thresh) and hi or lo
       -- SOUNDCNT_L=0x77, PSG ratio=100%: one envelope unit is 16/512.
-      s = (s + 1) * (v.envVol or 15) / 64
-      if v.routeL ~= false then outL[i] = outL[i] + s end
-      if v.routeR ~= false then outR[i] = outR[i] + s end
-      v.phase = v.phase + inc
-      v.phase = v.phase % 1
+      s = (s + 1) * ev / 64
+      if rl then outL[i] = outL[i] + s end
+      if rr then outR[i] = outR[i] + s end
+      phase = phase + inc
+      phase = phase % 1
     end
+    v.phase = phase
   elseif v.kind == "cgb_wave" then
     local wave = v.wave
     local inc = v.freq / Mix.SAMPLE_RATE
+    local rl, rr = v.routeL ~= false, v.routeR ~= false
+    -- gCgb3Vol: mute, 25%, 50%, 75%, 100% (hardware truncates nibbles).
+    local level = v.envVol or 15
+    local phase = v.phase
     for i = 1, n do
-      local idx = math.floor(v.phase * 32) % 32
+      local idx = math_floor(phase * 32) % 32
       local nibble = wave[idx + 1] or 8
-      -- gCgb3Vol: mute, 25%, 50%, 75%, 100% (hardware truncates nibbles).
-      local level = v.envVol or 15
       local sample = 0
       if level >= 14 then sample = nibble
-      elseif level >= 10 then sample = math.floor(nibble * 3 / 4)
-      elseif level >= 6 then sample = math.floor(nibble / 2)
-      elseif level >= 2 then sample = math.floor(nibble / 4) end
+      elseif level >= 10 then sample = math_floor(nibble * 3 / 4)
+      elseif level >= 6 then sample = math_floor(nibble / 2)
+      elseif level >= 2 then sample = math_floor(nibble / 4) end
       local s = sample / 32
-      if v.routeL ~= false then outL[i] = outL[i] + s end
-      if v.routeR ~= false then outR[i] = outR[i] + s end
-      v.phase = v.phase + inc
-      v.phase = v.phase % 1
+      if rl then outL[i] = outL[i] + s end
+      if rr then outR[i] = outR[i] + s end
+      phase = phase + inc
+      phase = phase % 1
     end
+    v.phase = phase
   elseif v.kind == "cgb_noise" then
+    local clock, lfsr, period = v.clock, v.lfsr, v.period
+    local shortNoise = v.shortNoise
+    local rl, rr = v.routeL ~= false, v.routeR ~= false
+    local on = (v.envVol or 15) / 32
     for i = 1, n do
-      v.clock = v.clock + 1
-      while v.clock >= v.period do
-        v.clock = v.clock - v.period
-        local lo = v.lfsr % 2
-        local hi = math.floor(v.lfsr / 2) % 2
+      clock = clock + 1
+      while clock >= period do
+        clock = clock - period
+        local lo = lfsr % 2
+        local hi = math_floor(lfsr / 2) % 2
         local bit = (lo == hi) and 0 or 1
-        v.lfsr = math.floor(v.lfsr / 2) + bit * 0x4000
-        if v.shortNoise then
-          v.lfsr = v.lfsr - (math.floor(v.lfsr / 64) % 2) * 64 + bit * 64
+        lfsr = math_floor(lfsr / 2) + bit * 0x4000
+        if shortNoise then
+          lfsr = lfsr - (math_floor(lfsr / 64) % 2) * 64 + bit * 64
         end
       end
-      local s = ((v.lfsr % 2) == 0) and (v.envVol or 15) / 32 or 0
-      if v.routeL ~= false then outL[i] = outL[i] + s end
-      if v.routeR ~= false then outR[i] = outR[i] + s end
+      local s = ((lfsr % 2) == 0) and on or 0
+      if rl then outL[i] = outL[i] + s end
+      if rr then outR[i] = outR[i] + s end
     end
+    v.clock, v.lfsr = clock, lfsr
   end
   if v.lengthRemaining and v.lengthRemaining <= 0 then v.alive = false end
 end
@@ -653,36 +695,51 @@ function Mix.reverbActive(state)
   return state and state.level > 0 and state.energy > 1e-8
 end
 
-local function reverb_tap(state, delay)
-  local at = (state.cursor - delay) % state.size
-  local i = math.floor(at)
+local function reverb_tap(L, R, size, cursor, delay)
+  local at = (cursor - delay) % size
+  local i = math_floor(at)
   local frac = at - i
-  local j = (i + 1) % state.size
-  local a = (state.left[i] or 0) + (state.right[i] or 0)
-  local b = (state.left[j] or 0) + (state.right[j] or 0)
+  local j = (i + 1) % size
+  local a = (L[i] or 0) + (R[i] or 0)
+  local b = (L[j] or 0) + (R[j] or 0)
   return a + (b - a) * frac
 end
 
 local function apply_reverb(state, left, right, n)
   if not state or state.level <= 0 then return end
   local gain = state.level / 512
+  local sL, sR, size = state.left, state.right, state.size
+  local shortDelay, longDelay = state.shortDelay, state.longDelay
+  local cursor, energy = state.cursor, state.energy
+  local max = math.max
   for i = 1, n do
-    local echo = (reverb_tap(state, state.shortDelay)
-      + reverb_tap(state, state.longDelay)) * gain
+    local echo = (reverb_tap(sL, sR, size, cursor, shortDelay)
+      + reverb_tap(sL, sR, size, cursor, longDelay)) * gain
     local l, r = left[i] + echo, right[i] + echo
-    local at = state.cursor
-    local oldL, oldR = state.left[at] or 0, state.right[at] or 0
-    state.energy = math.max(0, state.energy + l * l + r * r - oldL * oldL - oldR * oldR)
-    state.left[at], state.right[at] = l, r
-    state.cursor = (at + 1) % state.size
+    local oldL, oldR = sL[cursor] or 0, sR[cursor] or 0
+    energy = max(0, energy + l * l + r * r - oldL * oldL - oldR * oldR)
+    sL[cursor], sR[cursor] = l, r
+    cursor = (cursor + 1) % size
     left[i], right[i] = l, r
   end
+  state.cursor, state.energy = cursor, energy
 end
+
+local scratchL, scratchR = {}, {}
+local SCRATCH_MAX = 4096
 
 function Mix.render(voices, n, opts)
   opts = opts or {}
   n = n or 1024
-  local outL, outR = {}, {}
+  -- Scratch buffers are only safe when nothing returns them to the caller.
+  local reuse = not opts.raw and love and love.sound and love.sound.newSoundData
+    and n <= SCRATCH_MAX
+  local outL, outR
+  if reuse then
+    outL, outR = scratchL, scratchR
+  else
+    outL, outR = {}, {}
+  end
   for i = 1, n do outL[i] = 0; outR[i] = 0 end
   for _, v in ipairs(voices) do
     if v.kind == "ds" then render_voice(v, n, outL, outR) end
@@ -691,10 +748,14 @@ function Mix.render(voices, n, opts)
   for _, v in ipairs(voices) do
     if v.kind ~= "ds" then render_voice(v, n, outL, outR) end
   end
-  local alive = {}
-  for _, v in ipairs(voices) do
-    if v.alive then alive[#alive + 1] = v end
+  -- `voices` is compacted in place (dead voices removed) and returned as `alive`, raw or not.
+  local w, total = 0, #voices
+  for i = 1, total do
+    local v = voices[i]
+    if v.alive then w = w + 1; voices[w] = v end
   end
+  for i = w + 1, total do voices[i] = nil end
+  local alive = voices
 
   -- DC blocker; state belongs to the rendered player slot.
   local master = opts.master or 1

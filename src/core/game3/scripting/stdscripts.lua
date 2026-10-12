@@ -1,16 +1,4 @@
--- Shared FRLG std / common scripts (not map-local). Same role as pret
--- data/scripts/pc.inc + pkmn_center_nurse.inc — one definition, every map.
-
-local Flags = require("src.core.game3.scripting.flags")
-local Opcodes = require("src.core.game3.scripting.opcodes")
-local TextIR = require("src.core.game3.scripting.text_ir")
-
 local Std = {}
-
-local function T(ascii)
-  ascii = ascii:gsub("^\n", ""):gsub("\r\n", "\n"):gsub("\n", "\\n")
-  return TextIR.fromAscii(ascii)
-end
 
 -- 0-based def_special order of pokefirered/data/specials.inc
 Std.SPECIAL = {
@@ -35,6 +23,7 @@ Std.SPECIAL = {
   BedroomPC = 0xF9, -- pokefirered/data/specials.inc:260
   PlayerPC = 0xFA,
   CreatePCMenu = 0x106,
+  HallOfFamePCBeginFade = 0x107, -- pokefirered/data/specials.inc:274
   EnterHallOfFame = 0x110, -- 272 (special HallOfFame / GameClear)
   EnableNationalPokedex = 0x16F, -- pokefirered/data/specials.inc:378
   SetUnlockedPokedexFlags = 0x181, -- pokefirered/data/specials.inc:396
@@ -43,6 +32,7 @@ Std.SPECIAL = {
   BackupHelpContext = 0x17E,
   RestoreHelpContext = 0x17F,
   SetHelpContextForMap = 0x190,
+  DoSSAnneDepartureCutscene = 0x191, -- pokefirered/data/specials.inc:412
   HelpSystem_Disable = 0x198,
   HelpSystem_Enable = 0x199,
   StartMarowakBattle = 0x156, -- pokefirered/data/specials.inc:353
@@ -61,6 +51,8 @@ Std.SPECIAL = {
   GetLeadMonFriendship = 0xE6, -- pokefirered/data/specials.inc:241
   DaisyMassageServices = 0x197, -- pokefirered/data/specials.inc:418
   GetDaycareState = 0xB6, -- pokefirered/data/specials.inc:193
+  ScriptHatchMon = 0xC1, -- pokefirered/data/specials.inc:204
+  EggHatch = 0xC2, -- pokefirered/data/specials.inc:205
   StartOldManTutorialBattle = 0x9D, -- pokefirered/data/specials.inc:168
   StartGroudonKyogreBattle = 0x137, -- 311 (pokefirered/data/specials.inc:322)
   StartLegendaryBattle = 0x138, -- 312 (pokefirered/data/specials.inc:323)
@@ -96,6 +88,7 @@ Std.SPECIAL = {
   GetPCBoxToSendMon = 0x18A, -- pokefirered/data/specials.inc:405
   HasAtLeastOneBerry = 0x19B, -- pokefirered/data/specials.inc:422
   GetPlayerFacingDirection = 0x1AA, -- pokefirered/data/specials.inc:437
+  GetPlayerFacingDirectionUnusedSlot = 0x11F, -- pokefirered/data/specials.inc:298
   DoDeoxysTriangleInteraction = 0x1AB, -- pokefirered/data/specials.inc:438
   ValidateSavedWonderCard = 0x180, -- pokefirered/data/specials.inc:395
   GetMysteryGiftCardStat = 0x186, -- pokefirered/data/specials.inc:401
@@ -109,6 +102,7 @@ Std.SPECIAL = {
   HasAllMons = 0x1B0, -- pokefirered/data/specials.inc:443
   IsPlayerNotInTrainerTowerLobby = 0x1B1, -- pokefirered/data/specials.inc:444
   CallTrainerTowerFunc = 0x194, -- pokefirered/data/specials.inc:415
+  BufferTMHMMoveName = 0x196, -- pokefirered/data/specials.inc:417
   SavePlayerParty = 0x27, -- pokefirered/data/specials.inc:50
   LoadPlayerParty = 0x28, -- pokefirered/data/specials.inc:51
   ChooseHalfPartyForBattle = 0x29, -- pokefirered/data/specials.inc:52
@@ -143,7 +137,6 @@ Std.SPECIAL = {
   ExitSafariMode = 0xCE, -- pokefirered/data/specials.inc:217
   InitRoamer = 0x129, -- pokefirered/data/specials.inc:308
   SetIcefallCaveCrackedIceMetatiles = 0x135, -- pokefirered/data/specials.inc:320
-  ShowIcefallCaveCrackedIceAttempt = 0x136, -- pokefirered/data/specials.inc:321
   ShakeScreen = 0x136, -- pokefirered/data/specials.inc:321
   SetPostgameFlagsUnusedSlot = 0x155, -- pokefirered/data/specials.inc:352
   ForcePlayerOntoBike = 0x157, -- pokefirered/data/specials.inc:354
@@ -191,6 +184,29 @@ Std.SPECIAL = {
   IsThereMonInRoute5Daycare = 0x178, -- pokefirered/data/specials.inc:387
   GetNumLevelsGainedForRoute5DaycareMon = 0x179, -- pokefirered/data/specials.inc:388
   TakePokemonFromRoute5Daycare = 0x17A, -- pokefirered/data/specials.inc:389
+  -- pokefirered/data/specials.inc
+  BufferEReaderTrainerGreeting = 0xEB, -- pokefirered/data/specials.inc:246
+  ShowDiploma = 0x108, -- pokefirered/data/specials.inc:275
+  BufferEReaderTrainerName = 0x11D, -- pokefirered/data/specials.inc:296
+  Script_FacePlayer = 0x127, -- pokefirered/data/specials.inc:306
+  Script_ClearHeldMovement = 0x128, -- pokefirered/data/specials.inc:307
+  SetEReaderTrainerGfxId = 0x142, -- pokefirered/data/specials.inc:333
+  OpenMuseumFossilPic = 0x18B, -- pokefirered/data/specials.inc:406
+  CloseMuseumFossilPic = 0x18C, -- pokefirered/data/specials.inc:407
+  ChooseMonForWirelessMinigame = 0x18E, -- pokefirered/data/specials.inc:409
+  DoSSAnneDepartureCutscene = 0x191, -- pokefirered/data/specials.inc:412
+  IsPokemonJumpSpeciesInParty = 0x192, -- pokefirered/data/specials.inc:413
+  ShowPokemonJumpRecords = 0x195, -- pokefirered/data/specials.inc:416
+  DisplayBerryPowderVendorMenu = 0x19C, -- pokefirered/data/specials.inc:423
+  RemoveBerryPowderVendorMenu = 0x19D, -- pokefirered/data/specials.inc:424
+  Script_HasEnoughBerryPowder = 0x19E, -- pokefirered/data/specials.inc:425
+  Script_TakeBerryPowder = 0x19F, -- pokefirered/data/specials.inc:426
+  PrintPlayerBerryPowderAmount = 0x1A0, -- pokefirered/data/specials.inc:427
+  DoPokemonLeagueLightingEffect = 0x1A1, -- pokefirered/data/specials.inc:428
+  ShowBerryCrushRankings = 0x1A2, -- pokefirered/data/specials.inc:429
+  DoCredits = 0x1A5, -- pokefirered/data/specials.inc:432
+  ShowDodrioBerryPickingRecords = 0x1A6, -- pokefirered/data/specials.inc:433
+  LoopWingFlapSound = 0x1BA, -- pokefirered/data/specials.inc:453
   -- Engine-extension specials (not cart indices) for shared primitives.
   FadeScreen = 0xF001,
   OpenNaming = 0xF002,
@@ -200,299 +216,51 @@ Std.SPECIAL = {
 Std.SPECIAL_ALIASES = {
   FieldShowRegionMap = "ShowTownMap", -- pokefirered/data/specials.inc:262
   SetPostgameFlagsUnusedSlot = "SetPostgameFlags", -- pokefirered/data/specials.inc:352
+  GetPlayerFacingDirectionUnusedSlot = "GetPlayerFacingDirection", -- pokefirered/data/specials.inc:298
 }
 
 Std.SPECIAL_ENGINE_BASE = 0xF000
 
 Std.SPECIAL_NAME_BY_ID = {}
+Std.ENGINE_SPECIALS = {}
 for name, id in pairs(Std.SPECIAL) do
   if id < Std.SPECIAL_ENGINE_BASE then
     Std.SPECIAL_NAME_BY_ID[id] = Std.SPECIAL_ALIASES[name] or name
+  else
+    Std.ENGINE_SPECIALS[id] = name
   end
 end
 
-Std.TEXT = {
-  Text_TownMap = T([[
-It's a TOWN MAP.]]),
-  Text_WelcomeWantToHealPkmn = T([[
-Welcome to our POKéMON CENTER!\p
-Would you like me to heal your
-POKéMON to perfect health?]]),
-  Text_TakeYourPkmnForFewSeconds = T([[
-OK, may I see your POKéMON?]]),
-  Text_RestoredPkmnToFullHealth = T([[
-Thank you for waiting.
-Your POKéMON are fully healed.]]),
-  Text_WeHopeToSeeYouAgain = T([[
-We hope to see you again!]]),
-  Text_BootedUpPC = T([[
-{PLAYER} booted up the PC.]]),
-  Text_UsualPCServicesUnavailable = T([[
-The usual PC services aren't
-available right now…]]),
-  -- obtain_item.inc (simplified host strings)
-  Text_ObtainedTheX = T([[
-{PLAYER} obtained
-the {STR_VAR_2}!]]),
-  Text_PutItemAway = T([[
-{PLAYER} put away the
-{STR_VAR_2} in the {STR_VAR_3}.]]),
-  Text_TooBadBagFull = T([[
-Too bad!
-The BAG is full…]]),
-  Text_FoundOneItem = T([[
-{PLAYER} found one {STR_VAR_2}!]]),
-  Text_FoundTMHMContainsMove = T([[
-{PLAYER} found
-{STR_VAR_2}!]]),
-}
+local function specialsOf(game)
+  return require("src.core.game3.constants").of(game or "firered").specials
+end
 
--- Cart EventScript_PC (simplified host path: open full storage UI).
-Std.SCRIPTS = {
-  EventScript_WallTownMap = {
-    { op = "lockall" },
-    { op = "loadword", dest = 0, value = "Text_TownMap" },
-    { op = "callstd", std = Opcodes.STD.MSGBOX_DEFAULT },
-    { op = "fadescreen", [1] = 1 },
-    { op = "special", id = Std.SPECIAL.FieldShowRegionMap },
-    { op = "waitstate" },
-    { op = "releaseall" },
-    { op = "end" },
-  },
-  EventScript_PC = {
-    { op = "lockall" },
-    { op = "setvar", var = 0x8004, value = 0 },
-    { op = "special", id = Std.SPECIAL.AnimatePcTurnOn },
-    { op = "loadword", dest = 0, value = "Text_BootedUpPC" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "special", id = Std.SPECIAL.CreatePCMenu },
-    { op = "waitstate" },
-    { op = "setvar", var = 0x8004, value = 0 },
-    { op = "special", id = Std.SPECIAL.AnimatePcTurnOff },
-    { op = "releaseall" },
-    { op = "end" },
-  },
-  -- Pret shape: welcome → YES/NO → take&heal (turn left → FLDEFF_POKECENTER_HEAL
-  -- → turn down → HealPlayerParty) → restored → bow → goodbye.
-  EventScript_PkmnCenterNurse = {
-    { op = "loadword", dest = 0, value = "Text_WelcomeWantToHealPkmn" },
-    { op = "callstd", std = Opcodes.STD.MSGBOX_YESNO },
-    { op = "compare_var_to_value", var = 0x800D, value = 0 },
-    { op = "goto_if", cond = 1, target = "EventScript_PkmnCenterNurse_Goodbye" },
-    { op = "loadword", dest = 0, value = "Text_TakeYourPkmnForFewSeconds" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "call", target = "EventScript_PkmnCenterNurse_TakeAndHealPkmn" },
-    { op = "goto", target = "EventScript_PkmnCenterNurse_ReturnPkmn" },
-  },
-  -- pret EventScript_PkmnCenterNurse_TakeAndHealPkmn
-  EventScript_PkmnCenterNurse_TakeAndHealPkmn = {
-    -- WalkInPlaceFasterLeft / Down (0x2F / 0x2D) + step_end
-    { op = "applymovement", localId = 0x800F, movement = { 0x2F, 0xFE } },
-    { op = "waitmovement", localId = 0x800F },
-    { op = "dofieldeffect", [1] = 25 },
-    { op = "waitfieldeffect", [1] = 25 },
-    { op = "applymovement", localId = 0x800F, movement = { 0x2D, 0xFE } },
-    { op = "waitmovement", localId = 0x800F },
-    { op = "special", id = Std.SPECIAL.HealPlayerParty },
-    { op = "return" },
-  },
-  EventScript_PkmnCenterNurse_ReturnPkmn = {
-    { op = "loadword", dest = 0, value = "Text_RestoredPkmnToFullHealth" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    -- nurse_joy_bow (0x5B) + delay_4 (0x1A) + step_end
-    { op = "applymovement", localId = 0x800F, movement = { 0x5B, 0x1A, 0xFE } },
-    { op = "waitmovement", localId = 0x800F },
-    { op = "goto", target = "EventScript_PkmnCenterNurse_Goodbye" },
-  },
-  EventScript_PkmnCenterNurse_Goodbye = {
-    { op = "loadword", dest = 0, value = "Text_WeHopeToSeeYouAgain" },
-    { op = "callstd", std = Opcodes.STD.MSGBOX_DEFAULT },
-    { op = "return" },
-  },
-  -- Economy / item stds (pret obtain_item.inc). Pocket name → STR_VAR_3.
-  EventScript_RestorePrevTextColor = { -- data/scripts/obtain_item.inc:6
-    { op = "copyvar", [1] = 0x8012, [2] = 0x8013 },
-    { op = "return" },
-  },
-  ["std:0"] = { -- STD_OBTAIN_ITEM, data/scripts/obtain_item.inc:10
-    { op = "copyvar", [1] = 0x8013, [2] = 0x8012 },
-    { op = "textcolor", color = 3, [1] = 3 },
-    { op = "additem", [1] = 0x8000, [2] = 0x8001 },
-    { op = "copyvar", [1] = 0x8007, [2] = 0x800D },
-    { op = "call", target = "EventScript_ObtainItemMessage" },
-    { op = "copyvar", [1] = 0x8012, [2] = 0x8013 },
-    { op = "return" },
-  },
-  EventScript_ObtainItemMessage = {
-    { op = "bufferitemname", dest = 1, src = 0x8000 }, -- STR_VAR_2
-    { op = "checkitemtype", [1] = 0x8000 },
-    { op = "call", target = "EventScript_BufferPocketName" },
-    { op = "compare_var_to_value", var = 0x8007, value = 1 },
-    { op = "goto_if", cond = 1, target = "EventScript_ObtainedItem" },
-    { op = "setvar", var = 0x800D, value = 0 },
-    { op = "return" },
-  },
-  EventScript_ObtainedItem = {
-    { op = "playfanfare", [1] = 257 }, -- MUS_LEVEL_UP
-    { op = "loadword", dest = 0, value = "Text_ObtainedTheX" },
-    { op = "message", ptr = 0 },
-    { op = "waitfanfare" },
-    { op = "waitmessage" },
-    { op = "loadword", dest = 0, value = "Text_PutItemAway" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "setvar", var = 0x800D, value = 1 },
-    { op = "return" },
-  },
-  EventScript_BufferPocketName = {
-    { op = "compare_var_to_value", var = 0x800D, value = 1 },
-    { op = "goto_if", cond = 1, target = "EventScript_BufferItemsPocket" },
-    { op = "compare_var_to_value", var = 0x800D, value = 2 },
-    { op = "goto_if", cond = 1, target = "EventScript_BufferKeyItemsPocket" },
-    { op = "compare_var_to_value", var = 0x800D, value = 3 },
-    { op = "goto_if", cond = 1, target = "EventScript_BufferPokeBallsPocket" },
-    { op = "compare_var_to_value", var = 0x800D, value = 4 },
-    { op = "goto_if", cond = 1, target = "EventScript_BufferTMCase" },
-    { op = "compare_var_to_value", var = 0x800D, value = 5 },
-    { op = "goto_if", cond = 1, target = "EventScript_BufferBerryPouch" },
-    { op = "bufferstdstring", dest = 2, src = 24 }, -- STR_VAR_3 ITEMS POCKET
-    { op = "return" },
-  },
-  EventScript_BufferItemsPocket = {
-    { op = "bufferstdstring", dest = 2, src = 24 },
-    { op = "return" },
-  },
-  EventScript_BufferKeyItemsPocket = {
-    { op = "bufferstdstring", dest = 2, src = 25 },
-    { op = "return" },
-  },
-  EventScript_BufferPokeBallsPocket = {
-    { op = "bufferstdstring", dest = 2, src = 26 },
-    { op = "return" },
-  },
-  EventScript_BufferTMCase = {
-    { op = "bufferstdstring", dest = 2, src = 27 },
-    { op = "return" },
-  },
-  EventScript_BufferBerryPouch = {
-    { op = "bufferstdstring", dest = 2, src = 28 },
-    { op = "return" },
-  },
-  ["std:1"] = { -- STD_FIND_ITEM
-    { op = "checkitemspace", [1] = 0x8000, [2] = 0x8001 },
-    { op = "copyvar", [1] = 0x8007, [2] = 0x800D },
-    { op = "bufferitemname", dest = 1, src = 0x8000 },
-    { op = "checkitemtype", [1] = 0x8000 },
-    { op = "call", target = "EventScript_BufferPocketName" },
-    { op = "compare_var_to_value", var = 0x8007, value = 1 },
-    { op = "goto_if", cond = 1, target = "EventScript_PickUpItem" },
-    { op = "loadword", dest = 0, value = "Text_TooBadBagFull" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "setvar", var = 0x800D, value = 0 },
-    { op = "return" },
-  },
-  EventScript_PickUpItem = {
-    { op = "removeobject", [1] = 0x800F },
-    { op = "additem", [1] = 0x8000, [2] = 0x8001 },
-    { op = "playfanfare", [1] = 257 }, -- MUS_LEVEL_UP
-    { op = "loadword", dest = 0, value = "Text_FoundOneItem" },
-    { op = "message", ptr = 0 },
-    { op = "waitfanfare" },
-    { op = "waitmessage" },
-    { op = "loadword", dest = 0, value = "Text_PutItemAway" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "setvar", var = 0x800D, value = 1 },
-    { op = "return" },
-  },
-  ["std:2"] = { -- MSGBOX_NPC, data/scripts/std_msgbox.inc:6
-    { op = "lock" },
-    { op = "faceplayer" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "release" },
-    { op = "return" },
-  },
-  ["std:3"] = { -- MSGBOX_SIGN, data/scripts/std_msgbox.inc:14
-    { op = "lockall" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "releaseall" },
-    { op = "return" },
-  },
-  ["std:4"] = { -- MSGBOX_DEFAULT, data/scripts/std_msgbox.inc:22
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "return" },
-  },
-  ["std:5"] = { -- MSGBOX_YESNO, data/scripts/std_msgbox.inc:27
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "yesnobox", [1] = 20, [2] = 8 },
-    { op = "return" },
-  },
-  ["std:6"] = { -- MSGBOX_AUTOCLOSE, data/scripts/std_msgbox.inc:32
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "release" },
-    { op = "return" },
-  },
-  ["std:8"] = { -- STD_PUT_ITEM_AWAY
-    { op = "bufferitemname", dest = 1, src = 0x8000 },
-    { op = "checkitemtype", [1] = 0x8000 },
-    { op = "call", target = "EventScript_BufferPocketName" },
-    { op = "loadword", dest = 0, value = "Text_PutItemAway" },
-    { op = "message", ptr = 0 },
-    { op = "waitmessage" },
-    { op = "waitbuttonpress" },
-    { op = "return" },
-  },
-  ["std:9"] = { -- STD_RECEIVED_ITEM (msgreceiveditem)
-    { op = "textcolor", color = 3, [1] = 3 }, -- data/scripts/std_msgbox.inc:30
-    { op = "compare_var_to_value", var = 0x8002, value = 318 }, -- MUS_OBTAIN_KEY_ITEM
-    { op = "goto_if", cond = 1, target = "EventScript_ReceivedItemFanfareKeyItem" },
-    { op = "compare_var_to_value", var = 0x8002, value = 258 }, -- MUS_OBTAIN_ITEM
-    { op = "goto_if", cond = 1, target = "EventScript_ReceivedItemFanfareItem" },
-    { op = "compare_var_to_value", var = 0x8002, value = 257 }, -- MUS_LEVEL_UP
-    { op = "goto_if", cond = 1, target = "EventScript_ReceivedItemFanfareLevelUp" },
-    { op = "goto", target = "EventScript_ReceivedItemFanfareDefault" },
-  },
-  EventScript_ReceivedItemFanfareKeyItem = {
-    { op = "playfanfare", [1] = 318 }, -- MUS_OBTAIN_KEY_ITEM
-    { op = "goto", target = "EventScript_ReceivedItemShowMsg" },
-  },
-  EventScript_ReceivedItemFanfareItem = {
-    { op = "playfanfare", [1] = 258 }, -- MUS_OBTAIN_ITEM
-    { op = "goto", target = "EventScript_ReceivedItemShowMsg" },
-  },
-  EventScript_ReceivedItemFanfareLevelUp = {
-    { op = "playfanfare", [1] = 257 }, -- MUS_LEVEL_UP
-    { op = "goto", target = "EventScript_ReceivedItemShowMsg" },
-  },
-  EventScript_ReceivedItemFanfareDefault = {
-    { op = "playfanfare", [1] = 0x8002 }, -- VAR_0x8002 fallback
-    { op = "goto", target = "EventScript_ReceivedItemShowMsg" },
-  },
-  EventScript_ReceivedItemShowMsg = {
-    { op = "message", ptr = 0 },
-    { op = "waitfanfare" },
-    { op = "waitmessage" },
-    { op = "callstd", std = 8 }, -- STD_PUT_ITEM_AWAY
-    { op = "call", target = "EventScript_RestorePrevTextColor" },
-    { op = "return" },
-  },
-}
+function Std.specialIds(game)
+  local ids = {}
+  for id, name in pairs(specialsOf(game).byId) do ids[id] = name end
+  for id, name in pairs(Std.ENGINE_SPECIALS) do ids[id] = name end
+  return ids
+end
+
+function Std.specialName(game, id)
+  id = tonumber(id)
+  if not id then return nil end
+  return Std.ENGINE_SPECIALS[id] or specialsOf(game).byId[id]
+end
+
+function Std.bindById(byName, game, out)
+  out = out or {}
+  for id in pairs(out) do out[id] = nil end
+  for id, name in pairs(Std.specialIds(game)) do
+    local fn = byName[name]
+    if fn ~= nil then out[id] = fn end
+  end
+  return out
+end
+
+function Std.legacyHandlers(mod)
+  mod.HANDLERS = Std.bindById(mod.BY_NAME or {}, "firered", mod.HANDLERS)
+  return mod.HANDLERS
+end
 
 return Std

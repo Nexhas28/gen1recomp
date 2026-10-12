@@ -9,7 +9,7 @@ local LinkArtExtract = {}
 
 LinkArtExtract.UNION_SUB = "union_room"
 LinkArtExtract.STATUS_SUB = "wireless_status"
-LinkArtExtract.FORMAT_VERSION = 1
+LinkArtExtract.FORMAT_VERSION = 2
 
 local SCREEN_W, SCREEN_H = 240, 160
 -- src/link_rfu_3.c:434
@@ -121,6 +121,9 @@ return {
   -- src/wireless_communication_status_screen.c:226
   cache:write(status .. "/bg.rgba", BgBake.bakeRegionRgba(statusGfx,
     { [0] = statusBanks[0] }, statusMap, SCREEN_W, SCREEN_H, {}))
+  -- src/wireless_communication_status_screen.c:251
+  cache:write(status .. "/bg_index.bin",
+    BgBake.bakeRegionIndices(statusGfx, statusMap, SCREEN_W, SCREEN_H, {}))
 
   local palParts = {}
   for b = 0, STATUS_PAL_BANKS - 1 do
@@ -132,13 +135,16 @@ return {
   end
   cache:write(status .. "/palettes.pal", table.concat(palParts))
 
+  local L = Versions.WIRELESS_STATUS_LAYOUT
   cache:write(status .. "/manifest.lua", string.format([[
 return {
   format_version = %d,
-  bg = { width = %d, height = %d },
+  bg = { width = %d, height = %d, index = "bg_index.bin" },
   palettes = { banks = %d, colors = 16, bytes_per_color = 3, anim_first = 2, anim_count = 14 },
+  layout = { title_y = %d, label_x = %d, label_y = %d, row_step = %d, count_x = %d, total_y = %d },
 }
-]], LinkArtExtract.FORMAT_VERSION, SCREEN_W, SCREEN_H, STATUS_PAL_BANKS))
+]], LinkArtExtract.FORMAT_VERSION, SCREEN_W, SCREEN_H, STATUS_PAL_BANKS,
+    L.title_y, L.label_x, L.label_y, L.row_step, L.count_x, L.total_y))
 
   print(string.format(
     "[link_art_extract] %d wireless icon frames, chat screen %dx%d, status screen %dx%d -> %s",
@@ -163,7 +169,9 @@ function LinkArtExtract.ready(cache, cacheRoot)
     return false
   end
   local bg = cache:read(status .. "/bg.rgba")
-  return type(bg) == "string" and #bg == SCREEN_W * SCREEN_H * 4
+  if type(bg) ~= "string" or #bg ~= SCREEN_W * SCREEN_H * 4 then return false end
+  local idx = cache:exists(status .. "/bg_index.bin") and cache:read(status .. "/bg_index.bin")
+  return type(idx) == "string" and #idx == SCREEN_W * SCREEN_H
 end
 
 return LinkArtExtract

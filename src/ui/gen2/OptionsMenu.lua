@@ -61,6 +61,9 @@ local FINITE_VALUE_SOURCES = {
   Strings.source("LIGHT"), Strings.source("STRONG"),
   Strings.source("ADAPTIVE"), Strings.source("UNAVAILABLE"),
   Strings.source("DISPLAY"), Strings.source("DISPLAY (%dHZ)"),
+  Strings.source("ON"), Strings.source("4X"),
+  Strings.source("AUDIO MODE"), Strings.source("BOTH"), Strings.source("EXT ONLY"),
+  Strings.source("GAME ONLY"),
 }
 
 local function volLabel(v)
@@ -201,6 +204,22 @@ local ROWS = {
     text = function(options)
       return Strings(FILTERS[(options.musicFilter or 0) + 1])
     end },
+  { label = Strings.source("AUDIO MODE"), key = "audioMode", port = true,
+    cycle = function(options, delta)
+      local cur = options.audioMode or "both"
+      local modes = { "both", "external_only", "game_only" }
+      local idx = 1
+      for i, m in ipairs(modes) do if m == cur then idx = i break end end
+      idx = ((idx - 1 + (delta < 0 and -1 or 1)) % #modes) + 1
+      options.audioMode = modes[idx]
+      require("src.core.Music").applyOptions(options)
+    end,
+    text = function(options)
+      local cur = options.audioMode or "both"
+      if cur == "external_only" then return Strings("EXT ONLY") end
+      if cur == "game_only" then return Strings("GAME ONLY") end
+      return Strings("BOTH")
+    end },
   -- Heads the port's display group, same spot src/ui/OptionsMenu.lua's own
   -- PERFORMANCE row occupies relative to ZOOM/VOID FILL/TILT/SHADER FX below
   -- (the extras this tier scales).  Gen 1 row shape (`value`/`step`, not this
@@ -214,7 +233,11 @@ local ROWS = {
     step = function(g, dir)
       local o = g.options
       o.performance = Performance.cycle(o.performance, dir)
-      g:applyOptions()
+      if g.applyPerformanceOptions then
+        g:applyPerformanceOptions()
+      else
+        g:applyOptions()
+      end
       return true
     end },
   { label = Strings.source("GAME SPEED"), key = "speed", port = true,
@@ -226,6 +249,15 @@ local ROWS = {
       local speed = tonumber(options.speed) or 1
       if speed == 1 then return Strings("NORMAL") end
       return Strings("%dX", speed)
+    end },
+  { label = Strings.source("ORIENTATION"), key = "orientation", port = true,
+    cycle = function(options, delta)
+      local Orientation = require("src.core.Orientation")
+      options.orientation = Orientation.cycle(options.orientation, delta)
+      Orientation.apply(options.orientation)
+    end,
+    text = function(options)
+      return Strings(require("src.core.Orientation").modeLabel(options.orientation))
     end },
   { label = Strings.source("ZOOM"), key = "zoom", port = true,
     cycle = function(options, delta, game)
@@ -344,6 +376,15 @@ local ROWS = {
       local VideoMode = require("src.core.VideoMode")
       return VideoMode.normalize(options.videoMode) == "borderless"
         and Strings("FULL") or Strings("WINDOWED")
+    end },
+  { label = Strings.source("FAITHFUL RATIO"), key = "faithfulRes", port = true,
+    cycle = function(options, delta)
+      local FaithfulRes = require("src.core.FaithfulRes")
+      options.faithfulRes = FaithfulRes.cycle(options.faithfulRes, delta)
+      FaithfulRes.apply(options.faithfulRes)
+    end,
+    text = function(options)
+      return Strings(require("src.core.FaithfulRes").label(options.faithfulRes))
     end },
   { label = Strings.source("SCREEN POS"), key = "screenPos", port = true,
     cycle = function(options, delta)
@@ -486,11 +527,12 @@ local GROUPS = {
   { id = "group.speed", label = Strings.source("SPEED"),
     members = { "textSpeed", "speed" } },
   { id = "group.video", label = Strings.source("VIDEO"),
-    members = { "videoMode", "screenPos", "fpsCap", "vsync", "logicClock" } },
+    members = { "videoMode", "orientation", "faithfulRes", "screenPos", "fpsCap", "vsync",
+      "logicClock" } },
   { id = "group.graphics", label = Strings.source("GRAPHICS"),
     members = { "color", "uiLetterbox", "shaderfx", "shaderfx2", "frame" } },
   { id = "group.audio", label = Strings.source("AUDIO"),
-    members = { "sound", "musicVol", "sfxVol", "musicFilter" } },
+    members = { "sound", "musicVol", "sfxVol", "musicFilter", "audioMode" } },
   { id = "group.battle", label = Strings.source("BATTLE OPTIONS"),
     members = { "battleScene", "battleStyle", "battleLayout", "battleHud",
       "battleFit", "battleBg" } },
@@ -571,6 +613,7 @@ local function buildRows()
     -- The descriptor and the save key stay, so a build that grows a printer
     -- only has to drop this test.
     local hidden = row.key == "print"
+      or (row.key == "orientation" and osName ~= "Android" and osName ~= "iOS")
       or (isNX and row.key == "videoMode")
       or (not showTouch and (row.id == "touchControls"
           or row.id == "touchLayout" or row.id == "haptics"

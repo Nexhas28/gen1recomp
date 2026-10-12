@@ -164,11 +164,7 @@ end
 -- pokefirered/src/trainer_tower.c:631
 local function convertSpeech(words)
   if type(words) ~= "table" then return "" end
-  local okE, EasyChatData = pcall(require, "src.core.game3.easy_chat_data")
-  if not (okE and EasyChatData and EasyChatData.formatPhrase) then return "" end
-  local ok, text = pcall(EasyChatData.formatPhrase, words, 3, 2)
-  if ok and type(text) == "string" then return text end
-  return ""
+  return require("src.core.game3.easy_chat_text").phrase(words, 3, 2)
 end
 
 local function natives()
@@ -465,8 +461,9 @@ FUNCS[Tower.FUNC.ENCOUNTER_MUSIC] = function(ctx)
   local lut = pack and pack.encounterMusic
   local song = row and row.facilityClass and type(lut) == "table" and lut[row.facilityClass]
   local okA, Audio = pcall(require, "src.core.game3.audio")
-  if okA and Audio and Audio.playMapSong then
-    pcall(Audio.playMapSong, tonumber(song) or Tower.MUS_ENCOUNTER_BOY)
+  if okA and Audio and Audio.playSong then
+    -- pokefirered/src/sound.c:129 PlayNewMapMusic
+    pcall(Audio.playSong, tonumber(song) or Tower.MUS_ENCOUNTER_BOY)
   end
   return false
 end
@@ -490,9 +487,9 @@ function TowerNatives.chooseOptions()
   }
 end
 
-TowerNatives.HANDLERS = {
+TowerNatives.BY_NAME = {
   -- pokefirered/src/trainer_tower.c:438 CallTrainerTowerFunc
-  [Std.SPECIAL.CallTrainerTowerFunc] = function(ctx, adapters)
+  CallTrainerTowerFunc = function(ctx, adapters)
     local index = varGet(ctx, VAR_0x8004)
     local fn = FUNCS[index]
     if not fn then
@@ -503,25 +500,25 @@ TowerNatives.HANDLERS = {
   end,
 
   -- pokefirered/src/load_save.c:160 SavePlayerParty
-  [Std.SPECIAL.SavePlayerParty] = function()
+  SavePlayerParty = function()
     Tower.savePlayerParty(sessionOf())
     return false
   end,
 
   -- pokefirered/src/load_save.c:170 LoadPlayerParty
-  [Std.SPECIAL.LoadPlayerParty] = function()
+  LoadPlayerParty = function()
     Tower.loadPlayerParty(sessionOf())
     return false
   end,
 
   -- pokefirered/src/script_pokemon_util.c:197 ReducePlayerPartyToThree
-  [Std.SPECIAL.ReducePlayerPartyToThree] = function()
+  ReducePlayerPartyToThree = function()
     Tower.reducePartyToThree(sessionOf())
     return false
   end,
 
   -- pokefirered/src/script_pokemon_util.c:152 ChooseHalfPartyForBattle
-  [Std.SPECIAL.ChooseHalfPartyForBattle] = function(ctx, adapters)
+  ChooseHalfPartyForBattle = function(ctx, adapters)
     local session = sessionOf()
     Tower.clearSelectedOrder(session)
     local picked, settled = nil, false
@@ -559,20 +556,21 @@ TowerNatives.HANDLERS = {
   end,
 
   -- pokefirered/src/battle_tower.c:1354 ValidateEReaderTrainer
-  [Std.SPECIAL.ValidateEReaderTrainer] = function(ctx)
+  ValidateEReaderTrainer = function(ctx)
     -- pokefirered/data/maps/SevenIsland_House_Room1/scripts.inc:9
     return setResult(ctx, Tower.ereaderTrainer(sessionOf()) and 0 or 1)
   end,
 
   -- pokefirered/src/battle_records.c:83 ShowBattleRecords
-  [Std.SPECIAL.ShowBattleRecords] = function(ctx, adapters)
+  ShowBattleRecords = function(ctx, adapters)
     local session = sessionOf()
     -- pokefirered/src/battle_records.c:136
     local kind = (varGet(ctx, VAR_0x8004) ~= 0) and "tower" or "link"
     local Screen = recordsScreen()
+    -- src/battle_records.c:83, cable_club.inc:566-575
     if not Screen then
       takeScreenForPartyMenu()()
-      return false
+      return natives().yieldHost(ctx, adapters, function(done) done() end)
     end
     return natives().yieldHost(ctx, adapters, function(done)
       Screen.show({ session = session, kind = kind, onDone = done })
@@ -580,7 +578,7 @@ TowerNatives.HANDLERS = {
   end,
 
   -- pokefirered/src/battle_tower.c:895 StartSpecialBattle
-  [Std.SPECIAL.StartSpecialBattle] = function(ctx, adapters)
+  StartSpecialBattle = function(ctx, adapters)
     local session = sessionOf()
     local which = varGet(ctx, VAR_0x8004)
     local foe, after
@@ -605,6 +603,9 @@ TowerNatives.HANDLERS = {
     return runBattle(ctx, adapters, foe, {
       trainerId = 0,
       eReader = which == SPECIAL_BATTLE.EREADER,
+      -- src/battle_tower.c:895-933
+      battleTower = which == SPECIAL_BATTLE.BATTLE_TOWER,
+      secretBase = which == SPECIAL_BATTLE.SECRET_BASE,
       -- pokefirered/src/battle_message.c:2072 CopyEReaderTrainerName5
       trainerName = foe.trainerName,
       trainerPicId = foe.trainerPicId,
@@ -612,5 +613,6 @@ TowerNatives.HANDLERS = {
     }, after)
   end,
 }
+Std.legacyHandlers(TowerNatives)
 
 return TowerNatives

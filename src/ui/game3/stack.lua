@@ -24,6 +24,12 @@ end
 -- opts.drawUnder: if true, still draw layers below this one.
 function Stack.push(id, mod, opts)
   opts = opts or {}
+  local isMenu = opts.isMenu
+  if isMenu == nil then isMenu = mod and mod.isMenu end
+  if opts.hideBelow ~= false then
+    local Message = package.loaded["src.ui.game3.message"]
+    if Message and Message.closeStay then Message.closeStay() end
+  end
   -- Replace existing same-id layer (re-open).
   for i = #Stack._layers, 1, -1 do
     if Stack._layers[i].id == id then
@@ -33,8 +39,10 @@ function Stack.push(id, mod, opts)
   Stack._layers[#Stack._layers + 1] = {
     id = id,
     mod = mod,
+    isMenu = isMenu == true,
     drawUnder = opts.drawUnder and true or false,
     hideBelow = opts.hideBelow ~= false, -- default hide layers underneath
+    fullscreen = opts.fullscreen,
   }
 end
 
@@ -85,6 +93,15 @@ end
 
 function Stack.busy()
   return #Stack._layers > 0
+end
+
+function Stack.fullscreen()
+  for _, layer in ipairs(Stack.drawOrder()) do
+    local f = layer.fullscreen
+    if type(f) == "function" then f = f() end
+    if f then return true end
+  end
+  return false
 end
 
 return Stack

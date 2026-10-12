@@ -77,7 +77,9 @@ function NativePack.buildLayeredIdx(bundle, midList)
     Metatile.compositeIndexedUnder, bundle, midList, NativePack.FLAG_LAYERED)
   local over = build_idx_with(
     Metatile.compositeIndexedOver, bundle, midList, NativePack.FLAG_LAYERED)
-  return under, over
+  local middle = build_idx_with(
+    Metatile.compositeIndexedMiddle, bundle, midList, NativePack.FLAG_LAYERED)
+  return under, over, middle
 end
 
 function NativePack.encodeIdx(tbl)
@@ -111,26 +113,47 @@ function NativePack.decodeIdx(blob)
   local midCount = read_u16(blob, 7)
   local atlasCols = read_u16(blob, 9)
   local atlasRows = read_u16(blob, 11)
+  -- The header comes from a file in the user-writable cache and was trusted:
+  -- an absurd midCount walks the pixel loop past the blob (read_u16 does not
+  -- bounds-check), and an absurd atlas sizes a ~4 TB buffer downstream in
+  -- bake_or_load.  Require the declared tables to fit the blob, and the
+  -- dimensions to be sane, before reading anything.
+  local MAX_MIDS, MAX_ATLAS_TILES = 4096, 16384
+  if midCount < 1 or atlasCols < 1 or atlasRows < 1 then
+    return nil, "bad mids.idx dimensions"
+  end
+  if midCount > MAX_MIDS or atlasCols * atlasRows > MAX_ATLAS_TILES then
+    return nil, "mids.idx dimensions out of range"
+  end
+  if #blob < 12 + midCount * 2 + midCount * 256 then
+    return nil, "mids.idx truncated"
+  end
   local midIds = {}
   local off = 13
   for i = 1, midCount do
     midIds[i] = read_u16(blob, off)
     off = off + 2
   end
-  local pixels = {}
+  local dataOff = off
   local n = midCount * 256
-  for i = 1, n do
-    pixels[i] = blob:byte(off + i - 1) or 0
-  end
-  return {
+  return setmetatable({
     formatVersion = formatVersion,
     flags = flags,
     midCount = midCount,
     atlasCols = atlasCols,
     atlasRows = atlasRows,
     midIds = midIds,
-    pixels = pixels,
-  }
+  }, {
+    __index = function(self, k)
+      if k ~= "pixels" then return nil end
+      local pixels = {}
+      for i = 1, n do
+        pixels[i] = blob:byte(dataOff + i - 1) or 0
+      end
+      rawset(self, "pixels", pixels)
+      return pixels
+    end,
+  })
 end
 
 function NativePack.encodePalettes(mapPals)
@@ -212,6 +235,7 @@ function NativePack.bakeRgba(idxTbl, rgbPals, opts)
   local pixels = idxTbl.pixels or {}
   local rowChunks = {}
   for ay = 0, h - 1 do
+    if ay % 16 == 0 and opts.cancelled and opts.cancelled() then return nil, w, h end
     local midRow = math.floor(ay / 16)
     local py = ay % 16
     local line = {}
@@ -325,6 +349,20 @@ NativePack.PC_ON_BY_OFF = {
   [0x28F] = 0x28A, -- pokefirered/include/constants/metatile_labels.h:75
 }
 
+function NativePack.addDynamicMids(seen, pairName)
+  local spec = Versions.TILESET_PAIRS and Versions.TILESET_PAIRS[pairName]
+  if not spec then return seen end
+  for _, rule in ipairs(Versions.DYNAMIC_METATILES or {}) do
+    for _, name in ipairs({ spec.primary, spec.secondary }) do
+      local ts = Versions.TILESETS[name]
+      if ts and ts.metatiles == rule.metatiles then
+        for _, mid in ipairs(rule.mids) do seen[mid] = true end
+      end
+    end
+  end
+  return seen
+end
+
 function NativePack.addPcOnMids(seen)
   for off, on in pairs(NativePack.PC_ON_BY_OFF) do
     if seen[off] then seen[on] = true end
@@ -334,6 +372,29 @@ end
 
 -- pokefirered/include/fieldmap.h:9
 NativePack.NUM_METATILES_TOTAL = 1024
+
+NativePack.ATLAS_POLICY = { frlg = "used", rse = "full" }
+
+function NativePack.atlasPolicy(game)
+  local Family = require("src.import.gba.family")
+  local F = game and Family.of(game) or Family.active()
+  local okP, row = pcall(function() return require("src.core.game3.profile").of(F.game) end)
+  local fromProfile = okP and type(row) == "table" and type(row.map) == "table" and row.map.atlas or nil
+  return fromProfile or NativePack.ATLAS_POLICY[F.name] or "used"
+end
+
+-- pokeemerald/include/fieldmap.h:4
+function NativePack.fullMidsForPair(bundle)
+  local F = require("src.import.gba.family").active()
+  local list = {}
+  local nPri = math.min(bundle.primaryMt and bundle.primaryMt.count or 0, F.numPrimaryMetatiles)
+  for mid = 0, nPri - 1 do list[#list + 1] = mid end
+  local nSec = math.min(bundle.secondaryMt and bundle.secondaryMt.count or 0,
+    F.numMetatilesTotal - F.numPrimaryMetatiles)
+  for i = 0, nSec - 1 do list[#list + 1] = F.numPrimaryMetatiles + i end
+  if #list == 0 then list[1] = 0 end
+  return list
+end
 
 local function scriptTargets(v, out)
   if type(v) == "string" then
@@ -389,11 +450,11 @@ end
 -- pokefirered/src/event_object_movement.c:4835
 function NativePack.resolveLayoutColl(coll, mapColl, hasWarp)
   if (mapColl or 0) == 0 then return coll end
-  local Permissions = require("src.world.gen2.Permissions")
-  if Permissions.isLedge(coll) then return coll end
+  local Coll = require("src.core.CollPermissions")
+  if Coll.isLedge(coll) then return coll end
   -- pokefirered/src/field_control_avatar.c:987
   if hasWarp and coll >= 0x60 and coll <= 0x7F then return coll end
-  if not Permissions.isWalkable(coll) then return coll end
+  if not Coll.isWalkable(coll) then return coll end
   return require("src.core.game3.scripting.collision").seed("BLOCKED")
 end
 
@@ -437,6 +498,7 @@ function NativePack.collectMidsForPair(grids, borders, pairName, scriptMids)
       seen[mid] = true
     end
   end
+  NativePack.addDynamicMids(seen, pairName)
   NativePack.addPcOnMids(seen)
   seen[0] = true -- void / default border
   local list = {}
@@ -449,8 +511,9 @@ end
 -- grids: padded map grids; borders: mapId → { width, height, mids }
 -- midIndex: optional [pair][mid] = { coll, ... } for resolved COLL_* lookup
 -- CollisionFn: function(mid, rawColl, behavior, kind) → collByte
-function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames, midIndex, behaviorOf, fromCell, scriptMids, warpCells)
-  root = root or "data/generated/gba"
+function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames, midIndex, behaviorOf, fromCell, scriptMids, warpCells, opts)
+  root = root or require("src.core.game3.cache_paths").CACHE_ROOT
+  local midLists = opts and opts.midLists
   local NativeRoot = root .. "/native"
   local manifest = {
     native_version = Versions.NATIVE_VERSION or 1,
@@ -461,12 +524,14 @@ function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames
   for _, pairName in ipairs(pairNames or {}) do
     local bundle = bundles[pairName]
     if bundle then
-      local midList = NativePack.collectMidsForPair(grids, borders, pairName, scriptMids)
-      local underTbl, overTbl = NativePack.buildLayeredIdx(bundle, midList)
+      local midList = midLists and midLists[pairName]
+        or NativePack.collectMidsForPair(grids, borders, pairName, scriptMids)
+      local underTbl, overTbl, middleTbl = NativePack.buildLayeredIdx(bundle, midList)
       local palBlob = NativePack.encodePalettes(bundle.mapPals)
       local pairDir = NativeRoot .. "/" .. pairName
       cache:write(pairDir .. "/mids.idx", NativePack.encodeIdx(underTbl))
       cache:write(pairDir .. "/mids_over.idx", NativePack.encodeIdx(overTbl))
+      cache:write(pairDir .. "/mids_mid.idx", NativePack.encodeIdx(middleTbl))
       cache:write(pairDir .. "/palettes.bin", palBlob)
       manifest.pairs[pairName] = {
         midCount = underTbl.midCount,

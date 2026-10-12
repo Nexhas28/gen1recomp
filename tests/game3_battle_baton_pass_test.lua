@@ -1,6 +1,7 @@
 #!/usr/bin/env luajit
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("tests.game3_cache").requireData("game3_battle_baton_pass_test")
 
 package.loaded["src.core.game3.audio"] = setmetatable({}, {
   __index = function() return function() end end,
@@ -47,6 +48,7 @@ end
 
 local function battle(party, foeParty)
   local st = State.new({ wild = false, playerParty = party, foeParty = foeParty })
+  st.trainerClassName, st.trainerName = "YOUNGSTER", "BEN"
   st.rng = function(lo, hi) if lo == 1 and hi == 100 then return 1 end return hi end
   return st, Adapter.new(st)
 end

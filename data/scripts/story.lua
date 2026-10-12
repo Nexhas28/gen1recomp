@@ -154,8 +154,9 @@ M.BLUES_HOUSE = {
       { "show_text", "_BluesHouseDaisyOfferMapText" },
       -- _GotMapText: "{PLAYER} got a\n{RAM:wStringBuffer}!" -- the
       -- buffer supplies "TOWN MAP" (scripts/BluesHouse.asm GotMapText)
-      { "give_item", "TOWN_MAP", 1, "_GotMapText" },
+      { "give_item", "TOWN_MAP", 1, false },
       { "hide_object", "BLUES_HOUSE", "BLUESHOUSE_TOWN_MAP" },
+      { "show_text", "_GotMapText" },
       { "set_flag", "EVENT_GOT_TOWN_MAP" },
       { "jump", "end" },
       { "label", "got_map" },
@@ -468,7 +469,9 @@ M.SS_ANNE_CAPTAINS_ROOM = {
       { "show_text", "_SSAnneCaptainsRoomCaptainIFeelMuchBetterText" },
       -- give-then-print like scripts/SSAnneCaptainsRoom.asm (GiveItem
       -- fills wStringBuffer; the received text reads it)
-      { "give_item", "HM_CUT", 1, false },
+      -- scripts/SSAnneCaptainsRoom.asm:77
+      { "give_item", "HM_CUT", 1, false,
+        "_SSAnneCaptainsRoomCaptainHM01NoRoomText", "Get_Key_Item" },
       { "show_text", "_SSAnneCaptainsRoomCaptainReceivedHM01Text" },
       { "set_flag", "EVENT_GOT_HM01" },
       -- pokeyellow scripts/SSAnneCaptainsRoom.asm:32-33
@@ -482,10 +485,10 @@ M.SS_ANNE_CAPTAINS_ROOM = {
 do
   local rows = M.SS_ANNE_CAPTAINS_ROOM.talk.TEXT_SSANNECAPTAINSROOM_CAPTAIN
   if not require("src.core.GameVersion").isYellow() then
-    for i, row in ipairs(rows) do
+    for _, row in ipairs(rows) do
       if row[1] == "give_item" then
         -- pokered scripts/SSAnneCaptainsRoom.asm:34-37
-        table.insert(rows, i, { "no_npc_face_player", true })
+        row[7] = true
         break
       end
     end
@@ -606,7 +609,7 @@ M.POKEMON_TOWER_7F = {
       -- collected and the Route 16 SNORLAX sealed the map. The arrival
       -- mat itself is inert until stepped off (warpEntryCell), which is
       -- what makes the vanilla coordinates safe.
-      { "warp", "MR_FUJIS_HOUSE", 3, 7, "up" },           -- 8
+      { "warp", "MR_FUJIS_HOUSE", 3, 7, "up", true },     -- 8
     },
   },
 }
@@ -645,26 +648,14 @@ M.MR_FUJIS_HOUSE = {
 -- Snorlax (scripts/Route12.asm, Route16.asm)
 -- -------------------------------------------------------------------
 
--- each route has its own strings (text/Route12.asm, text/Route16.asm;
--- Route 16's sleeping line is the unnamed _Route16Text7).  Talking to
--- Snorlax before it's beaten always just shows the sleeping line --
--- Route12DefaultScript/Route16DefaultScript only special-case
--- EVENT_FIGHT_ROUTEnn_SNORLAX, which ItemUsePokeFlute sets when the
--- player USES the POKé FLUTE from the item-use menu while standing next
--- to Snorlax (see ItemEffects.lua's POKE_FLUTE branch); merely talking
--- to it with the flute in the bag does nothing.  From the woke-up text
--- on, snorlaxWake below mirrors Route12DefaultScript's fight branch /
--- Route12SnorlaxPostBattleScript (scripts/Route12.asm, Route16.asm):
--- HideObject runs BEFORE the battle (so Snorlax is gone even after a
--- blackout), then the battle, then the calmed-down/returned line only
--- when it was NOT caught (`ld a, [wBattleResult] / cp $2` skips it),
--- and EVENT_BEAT_ROUTEnn_SNORLAX on any non-blackout result.
+-- pokered/scripts/Route12.asm:24
+-- pokered/scripts/Route16.asm:24
 local function snorlaxWake(mapId, objName, beatFlag, wokeUpText, calmedText)
   return {
     { "show_text", wokeUpText },                    -- 1
     { "hide_object", mapId, objName },              -- 2 HideObject pre-battle
     { "static_battle", "SNORLAX", 30, beatFlag },   -- 3
-    { "check_battle_result", "win", "run" },        -- 4 not caught, not blackout
+    { "check_battle_result", "win" },
     { "jump_if_false", 7 },                         -- 5 end (skip calmed-down)
     { "show_text", calmedText },                    -- 6
   }
@@ -926,7 +917,7 @@ M.SILPH_CO_11F = {
       { "jump_if_true", 9 },                                                 -- 3
       { "show_text", "_SilphCo11FSilphPresidentText" },                      -- 4
       -- give-then-print like scripts/SilphCo11F.asm
-      { "give_item", "MASTER_BALL", 1, false },                              -- 5
+      { "give_item", "MASTER_BALL", 1, false, false, "Get_Key_Item" },       -- 5 scripts/SilphCo11F.asm:322
       { "show_text", "_SilphCo11FSilphPresidentReceivedMasterBallText" },    -- 6
       { "set_flag", "EVENT_GOT_MASTER_BALL" },                               -- 7
       { "jump", "end" },                                                     -- 8
@@ -1070,7 +1061,8 @@ M.VICTORY_ROAD_3F = {
 -- pokered forces the fight on map entry: Agatha's victory arms
 -- SCRIPT_CHAMPIONSROOM_PLAYER_ENTERS (scripts/AgathasRoom.asm), and
 -- ChampionsRoomPlayerEntersScript then runs RivalEntrance_RLEMovement
--- (up 1, right 1, up 3) before ChampionsRoomRivalReadyToBattleScript.
+-- (played back to front: up 3, right 1, up 1) before
+-- ChampionsRoomRivalReadyToBattleScript.
 -- The rival object has no trainer header / sight range, so without that
 -- entrance script the player can walk past (issue #99).  We arm on the
 -- run flag instead of Agatha's victory bit: same observable effect for
@@ -1099,6 +1091,7 @@ local championsRoomRivalScript = {
   -- playBattle("final") then no-ops on the same song, so the theme stays
   -- continuous into the fight
   { "play_music", "Music_FinalBattle" },                    -- 5
+  { "save_end_battle_text", "_RivalDefeatedText" },         -- scripts/ChampionsRoom.asm:65
   { "rival_battle", "OPP_RIVAL3", 1 },                      -- 6
   -- losing halts here; the numeric target this replaced pointed at the
   -- closing warp, which inducted a player who had just lost the fight (#704)
@@ -1107,8 +1100,7 @@ local championsRoomRivalScript = {
   { "set_flag", "EVENT_BEAT_CHAMPION_RIVAL" },              -- 9
   -- ChampionsRoomRivalDefeatedScript re-displays TEXT_CHAMPIONSROOM_RIVAL,
   -- whose text_asm takes the EVENT_BEAT_CHAMPION_RIVAL branch =
-  -- _ChampionsRoomRivalAfterBattleText (the in-battle _RivalDefeatedText
-  -- is the port's generic "<PLAYER> defeated BLUE!" engine line instead).
+  -- _ChampionsRoomRivalAfterBattleText.
   { "show_text", "_ChampionsRoomRivalAfterBattleText" },    -- 10
   -- ChampionsRoomOakArrivesScript: Music_Cities1AlternateTempo
   -- (Cities1, kept into HALL_OF_FAME like BIT_NO_MAP_MUSIC after
@@ -1162,10 +1154,11 @@ M.CHAMPIONS_ROOM = {
     end
     -- RivalEntrance_RLEMovement, then the battle/Oak script (queued
     -- separately so talk-script jump indices stay 1-based as written).
+    -- home/overworld.asm:1844
     ow:queueScript({
-      { "move_player", "up", 1 },
-      { "move_player", "right", 1 },
       { "move_player", "up", 3 },
+      { "move_player", "right", 1 },
+      { "move_player", "up", 1 },
     })
     ow:queueScript(championsRoomRivalScript, { npc = rival })
   end,

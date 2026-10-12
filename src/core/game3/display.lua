@@ -73,6 +73,22 @@ function Display.fit(winW, winH)
     if d and d > 1e-6 then dpiX, dpiY = d, d end
   end
 
+  local okPF, Playfield = pcall(require, "src.render.Playfield")
+  if okPF and Playfield and Playfield.cutout then
+    local vx, vy, vw, vh = Playfield.cutout(winW, winH)
+    if vx and vw and vh and vw > 0 and vh > 0 then
+      local k = math.max(1, math.floor(math.min(vw * dpiX / Display.W, vh * dpiY / Display.H) + 1e-9))
+      local scaleX, scaleY = k / dpiX, k / dpiY
+      local pw = Display.W * scaleX
+      local ph = Display.H * scaleY
+      local ox = vx + (vw - pw) * 0.5
+      local oy = vy + (vh - ph) * 0.5
+      ox = math.floor(ox * dpiX + 1e-9) / dpiX
+      oy = math.floor(oy * dpiY + 1e-9) / dpiY
+      return scaleX, ox, oy, pw, ph, scaleY
+    end
+  end
+
   local isPortrait = safeH > safeW
   local k, ox, oy, pw, ph, scaleX, scaleY
 
@@ -231,13 +247,19 @@ local function drawFieldPlane(game, vw, vh, Renderer)
   local transitioning = Transition and Transition.isActive and Transition.isActive()
   Oam.resetFrame()
   local prev = Oam.setLayer("world")
+  local function exchange(current, replacement)
+    return Renderer and Renderer:exchangeWorldCanvas(current, replacement)
+  end
   if Tilt.active() and not transitioning and Renderer and Renderer.beginUprightPass then
-    FieldView.draw(game, vw, vh, { skipActors = true })
+    FieldView.draw(game, vw, vh, { skipActors = true, exchangeCanvas = exchange })
     Renderer:beginUprightPass()
-    FieldView.draw(game, vw, vh, { actorsOnly = true, billboard = true })
+    FieldView.draw(game, vw, vh, {
+      actorsOnly = true, billboard = true,
+      endUnderActors = function(drawOverhead) Renderer:occludeUprightActors(drawOverhead) end,
+    })
     Renderer:endUprightPass()
   else
-    FieldView.draw(game, vw, vh)
+    FieldView.draw(game, vw, vh, { exchangeCanvas = exchange })
   end
   Oam.setLayer(prev)
   Oam.animateSprites("world")
@@ -252,12 +274,26 @@ local function drawFieldPlane(game, vw, vh, Renderer)
   end
 end
 
+local uiRenderer
+local uiPass
+function Display.setUiRenderer(fn)
+  uiRenderer = fn
+end
+local function drawUiPass()
+  if uiRenderer then return uiRenderer() end
+  if uiPass == nil then
+    local ok, pass = pcall(require, "src.ui.game3.ui_pass")
+    uiPass = (ok and type(pass) == "table") and pass or false
+  end
+  if uiPass and type(uiPass.drawUi) == "function" then uiPass.drawUi() end
+end
+Display.drawUiPass = drawUiPass
+
 local function drawUiPlane()
   local Oam = require("src.core.game3.oam")
-  local Gfx = require("src.core.game3.gfx")
   local Help = require("src.ui.game3.help_system")
   local prev = Oam.setLayer("ui")
-  Gfx.drawUi()
+  drawUiPass()
   if Help.isOpen() then Help.draw() end
   Oam.setLayer(prev)
   Oam.animateSprites("ui")
@@ -270,11 +306,20 @@ local function presentPlanes(game)
   local Battle = require("src.core.game3.battle")
   local Oam = require("src.core.game3.oam")
   local Bg = require("src.core.game3.bg")
-  local Gfx = require("src.core.game3.gfx")
 
   local battleActive = Battle.isActive()
+  local Stack = package.loaded["src.ui.game3.stack"]
+  local MG = package.loaded["src.core.game3.minigames.common"]
+  local mgRun = type(MG) == "table" and MG._run or nil
+  local minigameActive = not battleActive and type(mgRun) == "table" and mgRun.stage ~= "enter"
+    and Stack ~= nil and Stack.has ~= nil and Stack.has("minigame")
+  local uiOnly = minigameActive or (not battleActive and Stack ~= nil
+    and Stack.fullscreen ~= nil and Stack.fullscreen())
+  local Shop = package.loaded["src.ui.game3.shop_menu"]
+  local shopView = not battleActive and not uiOnly and Shop ~= nil
+    and Shop.isShopCamera ~= nil and Shop.isShopCamera()
   local Renderer = prepareRenderer(game, battleActive and "battle" or "field")
-  Renderer:beginFrame(not battleActive)
+  Renderer:beginFrame(not battleActive and not uiOnly and not shopView)
 
   if battleActive then
     love.graphics.push("all")
@@ -282,7 +327,7 @@ local function presentPlanes(game)
     love.graphics.clear(0.06, 0.12, 0.20, 1)
     Oam.resetFrame()
     Battle.draw(game, Display.W, Display.H)
-    Gfx.drawUi()
+    drawUiPass()
     if Help.isOpen() then Help.draw() end
     Oam.animateSprites()
     Oam.buildOamBuffer()
@@ -300,12 +345,25 @@ local function presentPlanes(game)
     return
   end
 
+  if uiOnly or shopView then
+    love.graphics.push("all")
+    love.graphics.origin()
+    -- pokeemerald/src/shop.c:781
+    if shopView then drawFieldPlane(game, Display.W, Display.H, nil) end
+    drawUiPlane()
+    love.graphics.pop()
+    Renderer:endFrame(nil, nil)
+    Display.mirrorFlatFrame(Renderer)
+    return
+  end
+
   Renderer:beginWorldPass()
   love.graphics.push("all")
   love.graphics.origin()
   local vw, vh = Renderer:worldViewSize()
   drawFieldPlane(game, vw, vh, Renderer)
   love.graphics.pop()
+  love.graphics.setCanvas(Renderer.worldCanvas)
   local Transition = package.loaded["src.core.game3.battle_transition"]
   if Transition and Transition.isActive and Transition.isActive() then
     Transition.drawWorld(Renderer.worldCanvas, vw, vh)
@@ -320,7 +378,12 @@ local function presentPlanes(game)
   Display.mirrorFlatFrame(Renderer)
 end
 
+-- The plane path presents straight from Renderer's canvases; the flat 240x160
+-- copy is only for test drivers that read Display._canvas back.
+Display.mirrorForTests = false
+
 function Display.mirrorFlatFrame(Renderer)
+  if not Display.mirrorForTests then return end
   local canvas = Display.ensureCanvas("main")
   if not canvas then return end
   local world = Renderer.worldCanvas
@@ -368,8 +431,7 @@ local function presentFlat(game, winW, winH)
       FieldView.draw(game, Display.W, Display.H)
     end
 
-    local Gfx = require("src.core.game3.gfx")
-    Gfx.drawUi()
+    drawUiPass()
 
     -- Animate after UI so party can attach bounce callbacks this frame.
     Oam.animateSprites()
@@ -400,6 +462,8 @@ end
 Display.presentFlat = presentFlat
 
 function Display.present(game, winW, winH)
+  local Stream = package.loaded["src.core.game3.asset_stream"]
+  if Stream then Stream.frameComplete() end
   if not Display.planesBroken then
     local ok, err = pcall(presentPlanes, game)
     if ok then return true end

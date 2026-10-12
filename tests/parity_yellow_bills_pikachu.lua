@@ -54,6 +54,15 @@ local yellowGame = {
     } },
   },
 }
+local yellowField = require("tests.yellow_field_cache")()
+if not yellowField then
+  print("[skip] parity Yellow Bill's Pikachu emotions: no Yellow cache with field.pikachu")
+  Sound.playPikaCry = realPikaCry
+  GameVersion.set("red")
+  S.finish()
+  return
+end
+yellowGame.data.field.pikachu = yellowField.pikachu
 local ow = {
   map = { id = "BILLS_HOUSE" }, npcs = { npc }, entities = { npc },
   player = { cellX = 3, cellY = 7 },
@@ -122,6 +131,10 @@ check(npc.goalX == 9 and npc.goalY == 9,
   "Pikachu stays parked in Bill's House during the scene")
 
 PikachuFollower.onBillExitedMachine(yellowGame, ow)
+check(ow.emote and ow.emote.bubble == false and ow.emote.frames == 12
+      and npc.facing ~= "left",
+  "SetSpriteFacingDirectionAndDelay + DELAY/LOOK_LEFT hold before the bubble")
+ow.emote.onDone()
 check(ow.emote and ow.emote.bubble == 2 and ow.emote.frames == 60
       and npc.facing == "left",
   "Pikachu reacts when Bill comes back out")

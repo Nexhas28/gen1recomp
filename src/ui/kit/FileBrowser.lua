@@ -3,6 +3,17 @@
 -- and select mod/skin archives (.zip) without requiring host desktop GUI pickers (zenity/kdialog).
 
 local Theme = require("src.ui.kit.Theme")
+local HostShell = require("src.core.HostShell")
+
+-- POSIX shell quoting for the ls/test commands below.  HostShell.quote is the
+-- shared helper, but the launcher may run where HostShell is a minimal shim
+-- (the NX gate), so fall back to the same escaping locally.
+local function shQuote(path)
+  if HostShell and type(HostShell.quote) == "function" then
+    return HostShell.quote(path)
+  end
+  return "'" .. tostring(path):gsub("'", "'\\''") .. "'"
+end
 local PAL = Theme.PAL
 local Kit = nil
 local function getKit()
@@ -13,7 +24,7 @@ end
 local FileBrowser = {
   active = false,
   title = "Select File",
-  mode = "rom", -- "rom", "save", "mod", "all"
+  mode = "rom", -- "rom", "save", "mod", "cart", "all"
   currentDir = "/",
   entries = {},
   selectedIdx = 1,
@@ -48,7 +59,7 @@ local function findSdCardRoot()
     "/userdata",
   }
   for _, path in ipairs(candidates) do
-    local ok, h = pcall(io.popen, string.format('test -d "%s" && echo "yes"', path))
+    local ok, h = pcall(io.popen, string.format("test -d %s && echo \"yes\"", shQuote(path)))
     if ok and h then
       local res = h:read("*a")
       h:close()
@@ -84,11 +95,16 @@ local function isMatchingFilter(name, isDir, mode)
   if not ext then return (mode == "all") end
   ext = ext:lower()
   if mode == "rom" then
-    return (ext == "gb" or ext == "gbc" or ext == "zip")
+    return ext == "gb" or ext == "gbc" or ext == "gba" or ext == "agb"
+      or ext == "bin" or ext == "zip" or ext == "7z"
   elseif mode == "save" then
-    return (ext == "sav")
+    return (ext == "sav" or ext == "srm" or ext == "lua")
+  elseif mode == "box" then
+    return (ext == "gci" or ext == "sav")
   elseif mode == "mod" then
     return (ext == "zip")
+  elseif mode == "cart" then
+    return (ext == "g1rcart")
   end
   return true
 end
@@ -97,7 +113,7 @@ local function scanDirectory(dir, mode)
   dir = normalizePath(dir)
   local entries = {}
 
-  local ok, handle = pcall(io.popen, string.format('ls -1ap "%s" 2>/dev/null', dir:gsub('"', '\\"')))
+  local ok, handle = pcall(io.popen, string.format("ls -1ap %s 2>/dev/null", shQuote(dir)))
   if ok and handle then
     local output = handle:read("*a")
     handle:close()
@@ -153,6 +169,7 @@ function FileBrowser.open(opts)
   FileBrowser.mode = opts.mode or "rom"
   FileBrowser.onSelect = opts.onSelect
   FileBrowser.onCancel = opts.onCancel
+  FileBrowser.hint = opts.hint
   FileBrowser.selectedIdx = 1
   FileBrowser.page = 1
 
@@ -172,6 +189,7 @@ function FileBrowser.close(path)
   FileBrowser.active = false
   FileBrowser.onSelect = nil
   FileBrowser.onCancel = nil
+  FileBrowser.hint = nil
   if path and onSelect then
     onSelect(path)
   elseif not path and onCancel then
@@ -307,6 +325,11 @@ function FileBrowser.draw(m)
   Kit.text("small", pathStr, px + pad + math.floor(6 * s), cy + math.floor(4 * s), PAL.heading)
 
   cy = cy + pathBarH + math.floor(8 * s)
+
+  if FileBrowser.hint then
+    cy = cy + Kit.textWrapped("micro", FileBrowser.hint, px + pad, cy, modalW - 2 * pad,
+      PAL.red, 2) + math.floor(6 * s)
+  end
 
   -- File / Directory List
   local total = #FileBrowser.entries

@@ -4,14 +4,15 @@ local Anim = require("src.core.game3.battle.anim")
 local State = require("src.core.game3.battle.state")
 local Audio = require("src.core.game3.audio")
 local SE = require("src.core.game3.se_ids")
-local ItemsData = require("src.core.game3.items_data")
 local Pokemon = require("src.core.game3.pokemon")
 local Catching = require("src.core.game3.battle.catching")
 local BallOpen = require("src.core.game3.battle.ball_open")
-local Strings = require("src.core.Strings")
+local BattleText = require("src.core.game3.battle.battle_text")
+local Adapter = require("src.core.game3.battle.adapter")
 
-local MUS_CAUGHT_INTRO = 319
-local MUS_CAUGHT = 322
+local function caught_song(key)
+  return Audio.resolveSong(require("src.core.game3.battle.profile").get(nil).sounds[key])
+end
 
 local CatchSeq = {}
 
@@ -75,6 +76,31 @@ local function wait_busy()
   CatchSeq._waiting = true
 end
 
+local function catch_text(id)
+  local st = CatchSeq._st
+  local session = CatchSeq._session
+  return BattleText.get(id, Adapter.fill(st, { opponentMon1 = st and st.enemy, lastItem = CatchSeq._ballId,
+    playerName = (session and session.name) or (st and st.playerName) }))
+end
+
+-- pokefirered/src/battle_message.c:1151
+local BALL_ESCAPE = {
+  [0] = "STRINGID_PKMNBROKEFREE", [1] = "STRINGID_ITAPPEAREDCAUGHT",
+  [2] = "STRINGID_AARGHALMOSTHADIT", [3] = "STRINGID_SHOOTSOCLOSE",
+}
+
+-- pokefirered/data/battle_scripts_2.s:77
+local function wally(st)
+  return st ~= nil and st.kinds ~= nil and st.kinds.tutorial == "wally"
+end
+
+local function gotcha_id(st)
+  if st and (st.oldManTutorial or st.pokedude) then return "STRINGID_GOTCHAPKMNCAUGHT2" end
+  -- pokeemerald/data/battle_scripts_2.s:90
+  if wally(st) then return "STRINGID_GOTCHAPKMNCAUGHTWALLY" end
+  return require("src.core.game3.battle.profile").of(st).strings.caught
+end
+
 --- Begin a catch animation sequence.
 -- opts: { pushMsg, headless, session }
 function CatchSeq.begin(st, itemId, caught, shakes, opts)
@@ -99,28 +125,41 @@ function CatchSeq.begin(st, itemId, caught, shakes, opts)
     end
   end
 
-  local playerName = (session and (session.name or session.playerName)) or "RED"
-  local ballName = ItemsData.displayName(itemId) or "POKé BALL"
-  local emon = st and st.enemy and st.enemy.mon
-  local ename = (emon and ((emon.nickname ~= "" and emon.nickname) or emon.name))
-    or Pokemon.name(st and st.enemy and st.enemy.species) or "POKéMON"
+  local ename = State.displayName(st.enemy)
+
+  -- pokefirered/data/battle_scripts_2.s:54
+  local throwMsg
+  if st.oldManTutorial then
+    throwMsg = catch_text("STRINGID_OLDMANUSEDITEM")
+  elseif wally(st) then
+    -- pokeemerald/data/battle_scripts_2.s:56
+    throwMsg = catch_text("STRINGID_WALLYUSEDITEM")
+  elseif st.pokedude then
+    throwMsg = catch_text("STRINGID_POKEDUDEUSED")
+  else
+    throwMsg = catch_text("STRINGID_PLAYERUSEDITEM")
+  end
 
   -- pokefirered/data/battle_scripts_2.s:124
-  local DODGE = Strings("It dodged the thrown BALL!\nThis POKéMON can't be caught!")
+  local DODGE = catch_text("STRINGID_ITDODGEDBALL")
   if opts.ghostDodge then CatchSeq._result = "fail_catch" end
   if CatchSeq._headless then
     if CatchSeq._pushMsg then
-      CatchSeq._pushMsg(Strings("%s used\nthe %s!", playerName, ballName))
+      CatchSeq._pushMsg(throwMsg)
     end
     if opts.ghostDodge then
       if CatchSeq._pushMsg then CatchSeq._pushMsg(DODGE) end
     elseif caught then
-      local res = Catching.storeCaught(session, st and st.enemy, itemId)
+      local res = nil
+      -- pokefirered/data/battle_scripts_2.s:99 BattleScript_OldMan_Pokedude_CaughtMessage
+      if not (st and (st.oldManTutorial or st.pokedude or wally(st))) then
+        res = Catching.storeCaught(session, st and st.enemy, itemId)
+      end
       CatchSeq._catchResult = res
       if CatchSeq._pushMsg then
-        CatchSeq._pushMsg(Strings("Gotcha!\n%s was caught!", ename))
+        CatchSeq._pushMsg(catch_text(gotcha_id(st)))
         if res and res.firstTimeCaught then
-          CatchSeq._pushMsg(Strings("%s's data was\nadded to the POKéDEX.", ename))
+          CatchSeq._pushMsg(catch_text("STRINGID_PKMNDATAADDEDTODEX"))
         end
         if res and res.location == "pc" then
           -- pokefirered/src/battle_script_commands.c:9617
@@ -130,15 +169,7 @@ function CatchSeq.begin(st, itemId, caught, shakes, opts)
       end
     else
       if CatchSeq._pushMsg then
-        if CatchSeq._shakes == 0 then
-          CatchSeq._pushMsg(Strings("Oh no! The POKéMON broke free!"))
-        elseif CatchSeq._shakes == 1 then
-          CatchSeq._pushMsg(Strings("Aww! It appeared to be caught!"))
-        elseif CatchSeq._shakes == 2 then
-          CatchSeq._pushMsg(Strings("Aargh! Almost had it!"))
-        else
-          CatchSeq._pushMsg(Strings("Shoot! It was so close too!"))
-        end
+        CatchSeq._pushMsg(catch_text(BALL_ESCAPE[math.min(3, CatchSeq._shakes)]))
       end
     end
     finish()
@@ -150,7 +181,7 @@ function CatchSeq.begin(st, itemId, caught, shakes, opts)
     steps[#steps + 1] = { kind = kind, data = data or {} }
   end
 
-  add("msg", { text = Strings("%s used\nthe %s!", playerName, ballName), wait = opts.ghostDodge and 0 or nil })
+  add("msg", { text = throwMsg, wait = opts.ghostDodge and 0 or nil })
 
   -- pokefirered/src/battle_script_commands.c:9590
   add("throw", {
@@ -163,12 +194,10 @@ function CatchSeq.begin(st, itemId, caught, shakes, opts)
   elseif caught then
     add("capture_success", {
       ballId = itemId,
-      ename = ename,
     })
   else
     add("breakout", {
       shakes = math.min(3, CatchSeq._shakes),
-      ename = ename,
     })
   end
 
@@ -561,12 +590,14 @@ function CB.beginBreakOut(b)
   b.cb = CB.runBreakOut
   BallOpen.start(b.target or 1, b.x, b.y, b.itemId, true)
   play_se(SE.SE_BALL_OPEN)
-  b.mon.visible = true
-  b.monAff = { paused = false }
-  affine_start(b.monAff, 1)
-  affine_step(b.monAff, MON_AFFINE)
-  b.mon.scale = b.monAff.scale / 256
-  b.monData1 = 0x1000
+  if b.mon then
+    b.mon.visible = true
+    b.monAff = { paused = false }
+    affine_start(b.monAff, 1)
+    affine_step(b.monAff, MON_AFFINE)
+    b.mon.scale = b.monAff.scale / 256
+    b.monData1 = 0x1000
+  end
 end
 
 -- pokefirered/src/battle_anim_special.c:1327
@@ -620,7 +651,7 @@ function CB.doClick(b)
   elseif d[4] == 95 then
     pcall(function()
       Audio.stopAll()
-      Audio.playSe(MUS_CAUGHT_INTRO)
+      Audio.playSe(caught_song("caughtIntro"))
     end)
   elseif d[4] == 315 then
     b.mon.visible = false
@@ -706,6 +737,8 @@ local function start_ball(d)
   end
   local stage = Anim.stage().ball
   stage.visible, stage.darken, stage.flash, stage.side = false, 0, 0, "enemy"
+  -- pokefirered/src/battle_anim_special.c:668
+  stage.ballId = BallOpen.ballIdForItem(d.itemId)
   local b = {
     x = 32, y = 80, x2 = 0, y2 = 0,
     data = { [0] = 34, base.x, base.y - 16, 0, 0, 0, 0, 0 },
@@ -759,19 +792,23 @@ local function run_step(step)
   end
 
   if kind == "capture_success" then
-    local res = Catching.storeCaught(CatchSeq._session, CatchSeq._st and CatchSeq._st.enemy, d.ballId)
+    local res = nil
+    -- pokefirered/data/battle_scripts_2.s:99 BattleScript_OldMan_Pokedude_CaughtMessage
+    if not (CatchSeq._st and (CatchSeq._st.oldManTutorial or CatchSeq._st.pokedude or wally(CatchSeq._st))) then
+      res = Catching.storeCaught(CatchSeq._session, CatchSeq._st and CatchSeq._st.enemy, d.ballId,
+        { deferPc = true })
+    end
     CatchSeq._catchResult = res
-    local ename = d.ename or "POKéMON"
-    -- pokefirered/src/battle_message.c:475
+    -- pokefirered/data/battle_scripts_2.s:77
     if CatchSeq._pushMsg then
-      CatchSeq._pushMsg(Strings("Gotcha!\n%s was caught!", ename))
+      CatchSeq._pushMsg(catch_text(gotcha_id(CatchSeq._st)))
     end
     pcall(function()
-      Audio.waitSe(MUS_CAUGHT_INTRO, function() Audio.playSong(MUS_CAUGHT) end)
+      Audio.waitSe(caught_song("caughtIntro"), function() Audio.playSong(caught_song("caught")) end)
     end)
     if CatchSeq._pushMsg then
       if res and res.firstTimeCaught then
-        CatchSeq._pushMsg(Strings("%s's data was\nadded to the POKéDEX.", ename))
+        CatchSeq._pushMsg(catch_text("STRINGID_PKMNDATAADDEDTODEX"))
       end
     end
     advance()
@@ -780,15 +817,8 @@ local function run_step(step)
 
   if kind == "breakout" then
     if CatchSeq._pushMsg then
-      if d.shakes == 0 then
-        CatchSeq._pushMsg(Strings("Oh no! The POKéMON broke free!"))
-      elseif d.shakes == 1 then
-        CatchSeq._pushMsg(Strings("Aww! It appeared to be caught!"))
-      elseif d.shakes == 2 then
-        CatchSeq._pushMsg(Strings("Aargh! Almost had it!"))
-      else
-        CatchSeq._pushMsg(Strings("Shoot! It was so close too!"))
-      end
+      -- pokefirered/data/battle_scripts_2.s:106
+      CatchSeq._pushMsg(catch_text(BALL_ESCAPE[d.shakes]))
     end
     advance()
     return

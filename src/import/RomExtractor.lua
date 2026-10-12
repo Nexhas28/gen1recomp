@@ -1,6 +1,7 @@
 local bit = require("bit")
 local ImageWriter = require("src.import.ImageWriter")
 local LuaWriter = require("src.import.LuaWriter")
+local PikachuPicExtractor = require("src.import.PikachuPicExtractor")
 local Rom = require("src.import.Rom")
 
 local RomExtractor = {}
@@ -824,12 +825,21 @@ function RomExtractor:extractBattleAnimations()
     end
   end
 
+  -- engine/battle/animations.asm:2418
+  local deltaSymbol = self:symbol("FallingObjects_DeltaXs")
+  local fallingDeltaXs = {}
+  for index = 0, 63 do
+    fallingDeltaXs[index] =
+      self.rom:byte(deltaSymbol.bank, deltaSymbol.address + index)
+  end
+
   local out = {
     tilesheets = tilesheets,
     baseCoords = baseCoords,
     frameBlocks = frameBlocks,
     subanims = subanims,
     moveAnims = moveAnims,
+    fallingDeltaXs = fallingDeltaXs,
   }
   self:write("battle_anims", out)
   return out
@@ -1513,6 +1523,13 @@ function RomExtractor:extractText()
       self:symbol(label), metadata.dynamic[label] or {})
     self:tick("Dialogue", index, #metadata.labels)
   end
+  -- pokered engine/battle/core.asm:2051, pokeyellow engine/battle/core.asm:2135-2138
+  for _, label in ipairs({ "DisplayBattleMenu.oldManName", "DisplayBattleMenu.profOakName" }) do
+    if label == "DisplayBattleMenu.oldManName" or self.symbols[label] then
+      local s = self:symbol(label)
+      texts[label] = self.rom:readString(s.bank, s.address, self.manifest.charmap)
+    end
+  end
   local trainerHeaders = {}
   for mapLabel, headers in pairs(metadata.trainerHeaders) do
     local converted = {}
@@ -2122,33 +2139,9 @@ function RomExtractor:extractField()
   end
   self:extractSurfingPikachuTitleArt()
 
-  -- Yellow-only: TalkToPikachu's framed portrait, one 5x5 base frame per
-  -- PikaPicAnimScript -- each script's FIRST pikapic_loadgfx in
-  -- data/pikachu/pikachu_pic_animation.asm, the pic PikaPicAnimBGFrames_4
-  -- (PikaAnimTilemap_1, column order) paints.  Scripts 18/22/23/24 have no
-  -- compressed base and take PikaPicAnimBGFrames_5 -> PikaAnimTilemap_9,
-  -- which is ROW order over a raw 25-tile sheet, hence no columns flag.
-  -- Script 26 shares script 11's base.  The pikaframe overlays each script
-  -- draws ON TOP of the base are a second full pose out of the same blob and
-  -- stay unripped: PikachuFollower.picLift stands in for their motion
-  -- (#561, still on #407's stand-in).
-  local PIKAPIC_BASE = {
-    "Pic_e4000", "Pic_e411c", "Pic_e4272", "Pic_e4383", "Pic_e458b",
-    "Pic_e467b", "Pic_e476e", "Pic_e49d1", "Pic_e4b39", "Pic_e4c3e",
-    "Pic_e5000", "Pic_e523f", "Pic_e548e", "Pic_e56d1", "Pic_e5924",
-    "Pic_e5b7d", "Pic_e5ddd", "GFX_e6020", "Pic_e6340", "Pic_e6587",
-    "Pic_e67d6", "GFX_e6e6f", "GFX_e718f", "GFX_e74af", "Pic_e77cf",
-    "Pic_e5000", "Pic_f0abf", "Pic_f0cf4",
-  }
-  if self.symbols[PIKAPIC_BASE[1]] then
-    for script, label in ipairs(PIKAPIC_BASE) do
-      local path = "pikachu/pikapic_" .. script .. ".png"
-      if label:sub(1, 4) == "GFX_" then
-        self:raw2bpp(label, 40, 40, path, { matte = true })
-      else
-        self:writeCompressedPic(label, path)
-      end
-    end
+  local pikachu
+  if self.symbols.PikaPicAnimPointers then
+    pikachu = PikachuPicExtractor.extract(self)
   end
 
   self:raw1bpp("LedgeHoppingShadow", 8, 8,
@@ -2251,6 +2244,7 @@ function RomExtractor:extractField()
   for index, values in pairs(adjacency) do converted[tonumber(index)] = values end
   data.hiddenExtras.trashCans.adjacent = converted
   data.tradeArt = tradeArt
+  data.pikachu = pikachu
   data.source = "canonical Pokemon Red ROM + bundled port metadata"
   self:write("field", data)
   self:tick("Interface artwork", total, total)

@@ -29,6 +29,10 @@
 
 local CacheFs = {}
 local Platform = require("src.core.Platform")
+local CacheBlob = require("src.import.CacheBlob")
+local SaveData = setmetatable({}, {
+  __index = function(_, k) return require("src.core.SaveData")[k] end,
+})
 
 local SEP = package.config:sub(1, 1)
 
@@ -46,6 +50,10 @@ local function withPrefix(rel)
   return p .. rel
 end
 
+local function unsafe_rel(rel)
+  return type(rel) ~= "string" or rel:find("..", 1, true) ~= nil
+end
+
 -- lazily-resolved windowless mkdir: function(absolutePath) or false when
 -- FFI is unavailable (the cache then stays on the save directory)
 local mkdirFn = nil
@@ -54,26 +62,9 @@ local function resolveMkdir()
   if mkdirFn ~= nil then return mkdirFn end
   mkdirFn = false
   if Platform.isUWP() then return mkdirFn end
-  local ok, ffi = pcall(require, "ffi")
+  local ok = pcall(require, "ffi")
   if not ok then return mkdirFn end
-  if ffi.os == "Windows" then
-    -- kernel32 is reliably resolvable through ffi.C on Windows (the engine
-    -- already binds it in DiscordPresence); CreateDirectoryA returns
-    -- nonzero on success and 0 when the directory already exists -- both
-    -- fine, the result is ignored.
-    pcall(ffi.cdef,
-      "int CreateDirectoryA(const char *lpPathName, void *lpSecurityAttributes);")
-    local resolved = pcall(function() return ffi.C.CreateDirectoryA end)
-    if resolved then
-      mkdirFn = function(path) pcall(ffi.C.CreateDirectoryA, path, nil) end
-    end
-  else
-    pcall(ffi.cdef, "int mkdir(const char *pathname, unsigned int mode);")
-    local resolved = pcall(function() return ffi.C.mkdir end)
-    if resolved then
-      mkdirFn = function(path) pcall(ffi.C.mkdir, path, 493) end -- 0755
-    end
-  end
+  mkdirFn = function(path) return SaveData.mkdirNative(path) end
   return mkdirFn
 end
 
@@ -223,14 +214,17 @@ end
 -- desktop portable install (SaveData) and a working windowless mkdir.
 local portableRoot = nil
 local portableResolved = false
+local portableFailure = nil
 local function resolvePortableRoot()
   if portableResolved then return portableRoot end
   portableResolved = true
   portableRoot = nil
-  if not resolveMkdir() then return nil end
+  portableFailure = nil
   local base = require("src.core.SaveData").portableBaseDir()
   if not base then return nil end
-  if type(love.filesystem) == "table" and love.filesystem.getSource
+  if not resolveMkdir() then
+    portableFailure = "portable mode is on (" .. base .. ") but no folder-creation call is available"
+  elseif type(love.filesystem) == "table" and love.filesystem.getSource
       and base == love.filesystem.getSource() then
     -- source run: the folder is already the physfs source
     portableRoot = base
@@ -238,6 +232,11 @@ local function resolvePortableRoot()
     -- fused build: base is next to the executable; mount it so io.* writes
     -- there are visible to love.filesystem/require/newImage
     portableRoot = base
+  else
+    portableFailure = "portable mode is on (" .. base .. ") but the folder could not be mounted"
+  end
+  if portableFailure then
+    require("src.core.Logger").warn("%s", portableFailure)
   end
   return portableRoot
 end
@@ -246,8 +245,25 @@ function CacheFs.root()
   return resolvePortableRoot()
 end
 
+function CacheFs.portableError()
+  resolvePortableRoot()
+  return portableFailure
+end
+
+function CacheFs._resetPortableForTests()
+  portableRoot = nil
+  portableResolved = false
+  portableFailure = nil
+end
+
 local function realPath(root, rel)
   return root .. SEP .. rel:gsub("/", SEP)
+end
+
+local knownDirs = {}
+
+local function forgetDirs()
+  for k in pairs(knownDirs) do knownDirs[k] = nil end
 end
 
 -- create every parent directory of `rel` under `root` (best effort; an
@@ -255,35 +271,75 @@ end
 -- subsequent io.open write fails)
 local function ensureParents(root, rel)
   local mkdir = resolveMkdir()
-  if not mkdir then return end
   local parts = {}
   for part in rel:gmatch("[^/]+") do parts[#parts + 1] = part end
   local cur = root
+  local curRel = ""
   for i = 1, #parts - 1 do
     cur = cur .. SEP .. parts[i]
-    mkdir(cur)
+    curRel = (curRel == "" and parts[i]) or (curRel .. "/" .. parts[i])
+    if not knownDirs[cur] then
+      if mkdir then
+        mkdir(cur)
+      elseif love and love.filesystem and love.filesystem.createDirectory then
+        love.filesystem.createDirectory(curRel)
+      end
+      knownDirs[cur] = true
+    end
   end
+end
+
+local function resolveWriteRoot()
+  local root = CacheFs.root()
+  if root then return root end
+  if portableFailure then return nil, portableFailure end
+  if Platform.isNX and Platform.isNX() then return nil end
+  if Platform.isUWP and Platform.isUWP() then return nil end
+  if love and (love._version or love.getVersion) and love.filesystem and love.filesystem.getSaveDirectory then
+    local saveDir = love.filesystem.getSaveDirectory()
+    if saveDir and type(saveDir) == "string" and saveDir ~= "" and not unsafe_rel(saveDir) then
+      return saveDir
+    end
+  end
+  return nil
+end
+
+local function ensureDirectory(parent)
+  if not parent or parent == "" or knownDirs[parent] then return true end
+  if not (love and love.filesystem and love.filesystem.createDirectory) then return true end
+  if love.filesystem.createDirectory(parent) then
+    knownDirs[parent] = true
+    return true
+  end
+  local info = love.filesystem.getInfo and love.filesystem.getInfo(parent)
+  if info and info.type == "directory" then
+    knownDirs[parent] = true
+    return true
+  end
+  local reason = info and ("a " .. info.type .. " already exists there") or "unknown reason"
+  return false, "could not create " .. parent .. ": " .. reason
 end
 
 -- write cache-relative `rel` (forward-slash path) with the given bytes;
 -- returns ok, err like love.filesystem.write
 function CacheFs.write(rel, data)
   rel = withPrefix(rel)
-  local root = CacheFs.root()
+  if unsafe_rel(rel) then return false, "unsafe cache path" end
+  data = CacheBlob.encode(rel, data)
+  local root, rootErr = resolveWriteRoot()
+  if not root and rootErr then return false, rootErr end
   if root then
     ensureParents(root, rel)
-    local f, err = io.open(realPath(root, rel), "wb")
+    local f, err = SaveData.openNative(realPath(root, rel), "wb")
     if not f then return false, err end
     f:write(data)
     f:close()
     return true
   end
   local parent = rel:match("^(.*)/[^/]+$")
-  if parent and not love.filesystem.createDirectory(parent) then
-    local info = love.filesystem.getInfo(parent)
-    local reason = info and ("a " .. info.type .. " already exists there")
-      or "unknown reason"
-    return false, "could not create " .. parent .. ": " .. reason
+  if parent then
+    local okDir, dirErr = ensureDirectory(parent)
+    if not okDir then return false, dirErr end
   end
   return love.filesystem.write(rel, data)
 end
@@ -294,10 +350,12 @@ end
 -- in one Lua string.
 function CacheFs.openWrite(rel)
   rel = withPrefix(rel)
-  local root = CacheFs.root()
+  if unsafe_rel(rel) then return nil, "unsafe cache path" end
+  local root, rootErr = resolveWriteRoot()
+  if not root and rootErr then return nil, rootErr end
   if root then
     ensureParents(root, rel)
-    local f, err = io.open(realPath(root, rel), "wb")
+    local f, err = SaveData.openNative(realPath(root, rel), "wb")
     if not f then return nil, err end
     return {
       write = function(_, data)
@@ -312,11 +370,9 @@ function CacheFs.openWrite(rel)
     return nil, "streaming cache writes are unavailable"
   end
   local parent = rel:match("^(.*)/[^/]+$")
-  if parent and not love.filesystem.createDirectory(parent) then
-    local info = love.filesystem.getInfo(parent)
-    local reason = info and ("a " .. info.type .. " already exists there")
-      or "unknown reason"
-    return nil, "could not create " .. parent .. ": " .. reason
+  if parent then
+    local okDir, dirErr = ensureDirectory(parent)
+    if not okDir then return nil, dirErr end
   end
   local file, makeErr = love.filesystem.newFile(rel)
   if not file then return nil, makeErr or "could not create cache file" end
@@ -328,18 +384,19 @@ end
 -- Read an exact version-qualified path without consulting CacheFs.prefix.
 -- Readiness checks use this to inspect another version without global state.
 function CacheFs.readAt(rel)
+  if unsafe_rel(rel) then return nil end
   local root = CacheFs.root()
   if root then
-    local f = io.open(realPath(root, rel), "rb")
+    local f = SaveData.openNative(realPath(root, rel), "rb")
     if not f then return nil end
     local data = f:read("*a")
     f:close()
-    return data
+    return CacheBlob.decode(rel, data)
   end
   -- headless (plain luajit, e.g. the modkit validate/pack driver): there is
   -- no save directory to read from, so a cache miss is nil, not a crash
   if not (love and love.filesystem and love.filesystem.read) then return nil end
-  return love.filesystem.read(rel)
+  return (CacheBlob.readFs(rel))
 end
 
 -- read cache-relative `rel`; returns the bytes or nil
@@ -393,14 +450,18 @@ end
 
 -- does cache-relative `rel` exist as a file?
 function CacheFs.existsAt(rel)
+  if unsafe_rel(rel) then return false end
   local root = CacheFs.root()
   if root then
-    local f = io.open(realPath(root, rel), "rb")
+    local f = SaveData.openNative(realPath(root, rel), "rb")
     if not f then return false end
     f:close()
     return true
   end
-  return love.filesystem.getInfo(rel, "file") ~= nil
+  if love and love.filesystem and love.filesystem.getInfo then
+    return love.filesystem.getInfo(rel, "file") ~= nil
+  end
+  return false
 end
 
 
@@ -410,13 +471,17 @@ end
 
 -- remove a single cache-relative file
 function CacheFs.remove(rel)
+  forgetDirs()
   rel = withPrefix(rel)
+  if unsafe_rel(rel) then return false end
   local root = CacheFs.root()
   if root then
-    os.remove(realPath(root, rel))
+    SaveData.removeNative(realPath(root, rel))
     return
   end
-  love.filesystem.remove(rel)
+  if love and love.filesystem and love.filesystem.remove then
+    love.filesystem.remove(rel)
+  end
 end
 
 -- Remove a single cache-relative directory once its files are gone.  Needed
@@ -426,14 +491,18 @@ end
 -- (issue #74: os.execute would flash a console window per call).  Used by the
 -- mod installer so an uninstall leaves nothing behind (#330).
 function CacheFs.removeDir(rel)
+  forgetDirs()
   rel = withPrefix(rel)
+  if unsafe_rel(rel) then return false end
   local root = CacheFs.root()
   if root then
     local rmdir = resolveRmdir()
     if rmdir then rmdir(realPath(root, rel)) end
     return
   end
-  love.filesystem.remove(rel)
+  if love and love.filesystem and love.filesystem.remove then
+    love.filesystem.remove(rel)
+  end
 end
 
 -- Remove the game-folder copy of a cache subtree before a fresh import, so a
@@ -443,7 +512,9 @@ end
 -- love.filesystem (the game folder is mounted) and the real files deleted
 -- with os.remove; empty directories are harmless and left in place.
 function CacheFs.removeTree(rel)
+  forgetDirs()
   rel = withPrefix(rel)
+  if unsafe_rel(rel) then return end
   local root = CacheFs.root()
   if not root then return end
   local function walk(r)
@@ -454,7 +525,7 @@ function CacheFs.removeTree(rel)
         walk(r .. "/" .. child)
       end
     else
-      os.remove(realPath(root, r))
+      SaveData.removeNative(realPath(root, r))
     end
   end
   walk(rel)
@@ -541,7 +612,7 @@ function CacheFs.migrateLegacyRedCache()
   local root = CacheFs.root()
   if root and not (fs.getSource and root == fs.getSource()) then
     local function rootHas(rel)
-      local f = io.open(realPath(root, rel), "rb")
+      local f = SaveData.openNative(realPath(root, rel), "rb")
       if f then f:close() return true end
       return false
     end
@@ -611,7 +682,7 @@ function CacheFs.mountVersion(version)
   -- Portable / desktop fused: absolute PHYSFS_mount of the version folder.
   if sub ~= "" then
     local base = CacheFs.root()
-    if not base and love.filesystem.getSaveDirectory then
+    if not base and not portableFailure and love.filesystem.getSaveDirectory then
       base = love.filesystem.getSaveDirectory()
     end
     if base then

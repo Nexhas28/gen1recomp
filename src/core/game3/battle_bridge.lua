@@ -25,6 +25,10 @@ local FLAG_SYS_SAFARI_MODE = 0x800
 
 -- pokefirered/src/battle_setup.c:239
 local function safari_mode_active(session)
+  if require("src.core.game3.battle.profile").get(session).safari then
+    -- pokeemerald/src/battle_setup.c:391
+    return require("src.core.game3.safari").isActive(session)
+  end
   if session and session.safari and session.safari.active then return true end
   local okS, Space = pcall(require, "src.core.game3.scripting.space")
   if not okS or not Space or not Space.store then return false end
@@ -91,9 +95,12 @@ function BattleBridge.calcMoneyLossFrlg(session, hostSave)
   local maxLv = 1
   local party = session and session.party
   if type(party) == "table" then
+    -- pokefirered/src/pokemon.c:6085
     for _, mon in ipairs(party) do
-      local lv = tonumber(mon and mon.level) or 1
-      if lv > maxLv then maxLv = lv end
+      if mon and not Pokemon.isEgg(mon) then
+        local lv = tonumber(mon.level) or 1
+        if lv > maxLv then maxLv = lv end
+      end
     end
   end
   local badges = count_badges(session, hostSave)
@@ -111,6 +118,19 @@ function BattleBridge.applyFrlgMoneyLoss(session, hostSave)
   return loss, money
 end
 
+-- pokeemerald/src/overworld.c:361
+function BattleBridge.applyWhiteoutMoneyLoss(session, hostSave)
+  local BattleProfile = require("src.core.game3.battle.profile")
+  if BattleProfile.get(session).rules.whiteout ~= "half" then
+    return BattleBridge.applyFrlgMoneyLoss(session, hostSave)
+  end
+  local money = tonumber(session and session.money) or tonumber(hostSave and hostSave.money) or 0
+  local kept = math.floor(money / 2)
+  if session then session.money = kept end
+  if hostSave then hostSave.money = kept end
+  return money - kept, kept
+end
+
 function BattleBridge.installWhiteoutIntercept(mod, game)
   if BattleBridge._interceptInstalled then return end
   BattleBridge._interceptInstalled = true
@@ -119,15 +139,15 @@ function BattleBridge.installWhiteoutIntercept(mod, game)
     local Runtime = require("src.core.game3.runtime")
     if not Runtime.isActive() then return false end
     local session = Runtime.getSession()
-    BattleBridge.applyFrlgMoneyLoss(session, game and game.save)
+    BattleBridge.applyWhiteoutMoneyLoss(session, game and game.save)
     local Field = require("src.core.game3.field")
     Field.respawnAtHeal()
     return true
   end
   BattleBridge._whiteoutHook = onWhiteout
 
-  local ok, World = pcall(require, "src.world.gen2.World")
-  if ok and World then
+  local World = package.loaded["src.world.gen2.World"]
+  if type(World) == "table" then
     if type(World.whiteOut) == "function" and not World._game3WhiteOut then
       local prev = World.whiteOut
       World.whiteOut = function(self, ...)
@@ -174,7 +194,7 @@ local function battle_payload(Battle, opts, foe, isDouble)
   local sp = enemy and tonumber(enemy.species or enemy.speciesId)
   local tid = opts.trainerId or (foe and foe.trainerId)
   return {
-    battle = st, kind = opts.wild and "wild" or "trainer",
+    battle = st, kind = (opts.link and "link") or (opts.wild and "wild") or "trainer",
     trainerId = (not opts.wild) and tid or nil,
     trainerClass = (not opts.wild) and foe and foe.trainerClass or nil,
     species = G3.speciesName(sp), speciesId = sp,
@@ -198,6 +218,7 @@ local function writeback(session, battleParty, remap, result, save, opts)
         exp = src.exp,
         pp = src.pp,
         maxPp = src.maxPp,
+        ppBonusesPacked = src.ppBonusesPacked,
         moves = src.moves,
         species = src.species or src.speciesId,
         speciesId = src.speciesId or src.species,
@@ -211,14 +232,33 @@ local function writeback(session, battleParty, remap, result, save, opts)
         speed = src.speed or src.spe,
         spAtk = src.spAtk or src.spa,
         spDef = src.spDef or src.spd,
+        atk = src.attack or src.atk,
+        def = src.defense or src.def,
+        spe = src.speed or src.spe,
+        spa = src.spAtk or src.spa,
+        spd = src.spDef or src.spd,
+        ability = src.ability,
+        abilityId = src.abilityId,
         _allowMoveRewrite = true,
       })
+      if src.status == nil or src.status == 0 then
+        mon.status, mon.sleep = nil, src.sleep
+        if mon.statusNum then mon.statusNum = 0 end
+      end
+      -- pokefirered/src/battle_controller_player.c:1909
+      local held = src.item or src.heldItem
+      if held == 0 or held == "" then held = nil end
+      mon.item, mon.heldItem = held, held
     end
   end
   local lost = (result == "lose" or result == "whiteout" or result == "blackout")
   if not lost then return end
   -- pokefirered/src/cable_club.c:780 LoadPlayerParty
   if opts.link then return end
+  -- pokeemerald/src/battle_setup.c:950
+  if opts.firstBattleKind == "birch" then return end
+  -- pokeemerald/src/battle_tower.c:1994
+  if opts.scriptedLoss then return end
 
   -- pret CB2_EndTrainerBattle EARLY_RIVAL + RIVAL_BATTLE_HEAL_AFTER:
   -- heal and continue script — no white-out warp.
@@ -226,11 +266,12 @@ local function writeback(session, battleParty, remap, result, save, opts)
   local healAfter = opts.noWhiteout
     or (opts.earlyRival and (flags % 2 == 1)) -- bit0 = RIVAL_BATTLE_HEAL_AFTER
   if healAfter then
-    Party.healAll(session.party)
+    -- pokeemerald/data/scripts/secret_base.inc:641-652
+    if not opts.deferHeal then Party.healAll(session.party) end
     return
   end
 
-  BattleBridge.applyFrlgMoneyLoss(session, save)
+  BattleBridge.applyWhiteoutMoneyLoss(session, save)
   local Field = require("src.core.game3.field")
   Field.respawnAtHeal()
 end
@@ -250,7 +291,11 @@ end
 function BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
   opts = opts or {}
   if opts.wild or type(session) ~= "table" then return false end
-  if not Pokemon.isLeagueTrainerClass(league_trainer_class(foe, opts)) then return false end
+  local policy = require("src.core.game3.battle.profile").get(session).trainerParty
+  if policy and (opts.link or opts.battleTower or opts.eReader or opts.secretBase
+      or (foe and (foe.battleTower or foe.eReader or foe.secretBase))) then return false end
+  local predicate = policy and policy.isLeagueTrainerClass or Pokemon.isLeagueTrainerClass
+  if not predicate(league_trainer_class(foe, opts)) then return false end
   local ctx = { leagueBattle = true, mapSec = Pokemon.currentMapSec(session) }
   local changed = false
   for i, mon in ipairs(session.party or {}) do
@@ -264,27 +309,132 @@ function BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
   return changed
 end
 
+-- pokeemerald/src/battle_main.c:1977
+function BattleBridge.twoOpponentFoe(foeA, trainerIdB)
+  local Trainers = require("src.core.game3.scripting.trainers")
+  local foeB = Trainers.foeFromId(trainerIdB)
+  if type(foeA) ~= "table" or type(foeA.party) ~= "table" or not foeB then
+    error("two-opponent battle needs trainer parties for A and B (" .. tostring(trainerIdB) .. ")", 2)
+  end
+  local out = {}
+  for k, v in pairs(foeA) do out[k] = v end
+  local party = {}
+  for i = 1, math.min(3, #foeA.party) do party[#party + 1] = foeA.party[i] end
+  local half = #party
+  for i = 1, math.min(3, #foeB.party) do party[#party + 1] = foeB.party[i] end
+  out.party = party
+  return out, half
+end
+
+BattleBridge.EXTRA_KINDS = {
+  "twoOpponents", "partner", "recordedLink", "frontier", "trainerHill", "kyogreGroudon", "regi",
+  "groudon", "kyogre", "rayquaza", "trainerIdB",
+  "tutorialKind", "playerHalf", "partnerTrainerId", "partnerBackPic", "trainerItems",
+  "battleTower", "secretBase", "dome", "palace", "arena", "factory", "pike", "pyramid", "frontierTrainer", "frontierTrainerB",
+  "towerLinkMulti", "victoryTextB", "specialBattleKind",
+}
+
+-- pokeemerald/src/battle_main.c:5098
+function BattleBridge.tvBattleEnd(session, result, resultState)
+  local B = package.loaded["src.core.game3.battle"]
+  local st = resultState or (B and B.getState and B.getState())
+  if not st then return end
+  if st.resultPolicy then
+    if st._rsTvPublished then return end
+    st.resultPolicy.captureFinishState(st, result)
+    if not st.battleResults._rsFinishSnapshot then return end
+    st._rsTvPublished = true
+    local k = st.kinds or {}
+    local kinds = {
+      link = st.link or k.link, recordedLink = k.recordedLink, trainer = not st.wild,
+      firstBattle = st.firstBattle or k.firstBattle, safari = st.safari or k.safari,
+      ereaderTrainer = st.eReader, wallyTutorial = k.tutorial == "wally",
+      battleTower = st.battleTower or k.battleTower, frontier = k.frontier,
+    }
+    local flags = st.resultPolicy.flagsForState(st)
+    for name, mask in pairs(st.resultPolicy.EXCLUDED_FLAGS) do
+      kinds[name] = math.floor(flags / mask) % 2 ~= 0
+    end
+    local code = require("src.core.game3.scripting.natives").outcome_to_code(result or "win")
+    require("src.core.game3.rse.init").call("tv", "onBattleEnd", "TryPutPokemonTodayOnAir", nil,
+      st.battleResults, code, kinds)
+    return
+  end
+  local Pokemon = require("src.core.game3.pokemon")
+  local k = st.kinds or {}
+  local r = st.battleResults or { catchAttempts = {} }
+  local function speciesOf(b) return b and b.mon and (tonumber(Pokemon.speciesOf(b.mon)) or 0) or 0 end
+  local function nickOf(b) return b and b.mon and (b.mon.nickname or b.mon.name) or "" end
+  local enemy = st.enemy
+  local caught = result == "caught" or result == "catch"
+  local results = {
+    playerMon1Species = speciesOf(st.player), playerMon1Name = nickOf(st.player),
+    playerMon2Species = st.player2 and speciesOf(st.player2) or 0,
+    caughtMonSpecies = caught and speciesOf(enemy) or 0,
+    caughtMonNick = caught and nickOf(enemy) or "",
+    caughtMonBall = caught and r.lastUsedItem or 0,
+    catchAttempts = r.catchAttempts or {},
+    usedMasterBall = r.usedMasterBall or false,
+    lastUsedItem = r.lastUsedItem or 0,
+    lastOpponentSpecies = speciesOf(enemy),
+    shinyWildMon = st.wild and enemy and enemy.mon and Pokemon.isShiny(enemy.mon) or false,
+  }
+  local battleType = {
+    link = st.link or k.link, recordedLink = k.recordedLink, trainer = not st.wild,
+    firstBattle = k.firstBattle ~= nil, safari = st.safari or k.safari, ereaderTrainer = st.eReader,
+    wallyTutorial = k.tutorial == "wally", frontier = k.frontier,
+  }
+  local code = require("src.core.game3.scripting.natives").outcome_to_code(result or "win")
+  require("src.core.game3.rse.init").call("tv", "onBattleEnd", "TryPutPokemonTodayOnAir", nil, results, code,
+    battleType)
+end
+
 --- Start owned game3 battle (async). opts.done(result) when finished.
 -- opts.earlyRival / opts.rivalFlags / opts.noWhiteout: Oaks Lab tutorial loss.
 function BattleBridge.start(mod, game, foe, opts)
   opts = opts or {}
   local Runtime = require("src.core.game3.runtime")
-  local session = Runtime.getSession()
+  local session = (opts.link and type(opts.session) == "table" and opts.session) or Runtime.getSession()
   if not session then return nil, "no session" end
 
   BattleBridge.installWhiteoutIntercept(mod, game)
+  if not opts.headless then
+    pcall(function() require("src.core.game3.prewarm").battle(session, foe) end)
+  end
+  if opts.wild and require("src.core.game3.profile").family(session) == "rse" then
+    -- pokeemerald/src/battle_setup.c:417
+    require("src.core.game3.rse.init").call("tv", "incrementDailyWildBattles", "IncrementDailyWildBattles", nil)
+  end
 
-  local battleParty, remap = PartyView.fromSession(session.party, session.move_overlay)
+  local linkParty = opts.link and type(opts.linkParty) == "table" and opts.linkParty or nil
+  local battleParty, remap
+  if linkParty then
+    battleParty, remap = PartyView.fromSession(linkParty, nil)
+  else
+    battleParty, remap = PartyView.fromSession(session.party, session.move_overlay)
+  end
   if #battleParty == 0 then return nil, "empty party" end
-  local isDouble = (not opts.wild) and (opts.double or (foe and foe.doubleBattle)) and true or false
-  if isDouble and Party.monsStateToDoubles(session.party) ~= Party.PLAYER_HAS_TWO_USABLE_MONS then
+  local foeHalf
+  if opts.twoOpponents and opts.frontierFoeHalf and not opts.wild then
+    foeHalf = opts.frontierFoeHalf
+  elseif opts.twoOpponents and opts.trainerIdB and not opts.wild then
+    foe, foeHalf = BattleBridge.twoOpponentFoe(foe, opts.trainerIdB)
+  end
+  local isDouble = (not opts.wild) and (opts.double or foeHalf or (foe and foe.doubleBattle)) and true or false
+  if isDouble and Party.monsStateToDoubles(linkParty or session.party) ~= Party.PLAYER_HAS_TWO_USABLE_MONS then
     return nil, "need two mons"
+  end
+  if not opts.link and require("src.core.game3.capabilities").gate(session, "match_call") then
+    local Rematch = require("src.core.game3.rse.rematch")
+    -- pokeemerald/src/battle_setup.c:402
+    if opts.wild then Rematch.onWildBattleStart(session) else Rematch.onTrainerBattleStart(session) end
   end
 
   BattleBridge._remap = remap
   BattleBridge._battleParty = battleParty
 
-  BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
+  local nativeTrainerPolicy = require("src.core.game3.battle.profile").get(session).trainerParty
+  if not nativeTrainerPolicy then BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts) end
 
   local save = game and game.save
   local done = opts.done
@@ -299,7 +449,18 @@ function BattleBridge.start(mod, game, foe, opts)
     if okN and Natives and Natives.outcome_to_code then
       session.battleOutcome = Natives.outcome_to_code(result or "win")
     end
-    writeback(session, battleParty, remap, result, save, opts)
+    if not linkParty then writeback(session, battleParty, remap, result, save, opts) end
+    if require("src.core.game3.profile").family(session) == "rse" then
+      BattleBridge.tvBattleEnd(session, result)
+    end
+    if opts.roamer or (foe and foe.roamer) then
+      local okR, Roamer = pcall(require, "src.core.game3.roamer")
+      if okR and Roamer and Roamer.onBattleEnd then
+        local st = package.loaded["src.core.game3.battle"] and package.loaded["src.core.game3.battle"].getState and package.loaded["src.core.game3.battle"].getState()
+        local enemyMon = (st and st.enemy and st.enemy.mon) or foe
+        Roamer.onBattleEnd(session, enemyMon, result, st and st.endReason)
+      end
+    end
     -- pokefirered/src/battle_main.c:3861
     if ModRuntime.wants("battle.ended") then
       local B = package.loaded["src.core.game3.battle"]
@@ -310,6 +471,12 @@ function BattleBridge.start(mod, game, foe, opts)
     BattleBridge._remap = nil
     BattleBridge._battleParty = nil
     BattleBridge._finish = nil
+    if opts.firstBattleKind or opts.firstBattle then
+      -- pokeemerald/src/battle_setup.c:952 CB2_EndFirstBattle Overworld_ClearSavedMusic
+      pcall(function()
+        require("src.core.game3.audio").clearSavedSong()
+      end)
+    end
     pcall(function()
       require("src.core.game3.audio").restoreMapSong()
     end)
@@ -317,6 +484,9 @@ function BattleBridge.start(mod, game, foe, opts)
     if okF and Fade and Fade.begin and not opts.headless and opts.fade ~= false then
       Fade.begin(Fade.MODE.FROM_BLACK, 1)
     end
+    -- pokeemerald/src/field_player_avatar.c:883
+    local FieldFx = package.loaded["src.core.game3.field_effects"]
+    if FieldFx and FieldFx.resetSurfBob then FieldFx.resetSurfBob() end
     -- pokefirered/src/battle_setup.c:432
     local okS, Space = pcall(require, "src.core.game3.scripting.space")
     if okS and Space and Space.returnToField then
@@ -359,13 +529,21 @@ function BattleBridge.start(mod, game, foe, opts)
   -- pokefirered/src/battle_setup.c:237
   local standardWild = opts.wild and not opts.trainerId
     and not wildScripted and not legendary and not roamer
-    and not opts.firstBattle and not opts.oldManTutorial
-  local startOpts = {
+    and not opts.firstBattle and not opts.oldManTutorial and not opts.firstBattleKind
+    and not opts.tutorialKind
+  local startOpts
+  startOpts = {
     -- pokefirered/src/cable_club.c:664 BATTLE_TYPE_LINK
     link = opts.link or (foe and foe.link) or nil,
+    session = session,
+    spectate = opts.spectate,
+    autoFight = opts.autoFight,
     linkFlags = opts.linkFlags,
     -- pokefirered/src/battle_controllers.c:148 InitLinkBtlControllers
     linkMaster = opts.linkMaster,
+    enigmaBerries = opts.enigmaBerries,
+    hostRules = opts.link and opts.hostRules or nil,
+    multi = opts.link and opts.multi or nil,
     unionRoom = opts.unionRoom,
     peerName = opts.peerName or (foe and foe.name) or nil,
     wild = opts.wild,
@@ -375,6 +553,7 @@ function BattleBridge.start(mod, game, foe, opts)
       or (standardWild and safari_mode_active(session)) or nil,
     roamer = roamer,
     firstBattle = opts.firstBattle or (foe and foe.firstBattle),
+    firstBattleKind = opts.firstBattleKind,
     oldManTutorial = opts.oldManTutorial or (foe and foe.oldManTutorial),
     aiFlags = opts.aiFlags or (foe and foe.aiFlags),
     double = isDouble,
@@ -395,8 +574,12 @@ function BattleBridge.start(mod, game, foe, opts)
     eReader = opts.eReader or (foe and foe.eReader),
     -- pokefirered/src/battle_message.c:2066 GetTrainerTowerOpponentName
     trainerName = opts.trainerName or (foe and foe.trainerName),
+    trainerClass = opts.trainerClass or (foe and foe.trainerClass),
+    trainerClassName = opts.trainerClassName or (foe and foe.trainerClassName),
     trainerPicId = opts.trainerPicId or (foe and foe.trainerPicId),
     defeatText = opts.defeatText or (foe and foe.defeatText),
+    defeatTextB = opts.defeatTextB,
+    foeHalf = foeHalf,
     victoryText = opts.victoryText or (foe and foe.victoryText),
     earlyRival = opts.earlyRival,
     rivalFlags = opts.rivalFlags,
@@ -405,7 +588,23 @@ function BattleBridge.start(mod, game, foe, opts)
     onDone = function(result)
       finish(result)
     end,
+    onResultsReady = function(result, st)
+      BattleBridge.tvBattleEnd(session, result, st)
+    end,
+    onPartyCreated = nativeTrainerPolicy and function()
+      BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
+    end or nil,
     onStarted = function()
+      local profile = require("src.core.game3.profile").forSession(session)
+      if profile.id == "ruby" or profile.id == "sapphire" then
+        local RsStats = require("src.core.game3.rse.battle_stats_rs")
+        if RsStats.firstBattle(startOpts) then
+          require("src.core.game3.encounters").resetRateModifiers()
+          require("src.core.game3.rse.first_battle_rs").onStart(session)
+        else
+          RsStats.onStarted(session, startOpts)
+        end
+      end
       -- pokefirered/src/battle_main.c:612
       if ModRuntime.wants("battle.started") then
         ModRuntime.emit("battle.started", battle_payload(Battle, opts, foe, isDouble))
@@ -413,10 +612,27 @@ function BattleBridge.start(mod, game, foe, opts)
     end,
   }
 
+  for _, k in ipairs(BattleBridge.EXTRA_KINDS) do
+    if opts[k] then startOpts[k] = opts[k] end
+  end
+
   local function resolve_battle_song(o, so)
     if o and o.song then return o.song end
     local okA, Audio = pcall(require, "src.core.game3.audio")
     if not (okA and Audio) then return nil end
+    local BattleProfile = require("src.core.game3.battle.profile")
+    local bp = BattleProfile.get(session)
+    if bp.music then
+      local tid = (not so.wild) and so.trainerId or nil
+      local okTr, Trainers = pcall(require, "src.core.game3.scripting.trainers")
+      local info = tid and okTr and Trainers.info(tid) or nil
+      -- pokeemerald/src/pokemon.c:6426
+      return BattleProfile.battleSong(bp, {
+        wild = so.wild, link = so.link, trainerClass = info and info.class,
+        trainerName = info and info.name,
+        kind = (so.kyogreGroudon and "kyogreGroudon") or (so.regi and "regi") or nil,
+      })
+    end
     if (o and o.wild) or (so and so.wild) then
       local f = (o and o.foe) or (so and so.foe)
       local sp = f and (f.species or f.id or f.speciesId)
@@ -445,6 +661,14 @@ function BattleBridge.start(mod, game, foe, opts)
     end
   end
 
+  do
+    local StayMessage = package.loaded["src.ui.game3.message"]
+    if StayMessage and StayMessage.closeStay then StayMessage.closeStay() end
+  end
+  if not opts.headless then
+    pcall(function() require("src.core.game3.prewarm").battleStart(startOpts) end)
+  end
+
   local function doStart()
     local ok, err = Battle.start(startOpts)
     if not ok then
@@ -457,6 +681,10 @@ function BattleBridge.start(mod, game, foe, opts)
     return true
   end
 
+  local profile = require("src.core.game3.profile").forSession(session)
+  if profile.id == "ruby" or profile.id == "sapphire" then
+    require("src.core.game3.rse.battle_stats_rs").onAccepted(session, startOpts)
+  end
   if opts.headless or opts.fade == false then
     return doStart()
   end
@@ -480,9 +708,19 @@ function BattleBridge.start(mod, game, foe, opts)
       playerLevel = playerLv,
       enemyLevel = foeLv,
       trainerId = startOpts.trainerId,
+      trainerClass = (not opts.wild) and foe and foe.trainerClass or nil,
+      trainerTower = startOpts.trainerTower,
+      eReader = startOpts.eReader,
       playerGender = startOpts.playerGender,
       transitionId = opts.transitionId,
     }
+    if require("src.core.game3.profile").family(session) == "rse" then
+      -- pokeemerald/src/battle_setup.c:696
+      pickOpts.mapType = mapType
+      pickOpts.mapBehavior = mapBehavior
+      pickOpts.flashLevel = session.flashLevel
+      pickOpts.pyramid = opts.pyramid
+    end
     local tid = BattleTransition.pick(pickOpts)
     BattleTransition.start(tid, pickOpts, function()
       doStart()
@@ -515,6 +753,32 @@ function BattleBridge.startWild(mod, game, encounter, opts)
   return BattleBridge.start(mod, game, encounter, opts)
 end
 
+-- pokeemerald/src/battle_setup.c:917
+function BattleBridge.startFirstBattle(mod, game, opts)
+  opts = opts or {}
+  local Runtime = require("src.core.game3.runtime")
+  local BattleProfile = require("src.core.game3.battle.profile")
+  local bp = BattleProfile.get(Runtime.getSession())
+  local fb = bp.firstBattle
+  if not fb then error("battle profile " .. tostring(bp.gameId) .. " has no first battle", 2) end
+  local C = BattleProfile.constants(bp)
+  -- pokeemerald/src/battle_controllers.c:70
+  local foe = { species = C:require("species", fb.species), level = fb.level, item = 0 }
+  local o = {}
+  for k, v in pairs(opts) do o[k] = v end
+  o.wild = true
+  o.firstBattleKind = bp.kinds.firstBattle
+  o.transitionId = opts.transitionId or C:require("battle", fb.transition)
+  -- pokeruby/src/battle_setup.c:871
+  if bp.gameId ~= "ruby" and bp.gameId ~= "sapphire" then
+    local okE, Encounters = pcall(require, "src.core.game3.encounters")
+    if okE and Encounters and Encounters.resetRateModifiers then
+      Encounters.resetRateModifiers()
+    end
+  end
+  return BattleBridge.start(mod, game, foe, o)
+end
+
 --- Tests / emergency: complete pending battle writeback.
 function BattleBridge.finishPending(result)
   local Battle = package.loaded["src.core.game3.battle"]
@@ -528,6 +792,13 @@ function BattleBridge.finishPending(result)
     BattleBridge._finish = nil
     return f(result or "win")
   end
+end
+
+-- pokefirered/src/main.c:480
+function BattleBridge.reset()
+  BattleBridge._finish = nil
+  BattleBridge._remap = nil
+  BattleBridge._battleParty = nil
 end
 
 return BattleBridge
