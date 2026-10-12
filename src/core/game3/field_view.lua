@@ -351,6 +351,34 @@ local function neighborActorDefs(mapId, def)
 end
 
 local ghostActors = setmetatable({}, { __mode = "k" })
+local defActors = {}
+local NO_HOST = {}
+local hostOrder = {}
+local function resetDefActors() defActors = {}; hostOrder = {} end
+-- Per-host pools (defActors[host][obj][entryId]); keep the current and
+-- previous host only so alternating hosts stay allocation-free.
+local function hostPool(hostMapId)
+  local key = hostMapId == nil and NO_HOST or hostMapId
+  local pool = defActors[key]
+  if not pool then
+    pool = {}
+    defActors[key] = pool
+    hostOrder[#hostOrder + 1] = key
+    while #hostOrder > 2 do
+      defActors[table.remove(hostOrder, 1)] = nil
+    end
+  elseif hostOrder[#hostOrder] ~= key then
+    -- LRU: move the used host to the back so eviction takes the stalest.
+    for i = #hostOrder - 1, 1, -1 do
+      if hostOrder[i] == key then table.remove(hostOrder, i); break end
+    end
+    hostOrder[#hostOrder + 1] = key
+  end
+  return pool
+end
+local EMPTY_NB = {
+  store = { flags = {}, vars = {} }, perm = {}, movementType = {},
+}
 local ACTOR_CULL_MARGIN = 64
 
 local function entryInView(entry, x0, y0, x1, y1)
@@ -361,13 +389,14 @@ local function entryInView(entry, x0, y0, x1, y1)
   return ex + w * CELL > x0 and ex < x1 and ey + h * CELL > y0 and ey < y1
 end
 
-local function collectNeighborActors(actors, baseIndex, hostMapId, hostDef, camX, camY)
+local function collectNeighborActors(actors, baseIndex, hostMapId, hostDef, camX, camY, gfxProfile)
   local Map = package.loaded["src.core.game3.map"]
   if not (Map and type(Map.world) == "table") then return baseIndex end
   local Ghosts = package.loaded["src.core.game3.ghosts"]
   local Objects = package.loaded["src.core.game3.objects"]
   local vw = FieldView._viewW or Display.W
   local vh = FieldView._viewH or Display.H
+  local hostActors = hostPool(hostMapId)
   local cull = camX ~= nil and camY ~= nil
   local x0, y0 = (camX or 0) - ACTOR_CULL_MARGIN, (camY or 0) - ACTOR_CULL_MARGIN
   local x1, y1 = (camX or 0) + vw + ACTOR_CULL_MARGIN, (camY or 0) + vh + ACTOR_CULL_MARGIN
@@ -411,7 +440,7 @@ local function collectNeighborActors(actors, baseIndex, hostMapId, hostDef, camX
         local Space = package.loaded["src.core.game3.scripting.space"]
         local nb = Space and Space.neighborObjectState
           and Space.neighborObjectState(entry.id)
-          or { store = { flags = {}, vars = {} }, perm = {}, movementType = {} }
+          or EMPTY_NB
         if defs then
           for _, obj in ipairs(defs) do
             local lid = tonumber(obj.localId or obj.index) or 0
@@ -424,24 +453,37 @@ local function collectNeighborActors(actors, baseIndex, hostMapId, hostDef, camX
             if tonumber(obj.movementType) == 0x4C then out = true end
             local gid = obj.graphicsId or obj.graphics
             if Space and Space.resolveObjectGraphicsId then
-              gid = Space.resolveObjectGraphicsId(obj, nb)
+              gid = Space.resolveObjectGraphicsId(obj, nb, gfxProfile)
             end
             if objectVisible(obj) and not out and gid then
               local mt = nb.movementType[lid]
               baseIndex = baseIndex + 1
-              actors[#actors + 1] = {
-                kind = "npc",
-                i = baseIndex,
-                obj = obj,
-                ghost = entry.id,
-                x = (entry.ox + ox) * CELL,
-                y = (entry.oy + oy) * CELL,
-                facing = (mt and GfxIds.initialFacing(mt))
-                  or (obj.movementType ~= nil and GfxIds.initialFacing(obj.movementType))
-                  or facingFromObj(obj),
-                sprite = spriteNameForObj(obj),
-                graphicsId = gid,
-              }
+              local pool = hostActors[obj]
+              if not pool then
+                pool = {}
+                hostActors[obj] = pool
+              end
+              local a = pool[entry.id]
+              if not a then
+                a = { kind = "npc" }
+                pool[entry.id] = a
+              end
+              a.i = baseIndex
+              a.obj = obj
+              a.ghost = entry.id
+              a.x = (entry.ox + ox) * CELL
+              a.y = (entry.oy + oy) * CELL
+              a.facing = (mt and GfxIds.initialFacing(mt))
+                or (obj.movementType ~= nil and GfxIds.initialFacing(obj.movementType))
+                or facingFromObj(obj)
+              a.sprite = spriteNameForObj(obj)
+              a.graphicsId = gid
+              a.elevation = nil
+              a.priority = nil
+              a.subpriority = nil
+              a.disguiseObject = nil
+              a.fixedPriority = nil
+              actors[#actors + 1] = a
             end
           end
         end
@@ -565,7 +607,6 @@ local function weatherMask()
 end
 
 local function drawSingleActor(game, mapDef, a, camX, camY)
-  local daytime = daytimeFor(game, mapDef)
   local OwSprites = modOwSprites()
   local useOw = OwSprites and OwSprites.ready and OwSprites.ready()
   love.graphics.setColor(1, 1, 1, 1)
@@ -602,7 +643,8 @@ local function drawSingleActor(game, mapDef, a, camX, camY)
   end
   if not drew then
     local sr = getSpriteRenderer(
-      game, a.sprite, a.kind .. ":" .. tostring(a.i or "p"), a.obj, daytime)
+      game, a.sprite, a.kind .. ":" .. tostring(a.i or "p"), a.obj,
+      daytimeFor(game, mapDef))
     if sr then
       sr:draw(a.x, a.y, camX, camY, a.facing, a.walkPhase or 0, a.stepFlip)
     else
@@ -662,13 +704,15 @@ local function collectGame3Actors(game, mapDef, camX, camY, px, py, facing, walk
       a.subpriority = nil
       actors[#actors + 1] = a
     end
-    collectNeighborActors(actors, 10000, currentMapId(game),
-      resolveMapDef(game, currentMapId(game)), camX, camY)
     local Space = package.loaded["src.core.game3.scripting.space"]
+    local gfxProfile
+    if Space and Space.gfxProfile then gfxProfile = Space.gfxProfile() end
+    collectNeighborActors(actors, 10000, currentMapId(game),
+      resolveMapDef(game, currentMapId(game)), camX, camY, gfxProfile)
     if Space and Space.resolveObjectGraphicsId then
       for _, a in ipairs(actors) do
         if a.obj and not a.ghost and not (a.eventObject and a.eventObject.graphicsId ~= nil) then
-          local gid = Space.resolveObjectGraphicsId(a.obj)
+          local gid = Space.resolveObjectGraphicsId(a.obj, nil, gfxProfile)
           if gid then a.graphicsId = gid end
         end
       end
@@ -1874,6 +1918,7 @@ end
 
 --- Drop cached atlases/sprites (tileset hot-reload).
 function FieldView.invalidate()
+  resetDefActors()
   local Plan = package.loaded["src.core.game3.field_plan"]
   if Plan then Plan.invalidate() end
   FieldView._atlas = nil

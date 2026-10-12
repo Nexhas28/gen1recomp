@@ -179,7 +179,16 @@ function R.droughtTable(i)
     for t = 0, (m.drought.tables or 6) - 1 do
       local tbl = {}
       local base = t * entries * 2
-      for e = 0, entries - 1 do
+      local avail = math.max(0, math.min(entries, math.floor((#raw - base) / 2)))
+      local byte = string.byte
+      for e0 = 0, avail - 1, 512 do
+        local n = math.min(512, avail - e0)
+        local bytes = { byte(raw, base + e0 * 2 + 1, base + (e0 + n) * 2) }
+        for k = 0, n - 1 do
+          tbl[e0 + k] = bytes[k * 2 + 1] + bytes[k * 2 + 2] * 256
+        end
+      end
+      for e = avail, entries - 1 do
         local lo, hi = raw:byte(base + e * 2 + 1, base + e * 2 + 2)
         tbl[e] = (lo or 0) + (hi or 0) * 256
       end
@@ -255,28 +264,36 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 local function rgb8(c5) return math.floor(c5 * 255 / 31 + 0.5) end
 
 local function buildLuts()
-  local lut = love.image.newImageData(32, NUM_WEATHER_COLOR_MAPS * 2)
+  local char = string.char
+  local rows = {}
   for i = 0, NUM_WEATHER_COLOR_MAPS - 1 do
+    local drow, crow = {}, {}
     for v = 0, 31 do
-      local d = rgb8(R.colorMaps.dark[i][v]) / 255
-      local c = rgb8(R.colorMaps.contrast[i][v]) / 255
-      lut:setPixel(v, i, d, d, d, 1)
-      lut:setPixel(v, NUM_WEATHER_COLOR_MAPS + i, c, c, c, 1)
+      local d = char(rgb8(R.colorMaps.dark[i][v]))
+      local c = char(rgb8(R.colorMaps.contrast[i][v]))
+      drow[v + 1] = d .. d .. d .. "\255"
+      crow[v + 1] = c .. c .. c .. "\255"
     end
+    rows[i + 1] = table.concat(drow)
+    rows[NUM_WEATHER_COLOR_MAPS + i + 1] = table.concat(crow)
   end
+  local lut = love.image.newImageData(32, NUM_WEATHER_COLOR_MAPS * 2, "rgba8", table.concat(rows))
   local lutImg = love.graphics.newImage(lut)
   lutImg:setFilter("nearest", "nearest")
-  local dl = love.image.newImageData(64, 384)
+  local dlPx = {}
   for t = 0, 5 do
     local tbl = R.droughtTable(t)
-    if tbl then
-      for e = 0, 4095 do
+    for e = 0, 4095 do
+      local idx = t * 4096 + e + 1
+      if tbl then
         local c = tbl[e]
-        dl:setPixel(e % 64, t * 64 + math.floor(e / 64), rgb8(c % 32) / 255,
-          rgb8(math.floor(c / 32) % 32) / 255, rgb8(math.floor(c / 1024) % 32) / 255, 1)
+        dlPx[idx] = char(rgb8(c % 32), rgb8(math.floor(c / 32) % 32), rgb8(math.floor(c / 1024) % 32), 255)
+      else
+        dlPx[idx] = "\0\0\0\0"
       end
     end
   end
+  local dl = love.image.newImageData(64, 384, "rgba8", table.concat(dlPx))
   local dlImg = love.graphics.newImage(dl)
   dlImg:setFilter("nearest", "nearest")
   return lutImg, dlImg
@@ -1965,19 +1982,28 @@ local function drawScreenSprites(A, list, ox, oy, cw, ch, repeatScreen)
   end
 end
 
-local function drawTiled(sheet, frame, baseX, baseY, ox, oy, cw, ch)
-  local sx = ox + (baseX % 64) - 64
-  local sy = oy + (baseY % 64) - 64
+local function tileOrigin(baseX, baseY, ox, oy)
+  local sx = math.floor(ox + (baseX % 64) - 64)
+  local sy = math.floor(oy + (baseY % 64) - 64)
   while sx > -64 do sx = sx - 64 end
   while sy > -64 do sy = sy - 64 end
+  return sx, sy
+end
+
+local function drawTiled(sheet, frame, baseX, baseY, ox, oy, cw, ch)
+  local sx, sy = tileOrigin(baseX, baseY, ox, oy)
   if love.graphics.newSpriteBatch then
     local r, g, b, a = love.graphics.getColor()
     local bucket = r == 1 and g == 1 and b == 1 and a == 1 and "tiledBase" or "tiledTint"
     local store = sheet[bucket] or {}; sheet[bucket] = store
-    local key = table.concat({ frame, sx, sy, cw, ch, r, g, b, a }, ":")
-    if store.key ~= key then
+    if store.frame ~= frame or store.cw ~= cw or store.ch ~= ch or store.r ~= r
+        or store.g ~= g or store.b ~= b or store.a ~= a or not store.built then
       local q = sheetQuad(sheet, frame, 8, 8)
-      local count = (math.floor((cw - sx) / 64) + 1) * (math.floor((ch - sy) / 64) + 1)
+      -- Scroll-independent layout starting at -64; the draw below is
+      -- translated by sx + 128 in (0, 64], so the first tile lands at
+      -- sx + 64 in (-64, 0] and the grid matches the sx + 64k original.
+      -- The tile at sx itself would be entirely off-screen.
+      local count = (math.floor((cw + 64) / 64) + 1) * (math.floor((ch + 64) / 64) + 1)
       count = count * (type(q) == "table" and #q or 1)
       if not store.batch or store.capacity < count then
         store.batch = love.graphics.newSpriteBatch(sheet.image, count, "dynamic")
@@ -1989,17 +2015,19 @@ local function drawTiled(sheet, frame, baseX, baseY, ox, oy, cw, ch)
       -- the same byte conversion here, including fractional EVA/16, instead
       -- of applying a float constant colour to the finished SpriteBatch.
       batch:setColor(r, g, b, a)
-      for y = sy, ch, 64 do
-        for x = sx, cw, 64 do
+      for y = -64, ch, 64 do
+        for x = -64, cw, 64 do
           if type(q) == "table" then
             for _, part in ipairs(q) do batch:add(part[1], x + part[2], y + part[3]) end
           else batch:add(q, x, y) end
         end
       end
-      store.key = key
+      store.frame, store.cw, store.ch = frame, cw, ch
+      store.r, store.g, store.b, store.a = r, g, b, a
+      store.built = true
     end
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(store.batch)
+    love.graphics.draw(store.batch, sx + 128, sy + 128)
     love.graphics.setColor(r, g, b, a)
     return
   end
@@ -2164,7 +2192,8 @@ local function colorMapPass(A, cw, ch, exchangeCanvas)
   love.graphics.origin()
   love.graphics.setShader()
   love.graphics.setCanvas(tmp)
-  love.graphics.clear(0, 0, 0, 0)
+  -- No clear: the replace-blend blit below overwrites every pixel the
+  -- second blit can read (same size, same scissor).
   love.graphics.setBlendMode("replace", "premultiplied")
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(cur, 0, 0)

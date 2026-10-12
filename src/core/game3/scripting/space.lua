@@ -559,13 +559,35 @@ function Space.resolveObjectSprite(obj)
   return GfxIds.spriteFor(Space.resolveObjectGraphicsId(obj))
 end
 
+local function forSessionNil()
+  return lazyReq("src.core.game3.profile").forSession(nil)
+end
+
+local gfxByNameCache = setmetatable({}, { __mode = "k" })
+
+--- Drop cached constants lookups (call after constants/profile reset).
+function Space.invalidateGfxCache()
+  for k in pairs(gfxByNameCache) do gfxByNameCache[k] = nil end
+end
+
+--- Resolve the active profile once for a batch of resolveObjectGraphicsId
+-- calls. Returns false when no profile can be resolved.
+function Space.gfxProfile()
+  local okP, P = pcall(forSessionNil)
+  return (okP and P) or false
+end
+
 --- Resolve FRLG OBJ_EVENT_GFX id (honours graphicsVar + OBJ_EVENT_GFX_VAR_*).
 -- pret: graphicsId >= 240 → VarGetObjectEventGraphicsId(id - 240).
-function Space.resolveObjectGraphicsId(obj, neighbor)
+-- `profile` is optional (from Space.gfxProfile); nil resolves it per call.
+function Space.resolveObjectGraphicsId(obj, neighbor, profile)
   if not obj then return nil end
   local graphics = tonumber(obj.graphics or obj.graphicsId)
-  local store = (neighbor and neighbor.store) or Space.store or Flags.newStore()
-  local ctx = (Space.vm and Space.vm.ctx) or Ctx.new()
+  local store, ctx
+  if obj.graphicsVar or (graphics and graphics >= 240 and graphics <= 255) then
+    store = (neighbor and neighbor.store) or Space.store or Flags.newStore()
+    ctx = (Space.vm and Space.vm.ctx) or Ctx.new()
+  end
   if obj.graphicsVar then
     local v = Flags.getVar(store, ctx, obj.graphicsVar)
     if type(v) == "number" and v ~= 0 then graphics = v end
@@ -576,10 +598,18 @@ function Space.resolveObjectGraphicsId(obj, neighbor)
     -- src/event_object_movement.c:2043
     graphics = (tonumber(Flags.getVar(store, ctx, varId)) or 0) % 256
   end
-  local okP, P = pcall(function() return lazyReq("src.core.game3.profile").forSession(nil) end)
-  local invalid = okP and P and P.field and P.field.invalidGfx
+  local P = profile
+  if P == nil then
+    local okP, P0 = pcall(forSessionNil)
+    P = okP and P0
+  end
+  local invalid = P and P.field and P.field.invalidGfx
   if invalid then
-    local E = lazyReq("src.core.game3.constants").of(P.id).event_objects.byName
+    local E = gfxByNameCache[P]
+    if not E then
+      E = lazyReq("src.core.game3.constants").of(P.id).event_objects.byName
+      gfxByNameCache[P] = E
+    end
     -- pokeemerald/src/event_object_movement.c:1927
     if graphics and graphics >= E.NUM_OBJ_EVENT_GFX then graphics = E[invalid] end
     return graphics
