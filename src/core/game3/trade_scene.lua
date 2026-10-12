@@ -1,12 +1,9 @@
 local SE = require("src.core.game3.se_ids")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
+local RsTrade = require("src.ui.game3.rs.trade_policy")
 local TradeScene = {}
 
--- pokefirered/include/constants/songs.h:271
-local MUS_EVOLUTION = 264
--- pokefirered/include/constants/songs.h:266
-local MUS_EVOLVED = 259
 -- pokefirered/include/constants/species.h:421
 local SPECIES_EGG = 412
 
@@ -212,8 +209,11 @@ local function cryFinished(s)
   return done and true or false
 end
 
+-- pokefirered/src/trade_scene.c:1239 GetMonData(MON_DATA_NICKNAME), which is
+-- gText_EggNickname for an egg (pokemon.c:3020)
 local function nameOf(mon)
   if not mon then return "" end
+  if isEgg(mon) then return RomText.plain("gText_EggNickname") end
   local nick = mon.nickname or mon.name
   if type(nick) == "string" and nick ~= "" then return nick end
   local ok, Pokemon = pcall(require, "src.core.game3.pokemon")
@@ -234,6 +234,11 @@ end
 -- pokefirered/src/trade_scene.c:2808 DrawTextOnTradeWindow
 local function setText(s, text)
   s.text = text or ""
+end
+
+-- pokefirered/src/trade_scene.c:1238 TradeBufferOTnameAndNicknames
+local function tradeText(s, key)
+  return RomText.plain(s.nativeRS and RsTrade.textKey(key) or key, { stringVars = { s.otName, s.sentName, s.recvName } })
 end
 
 local function evolutionOpen()
@@ -286,7 +291,7 @@ phase("start", function(s)
   -- pokefirered/src/trade_scene.c:1348
   s.cachedMapMusic = currentMapMusic()
   -- pokefirered/src/trade_scene.c:1349
-  playNewMapMusic(s, MUS_EVOLUTION)
+  playNewMapMusic(s, (s.nativeRS and require("src.core.game3.song_ids").forVersion(s.version) or require("src.core.game3.song_ids")).MUS_EVOLUTION)
   return true
 end)
 
@@ -304,7 +309,7 @@ end)
 
 -- pokefirered/src/trade_scene.c:1366
 phase("send_msg", function(s)
-  setText(s, Strings("%s will be\nsent to %s.", s.sentName, s.otName))
+  setText(s, tradeText(s, "gText_XWillBeSentToY"))
   playCry(s, s.offer)
   return true
 end)
@@ -313,7 +318,7 @@ end)
 phase("bye_bye", function(s)
   s.timer = s.timer + 1
   if s.timer ~= BYE_BYE_DELAY then return false end
-  setText(s, Strings("Bye-bye, %s!", s.sentName))
+  setText(s, tradeText(s, "gText_ByeByeVar1"))
   s.ballVisible = true
   s.ballX, s.ballY, s.ballY2 = 120, 32, 0
   return true
@@ -372,6 +377,8 @@ phase("wait_fade_out_to_gba_send", function(s)
   if s.frames < FADE_FRAMES then return false end
   s.veil = 1
   setText(s, "")
+  -- pokefirered/src/trade_scene.c:1404
+  s.monShadowBg = false
   -- pokefirered/src/trade_scene.c:1166
   s.bg2Zoom = ZOOM_MAX
   return true
@@ -646,6 +653,9 @@ phase("wait_fade_out_to_new_mon", function(s)
   if s.frames < FADE_FRAMES then return false end
   s.veil = 1
   s.gbaVisible = false
+  -- pokefirered/src/trade_scene.c:1670
+  s.monShadowBg = true
+  s.bg2hofs = 0
   return true
 end)
 
@@ -710,7 +720,7 @@ end)
 
 -- pokefirered/src/trade_scene.c:1725
 phase("new_mon_msg", function(s)
-  setText(s, Strings("%s sent over %s.", s.otName, s.recvName))
+  setText(s, tradeText(s, "gText_XSentOverY"))
   s.timer = 0
   return true
 end)
@@ -732,9 +742,9 @@ end)
 -- pokefirered/src/trade_scene.c:1749
 phase("take_care_of_mon", function(s)
   s.timer = s.timer + 1
-  if s.timer == FANFARE_AT then playFanfare(s, MUS_EVOLVED) end
-  if s.timer ~= TAKE_CARE_AT then return false end
-  setText(s, Strings("Take good care of %s!", s.recvName))
+  if s.timer == (s.nativeRS and 4 or FANFARE_AT) then playFanfare(s, (s.nativeRS and require("src.core.game3.song_ids").forVersion(s.version) or require("src.core.game3.song_ids")).MUS_EVOLVED) end
+  if s.timer ~= (s.nativeRS and 240 or TAKE_CARE_AT) then return false end
+  setText(s, tradeText(s, "gText_TakeGoodCareOfX"))
   s.timer = 0
   return true
 end)
@@ -788,14 +798,14 @@ end)
 
 -- pokefirered/src/trade_scene.c:2572
 phase("link_standby", function(s)
-  setText(s, Strings("Communication standby…"))
+  setText(s, tradeText(s, "gText_CommunicationStandby4"))
   if not s.awaitSave then return true end
   return s.linkTaskDone == true
 end, "link")
 
 -- pokefirered/src/trade_scene.c:2595
 phase("link_save", function(s)
-  setText(s, Strings("SAVING…\nDON'T TURN OFF THE POWER."))
+  setText(s, tradeText(s, "gText_SavingDontTurnOffThePower2"))
   if not s.awaitSave then return true end
   return s.saveDone == true
 end, "link")
@@ -894,9 +904,10 @@ function TradeScene.hasArt()
   return (s and s.art) and true or false
 end
 
+-- pokefirered/src/trade_scene.c:1772
 function TradeScene.pressA()
   local s = TradeScene._s
-  if s then s.aPressed = true end
+  if s and TradeScene.phase() == "end_link_trade" then s.aPressed = true end
 end
 
 function TradeScene.isLink()
@@ -954,7 +965,9 @@ end
 function TradeScene.play(offer, received, onDone, opts)
   opts = opts or {}
   local headless = not (type(love) == "table" and love.graphics)
+  local version = require("src.core.game3.profile").forSession().id
   local s = {
+    version = version, nativeRS = RsTrade.matches(version), elapsed = 0,
     offer = offer,
     received = received,
     onDone = onDone,
@@ -976,6 +989,8 @@ function TradeScene.play(offer, received, onDone, opts)
     phaseIndex = 1,
     -- pokefirered/src/trade_scene.c:1119
     bg2hofs = MON_SLIDE_HOFS,
+    -- pokefirered/src/trade_scene.c:1120
+    monShadowBg = true,
     bg1vofs = BG1_GBA_TOP,
     -- pokefirered/src/trade_scene.c:1172
     bg2Zoom = ZOOM_MAX,
@@ -1020,9 +1035,54 @@ function TradeScene.play(offer, received, onDone, opts)
   end
 
   s.phases = TradeScene.sequence(s.art ~= nil, s.link, opts.fadeIn)
+  if s.nativeRS then
+    local native = {}
+    for _, ph in ipairs(s.phases) do
+      if ph.name ~= "delay_for_mon_anim" and ph.name ~= "wait_for_mon_cry" then native[#native + 1] = ph end
+    end
+    s.phases = native
+    s.rsBackground = "shadow"
+    s.rsSymbolY, s.rsSymbolRotation = -70, 0
+  end
   TradeScene._s = s
   TradeScene.open = true
   return true
+end
+
+local function nativeSceneState(s, name, done)
+  if not s.nativeRS then return end
+  if name == "wait_fade_out_to_gba_send" and done then s.rsBackground = "gba_affine" end
+  if name == "gba_zoom_out" and done then s.rsBackground = "gba" end
+  if name == "gba_flash_send" and done then s.rsSymbolY, s.rsSymbolRotation = -70, 0 end
+  if name == "link_mon_travel_out" or name == "link_mon_travel_offscreen" then
+    s.rsSymbolVisible = true
+    if s.bg1vofs < 266 then s.rsSymbolY = s.rsSymbolY + 1; s.rsSymbolRotation = (s.rsSymbolRotation + 64) % 65536 end
+  end
+  if name == "wait_fade_out_to_crossing" and done then s.rsBackground, s.rsSymbolVisible = "cable", false end
+  if name == "create_link_mon_arriving" and done then s.rsBackground = "gba" end
+  if name == "wait_fade_out_to_gba_recv" or name == "link_mon_travel_in" or name == "pan_to_gba" then
+    s.rsSymbolVisible = true
+    if s.rsSymbolY > -64 then s.rsSymbolY = s.rsSymbolY - 1; s.rsSymbolRotation = (s.rsSymbolRotation + 64) % 65536 end
+  end
+  if name == "gba_stop_flash_recv" and done then s.rsBackground, s.rsSymbolVisible = "gba_affine", false end
+  if name == "wait_fade_out_to_new_mon" and done then s.rsBackground = "shadow" end
+  if (name == "pan_away_gba" or name == "move_gba_to_center") and s.bg1vofs == CABLE_END_VOFS then
+    s.rsCableCreated = s.elapsed; s.rsCableDirection = name == "pan_away_gba" and 1 or -1
+  end
+  local linkNow = s.linkVisible and true or false
+  if linkNow and not s.rsHadLink then s.rsLinkCreated = s.elapsed end
+  s.rsHadLink = linkNow
+  local crossNow = s.crossVisible and true or false
+  if crossNow and not s.rsHadCross then s.rsCrossCreated = s.elapsed end
+  s.rsHadCross = crossNow
+  if name == "crossing_link_mons_enter" and done then s.rsCrossColorFrozen = (s.elapsed - s.rsCrossCreated) % 12 end
+  if name == "crossing_mon_pics_move" and done then s.rsCrossColorResumed = s.elapsed end
+  if s.ballVisible and not s.rsHadBall then s.rsBallCreated = s.elapsed end
+  s.rsHadBall = s.ballVisible and true or false
+  if s.flash ~= nil and not s.rsHadFlash then s.rsFlashCreated = s.elapsed end
+  s.rsHadFlash = s.flash ~= nil
+  if linkNow and (s.elapsed - s.rsLinkCreated + 1) % 10 == 0 then playSe(s, SE.SE_BALL) end
+  if s.rsHadFlash and (s.elapsed - s.rsFlashCreated + 1) % 15 == 0 then playSe(s, SE.SE_M_MINIMIZE) end
 end
 
 -- pokefirered/src/trade_scene.c:1255 DoTradeAnim
@@ -1035,7 +1095,10 @@ function TradeScene.step()
     return true
   end
   s.frames = s.frames + 1
-  if ph.step(s) then
+  s.elapsed = (s.elapsed or 0) + 1
+  local done = ph.step(s)
+  nativeSceneState(s, ph.name, done)
+  if done then
     s.phaseIndex = s.phaseIndex + 1
     s.frames = 0
     s.timer = 0

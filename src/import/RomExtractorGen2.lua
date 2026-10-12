@@ -338,6 +338,8 @@ function RomExtractorGen2:extractConstants()
   self:beginStage("Game constants")
   local data = copy(self.manifest.constants)
   data.generation = 2
+  data.spriteContext = require("src.import.Gen2SpriteMetadata").read(
+    self.rom, self.symbols, data, self.edition)
   self:write("constants", data)
   self:tick("Game constants", 1, 1)
   return data
@@ -2596,16 +2598,11 @@ end
 --                         Game Boy Printer's second sheet and is not read
 --                         here, the same way PrintDiploma stays stubbed.
 --   DiplomaPalettes       gfx/diploma/diploma.pal, eight four-colour sets.
---                         _CGB_Diploma (engine/gfx/cgb_layouts.asm) loads all
---                         eight and then WipeAttrmap zeroes the attrmap, so
---                         set 0 is the one the whole screen actually draws
---                         through; the rest are written out because the block
---                         is one table.
---
--- Tolerated rather than required, like credits: a manifest built before these
--- three symbols were listed still imports, it just leaves src/ui/gen2/
--- Diploma.lua on its placeholder frame.
+--   bgPalette             gfx/sgb/predef.pal:28 PREDEFPAL_DIPLOMA
+--                         engine/gfx/cgb_layouts.asm:495
 local DIPLOMA_TILES = 112
+-- constants/scgb_constants.asm:71
+local PREDEFPAL_DIPLOMA = 27
 local DIPLOMA_SHEET_TILES = 16 -- tiles per row of the sheet
 local DIPLOMA_SCREEN_W, DIPLOMA_SCREEN_H = 20, 18
 local DIPLOMA_PALETTE_SETS = 8
@@ -2650,6 +2647,7 @@ function RomExtractorGen2:extractDiploma()
     end
     data.palettes = palettes
   end
+  data.bgPalette = self:predefPal(PREDEFPAL_DIPLOMA)
   self:tick("Diploma", 3, 3)
 
   self:write("diploma", data)
@@ -3095,6 +3093,78 @@ local function romAddrOk(bank, address)
   return address >= 0x4000 and address < 0x8000
 end
 
+-- pokecrystal/data/radio/buenas_passwords.asm:1
+function RomExtractorGen2:readBuenaPasswordData()
+  if self.edition ~= "crystal" then return nil end
+  local tableAt = self:symbol("BuenasPasswordTable")
+  local nameAt = self:symbol("BuenasPasswordChannelName")
+  local charmap = self.manifest.charmap or {}
+  local constants = self.manifest.constants or {}
+  local kinds = { "mon", "item", "move", "string" }
+  local orders = { constants.speciesOrder, constants.itemOrder,
+    constants.moveOrder }
+  local function range(bank, address, count)
+    assert(type(bank) == "number" and bank % 1 == 0 and bank >= 0
+      and bank <= 0x7f, "invalid Buena ROM bank")
+    local first, last = bank == 0 and 0 or 0x4000,
+      bank == 0 and 0x4000 or 0x8000
+    assert(type(address) == "number" and address % 1 == 0
+      and address >= first and address + count <= last,
+      "invalid Buena ROM pointer")
+  end
+  local function readString(bank, address, limit)
+    local chars = {}
+    for offset = 0, limit - 1 do
+      range(bank, address + offset, 1)
+      local byte = self.rom:byte(bank, address + offset)
+      if byte == 0x50 then
+        assert(#chars > 0, "empty Buena ROM string")
+        return table.concat(chars), offset + 1
+      end
+      local char = charmap[tostring(byte)]
+      assert(type(char) == "string", "invalid Buena ROM character")
+      chars[#chars + 1] = char
+    end
+    error("unterminated Buena ROM string")
+  end
+  local stationName = readString(nameAt.bank, nameAt.address, 32)
+  local categories = {}
+  -- pokecrystal/constants/radio_constants.asm:120
+  range(tableAt.bank, tableAt.address, 11 * 2)
+  for category = 0, 10 do
+    local address = self.rom:word(tableAt.bank,
+      tableAt.address + category * 2)
+    range(tableAt.bank, address, 2)
+    local kind = self.rom:byte(tableAt.bank, address)
+    local width = self.rom:byte(tableAt.bank, address + 1)
+    assert(kinds[kind + 1], "invalid Buena password type")
+    assert(width > 0 and width <= 18, "invalid Buena password width")
+    local words = {}
+    address = address + 2
+    -- pokecrystal/constants/radio_constants.asm:121
+    for option = 1, 3 do
+      if kind == 3 then
+        local word, length = readString(tableAt.bank, address, 32)
+        words[option] = word
+        address = address + length
+      else
+        range(tableAt.bank, address, 1)
+        local id = self.rom:byte(tableAt.bank, address)
+        local word = orders[kind + 1] and orders[kind + 1][id]
+        assert(id > 0 and type(word) == "string"
+          and not word:match("^UNUSED") and word ~= "NO_ITEM",
+          "invalid Buena password identifier")
+        words[option] = word
+        address = address + 1
+      end
+    end
+    categories[#categories + 1] = {
+      kind = kinds[kind + 1], width = width, words = words,
+    }
+  end
+  return { stationName = stationName, categories = categories }
+end
+
 -- The side tables a script command NAMES rather than carries: the phone book,
 -- the in-game trades, the elevator's floor labels, and the five decoration
 -- descriptions.  Each row's script pointers come back with the rest so
@@ -3107,6 +3177,7 @@ function RomExtractorGen2:readEventTables()
   local consts = self.manifest.constants
   local charmap = self.manifest.charmap or {}
   local out = {}
+  out.buenaPassword = self:readBuenaPasswordData()
 
   local function name(list, index, fallback)
     if type(list) ~= "table" then return fallback end
@@ -4437,6 +4508,14 @@ function RomExtractorGen2:extractItems()
       -- These items have no ItemNames row, so the label IS the name.
       entry.name = entry.name or entry.tmLabel
     end
+  end
+  -- data/items/catch_rate_items.asm:5
+  local capsule = self:symbol("TimeCapsule_CatchRateItems")
+  out.timeCapsule = {}
+  for row = 0, 255 do
+    local from = self.rom:byte(capsule.bank, capsule.address + row * 2)
+    if from == 0 then break end
+    out.timeCapsule[from] = order[self.rom:byte(capsule.bank, capsule.address + row * 2 + 1)]
   end
   self:write("items", out)
   self:tick("Items", #order, #order)

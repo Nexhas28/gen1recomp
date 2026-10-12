@@ -15,62 +15,28 @@ local TRADED_FRIENDSHIP = 70 -- pokefirered/src/trade_scene.c:1075
 -- pokefirered/src/trade_scene.c:2778
 local FADE_FRAMES = 16
 
--- pokefirered/src/data/ingame_trades.h:1 sInGameTrades, FIRERED branch
-local TRADES = {
-  [0] = {
-    nickname = "MIMIEN", species = 122, ivs = { 20, 15, 17, 24, 23, 22 },
-    abilityNum = 0, otId = 1985, personality = 0x00009cae, heldItem = 0,
-    otName = "REYLEY", otGender = 0, requestedSpecies = 63,
-  },
-  [1] = {
-    nickname = "ZYNX", species = 124, ivs = { 18, 17, 18, 22, 25, 21 },
-    abilityNum = 0, otId = 36728, personality = 0x498a2e1d, heldItem = 131,
-    otName = "DONTAE", otGender = 0, requestedSpecies = 61, mailNum = 0,
-  },
-  [2] = {
-    nickname = "MS. NIDO", species = 29, ivs = { 22, 18, 25, 19, 15, 22 },
-    abilityNum = 0, otId = 63184, personality = 0x4c970b89, heldItem = 103,
-    otName = "SAIGE", otGender = 1, requestedSpecies = 32,
-  },
-  [3] = {
-    nickname = "CH'DING", species = 83, ivs = { 20, 25, 21, 24, 15, 20 },
-    abilityNum = 0, otId = 8810, personality = 0x151943d7, heldItem = 225,
-    otName = "ELYSSA", otGender = 0, requestedSpecies = 21,
-  },
-  [4] = {
-    nickname = "NINA", species = 30, ivs = { 22, 25, 18, 19, 22, 15 },
-    abilityNum = 0, otId = 13637, personality = 0x00eeca15, heldItem = 0,
-    otName = "TURNER", otGender = 0, requestedSpecies = 33,
-  },
-  [5] = {
-    nickname = "MARC", species = 108, ivs = { 24, 19, 21, 15, 23, 21 },
-    abilityNum = 0, otId = 1239, personality = 0x451308ab, heldItem = 0,
-    otName = "HADEN", otGender = 0, requestedSpecies = 55,
-  },
-  [6] = {
-    nickname = "ESPHERE", species = 101, ivs = { 19, 16, 18, 25, 25, 19 },
-    abilityNum = 1, otId = 50298, personality = 0x06341016, heldItem = 0,
-    otName = "CLIFTON", otGender = 0, requestedSpecies = 26,
-  },
-  [7] = {
-    nickname = "TANGENY", species = 114, ivs = { 22, 17, 25, 16, 23, 20 },
-    abilityNum = 0, otId = 60042, personality = 0x5c77ecfa, heldItem = 108,
-    otName = "NORMA", otGender = 1, requestedSpecies = 48,
-  },
-  [8] = {
-    nickname = "SEELOR", species = 86, ivs = { 24, 15, 22, 16, 23, 22 },
-    abilityNum = 0, otId = 9853, personality = 0x482cac89, heldItem = 0,
-    otName = "GARETT", otGender = 0, requestedSpecies = 77,
-  },
-}
-Trade.TRADES = TRADES
+Trade.FILE = "data/generated/gba/trades/ingame_trades.lua"
+
+local packs = {}
+local function pack()
+  local version = tostring(require("src.core.GameVersion").get())
+  if not packs[version] then
+    local src = assert(require("src.core.game3.dataset").cache():read(Trade.FILE),
+      Trade.FILE .. " is not in the cache")
+    packs[version] = assert(load(src, "@" .. Trade.FILE, "t", {}))()
+  end
+  return packs[version]
+end
+
+-- pokefirered/src/data/ingame_trades.h:1 sInGameTrades
+Trade.TRADES = setmetatable({}, { __index = function(_, id) return pack().trades[id] end })
+function Trade.entry(id)
+  return pack().trades[id]
+end
 Trade.COUNT = 9
 
 -- pokefirered/src/data/ingame_trades.h:184 sInGameTradeMailMessages
-local TRADE_MAIL_MESSAGES = {
-  [0] = { 3613, 4128, 5147, 10876, 3072, 4102, 5183, 4143, 4137 },
-}
-Trade.MAIL_MESSAGES = TRADE_MAIL_MESSAGES
+Trade.MAIL_MESSAGES = setmetatable({}, { __index = function(_, id) return pack().mail[id] end })
 
 -- pokefirered/src/trade.c:144 gLinkPartnerMail
 Trade.PARTNER_MAIL = {}
@@ -137,8 +103,11 @@ local function speciesName(species)
   return (Pokemon.name and Pokemon.name(species)) or ""
 end
 
+-- GetMonData(MON_DATA_NICKNAME) is gText_EggNickname for an egg
+-- (pokefirered/src/pokemon.c:3020)
 local function nicknameOf(mon)
   if not mon then return "" end
+  if require("src.core.game3.pokemon").isEgg(mon) then return require("src.core.game3.rom_text").plain("gText_EggNickname") end
   if mon.nickname and mon.nickname ~= "" then return tostring(mon.nickname) end
   return speciesName(speciesOf(mon))
 end
@@ -156,7 +125,7 @@ local KANTO_SPECIES_END = 151
 local SPECIES_MEW = 151 -- pokefirered/include/constants/species.h:155
 local SPECIES_DEOXYS = 410 -- pokefirered/include/constants/species.h:419
 local VERSION_RUBY = 2 -- pokefirered/include/constants/global.h:9
-local VERSION_SAPPHIRE = 3 -- pokefirered/include/constants/global.h:10
+local VERSION_SAPPHIRE = 1 -- pokefirered/include/constants/global.h:8
 
 -- pokefirered/src/pokemon.c:3049 MON_DATA_SPECIES_OR_EGG
 local function speciesOrEgg(mon)
@@ -242,34 +211,31 @@ end
 
 -- pokefirered/src/trade.c:546 sMessages
 function Trade.refusalText(code)
+  local RomText = require("src.core.game3.rom_text")
   if code == Trade.CANT_TRADE_LAST_MON then
-    -- pokefirered/src/strings.c:301 gText_OnlyPkmnForBattle
-    return Strings("That's your only\nPOKéMON for battle.")
+    return RomText.plain("gText_OnlyPkmnForBattle")
   end
   if code == Trade.CANT_TRADE_EGG_YET or code == Trade.CANT_TRADE_PARTNER_EGG_YET then
-    -- pokefirered/src/strings.c:303 gText_EggCantBeTradedNow
-    return Strings("An EGG can't be traded now.")
+    return RomText.plain("gText_EggCantBeTradedNow")
   end
   if code == Trade.CANT_TRADE_NATIONAL or code == Trade.CANT_TRADE_INVALID_MON then
-    -- pokefirered/src/strings.c:302 gText_PkmnCantBeTradedNow
-    return Strings("That POKéMON can't be traded\nnow.")
+    return RomText.plain("gText_PkmnCantBeTradedNow")
   end
   return nil
 end
 
 -- pokefirered/data/scripts/cable_club.inc:1440 CableClub_Text_YouHaveAMonThatCantBeTaken
 function Trade.badEggText()
-  return Strings("You have at least one POKéMON\nthat can't be taken.")
+  return require("src.core.game3.rom_text").plain("CableClub_Text_YouHaveAMonThatCantBeTaken")
 end
 
--- pokefirered/src/strings.c:304 gText_OtherTrainersPkmnCantBeTraded
 function Trade.peerMonRefusalText()
-  return Strings("The other TRAINER's POKéMON\ncan't be traded now.")
+  return require("src.core.game3.rom_text").plain("gText_OtherTrainersPkmnCantBeTraded")
 end
 
 -- pokefirered/src/trade_scene.c:2500 GetInGameTradeMail
 function Trade.tradeMail(entry)
-  local words = entry and TRADE_MAIL_MESSAGES[tonumber(entry.mailNum) or -1]
+  local words = entry and Trade.MAIL_MESSAGES[tonumber(entry.mailNum) or -1]
   if not words then return nil end
   local record = Mail.clear(nil)
   for i = 1, Mail.MAIL_WORDS_COUNT do
@@ -284,8 +250,8 @@ function Trade.tradeMail(entry)
 end
 
 -- pokefirered/src/trade_scene.c:2456 CreateInGameTradePokemonInternal
-function Trade.createTradeMon(tradeIdx, level)
-  local entry = TRADES[tonumber(tradeIdx) or -1]
+function Trade.createTradeMon(tradeIdx, level, opts)
+  local entry = Trade.entry(tonumber(tradeIdx) or -1)
   if not entry then return nil end
   level = math.max(1, math.min(100, tonumber(level) or 5))
 
@@ -293,7 +259,7 @@ function Trade.createTradeMon(tradeIdx, level)
   local Party = require("src.core.game3.party")
   local nickname, otName = Strings(entry.nickname), Strings(entry.otName)
   local scratch = { party = {}, name = otName, trainerId = entry.otId }
-  local ok, _, mon = Party.giveMon(scratch, entry.species, level, nickname)
+  local ok, _, mon = Party.giveMon(scratch, entry.species, level, nickname, opts)
   if not (ok and mon) then return nil end
 
   mon.personality = entry.personality
@@ -314,6 +280,11 @@ function Trade.createTradeMon(tradeIdx, level)
   mon.abilityId = ability
   mon.gender = (Pokemon.gender and Pokemon.gender(entry.species, entry.personality)) or "U"
   mon.metLocation = METLOC_IN_GAME_TRADE
+  if type(entry.conditions) == "table" then
+    -- pokeemerald/src/trade.c:4571
+    local c = entry.conditions
+    mon.contest = { cool = c[1], beauty = c[2], cute = c[3], smart = c[4], tough = c[5], sheen = entry.sheen or 0 }
+  end
   mon.item = entry.heldItem
   mon.heldItem = entry.heldItem
   -- pokefirered/src/trade_scene.c:2483
@@ -331,7 +302,8 @@ end
 -- pokefirered/src/trade_scene.c:1054 TradeMons
 function Trade.tradeMons(session, playerSlot, offered)
   if not (session and offered) then return nil end
-  local party = session.party or {}
+  session.party = session.party or {}
+  local party = session.party
   local slot = (tonumber(playerSlot) or 0) + 1
   local sent = party[slot]
   if not sent then return nil end
@@ -355,15 +327,44 @@ function Trade.tradeMons(session, playerSlot, offered)
     if record then Mail.giveMailToMon2(session, offered, record) end
   end
   -- pokefirered/src/trade_scene.c:1081 UpdatePokedexForReceivedMon
-  session.dex = session.dex or { seen = {}, owned = {} }
-  session.dex.seen = session.dex.seen or {}
-  session.dex.owned = session.dex.owned or {}
-  local species = speciesOf(offered)
-  if species ~= SPECIES_NONE then
-    session.dex.seen[species] = true
-    session.dex.owned[species] = true
+  -- pokefirered/src/trade_scene.c:1036
+  if not isEgg(offered) then
+    session.dex = session.dex or { seen = {}, owned = {}, caught = {} }
+    session.dex.seen = session.dex.seen or {}
+    session.dex.owned = session.dex.owned or {}
+    session.dex.caught = session.dex.caught or {}
+    local species = speciesOf(offered)
+    if species ~= SPECIES_NONE then
+      session.dex.seen[species] = true
+      require("src.core.game3.dex").handleSetPokedexFlag(session.dex, species, true, offered.personality)
+    end
   end
   return sent
+end
+
+-- pokefirered/include/constants/game_stat.h:25
+Trade.GAME_STAT_POKEMON_TRADES = 21
+
+-- pokefirered/src/quest_log_events.c:1014
+local function questSpeciesName(mon)
+  if isEgg(mon) then return require("src.core.game3.rom_text").plain("gText_EggNickname") end
+  return speciesName(speciesOf(mon))
+end
+
+-- pokefirered/src/trade_scene.c:2599
+function Trade.noteLinkTrade(session, sent, received, partnerName, unionRoom)
+  if type(session) ~= "table" then return nil end
+  local key = "TradedMon1ForTrainersMon2"
+  if not unionRoom then
+    key = "TradedMon1ForPersonsMon2"
+    -- pokefirered/src/trade_scene.c:2606
+    if type(session.gameStats) ~= "table" then session.gameStats = {} end
+    local id = Trade.GAME_STAT_POKEMON_TRADES
+    session.gameStats[id] = math.min(0xFFFFFF, math.floor(tonumber(session.gameStats[id]) or 0) + 1)
+  end
+  -- pokefirered/src/quest_log_events.c:1280
+  return key, { S1 = tostring(partnerName or ""), S2 = questSpeciesName(received),
+    S3 = questSpeciesName(sent) }
 end
 
 local function evolutionOpen()
@@ -395,7 +396,7 @@ end
 -- pokefirered/src/trade_scene.c:2774 DoInGameTradeScene
 function Trade.sceneTask(ctx, adapters, tradeIdx, playerSlot)
   local TradeScene = require("src.core.game3.trade_scene")
-  local entry = TRADES[tonumber(tradeIdx) or -1]
+  local entry = Trade.entry(tonumber(tradeIdx) or -1)
   local frames = 0
   local phase = "fadeout"
   return function()
@@ -460,33 +461,34 @@ function Trade.levelOfSlot(playerSlot)
   return tonumber(mon and mon.level) or 5
 end
 
-Trade.HANDLERS = {
+Trade.BY_NAME = {
   -- pokefirered/src/trade_scene.c:2434
-  [Std.SPECIAL.GetInGameTradeSpeciesInfo] = function(ctx, adapters)
-    local entry = TRADES[varGet(ctx, VAR_0x8004)]
+  GetInGameTradeSpeciesInfo = function(ctx, adapters)
+    local entry = Trade.entry(varGet(ctx, VAR_0x8004))
     if not entry then return false, SPECIES_NONE end
     setStringVar(ctx, adapters, 1, speciesName(entry.requestedSpecies))
     setStringVar(ctx, adapters, 2, speciesName(entry.species))
     return false, entry.requestedSpecies
   end,
   -- pokefirered/src/trade_scene.c:2514
-  [Std.SPECIAL.GetTradeSpecies] = function(ctx)
+  GetTradeSpecies = function(ctx)
     local mon = partyOf()[varGet(ctx, VAR_0x8005) + 1]
     if isEgg(mon) then return false, SPECIES_NONE end
     return false, speciesOf(mon)
   end,
   -- pokefirered/src/trade_scene.c:2522
-  [Std.SPECIAL.CreateInGameTradePokemon] = function(ctx)
+  CreateInGameTradePokemon = function(ctx)
     Trade._offered = Trade.createTradeMon(varGet(ctx, VAR_0x8004), Trade.levelOfSlot(varGet(ctx, VAR_0x8005)))
     return false
   end,
   -- pokefirered/src/trade_scene.c:2774
-  [Std.SPECIAL.DoInGameTradeScene] = function(ctx, adapters)
+  DoInGameTradeScene = function(ctx, adapters)
     local Natives = require("src.core.game3.scripting.natives")
     Natives.awaitState(ctx, Trade.sceneTask(ctx, adapters, varGet(ctx, VAR_0x8004),
       varGet(ctx, VAR_0x8005)))
     return false
   end,
 }
+Std.legacyHandlers(Trade)
 
 return Trade

@@ -356,7 +356,7 @@ end
 function PackMenu:tickRepeatSfx()
   local pending = self.repeatSfx
   if not pending then return false end
-  if WaitPlaySFX.waiting(pending) then return true end
+  if WaitPlaySFX.waiting(pending, self.game) then return true end
   self.repeatSfx = nil
   self:playSfx(pending.name)
   return false
@@ -726,7 +726,9 @@ function PackMenu:giveToSlot(slot, row)
     save = self.save,
     slot = slot,
     items = self.items,
+    -- engine/items/pack.asm:606
     onClose = function()
+      game.stack:pop()
       game.stack:pop()
       self:rebuild()
     end,

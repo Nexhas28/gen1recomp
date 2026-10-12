@@ -149,7 +149,7 @@ end
 -- the party ball rows DrawAllPokeballs puts up with the intro text, moved
 -- out to the wide screen's own corners
 local function drawIntroBalls(battle)
-  if not battle.introBalls then return end
+  if battle.introBalls ~= true then return end
   if battle.enemyParty and
       (battle.kind == "trainer" or battle.kind == "link") then
     battle:drawBallRow(battle.enemyParty, 88, 40, -8)
@@ -183,16 +183,16 @@ end
 local function drawMessageBox(battle)
   Font.drawBox(0, 13, 38, 5)
   love.graphics.setColor(0, 0, 0, 1)
-  if battle.scrollPx and battle.scrollPx > 0 then
-    battle.scrollPx = battle.scrollPx - 2
-    if battle.scrollPx <= 0 then battle.scrollPx = nil end
-  end
+  -- scrollPx counts down in BattleState:tickTextScroll (logic step), not
+  -- here, so the scroll speed does not follow the display refresh rate
   local off = battle.scrollPx or 0
   local ys = { 112, 128 }
   for li, line in ipairs(battle.shown or {}) do
     local y = (ys[li] or 128) + off
+    local pen = 8
     for i = 1, #line do
-      Font.drawCode(line[i], 8 + (i - 1) * 8, y)
+      Font.drawCode(line[i], pen, y)
+      pen = pen + Font.advanceOf(line[i])
     end
   end
   if (battle.msgWaiting or battle.msgPrompt) and battle.frame % 60 < 30 then
@@ -232,8 +232,7 @@ local function drawCommandMenu(battle)
     Font.drawCode(0xE1, 240, 112); Font.drawCode(0xE2, 248, 112)
     Font.draw(Strings("ITEM"), 176, 128)
     Font.draw(Strings("RUN"), 240, 128)
-    -- next to FIGHT for the first 80 frames, then ITEM
-    Font.drawCode(0xED, 168, (battle.demoTimer or 0) <= 80 and 112 or 128)
+    Font.drawCode(0xED, 168, (battle.demoTimer or 0) <= battle:demoDelays() and 112 or 128)
     return
   end
   Font.draw(Strings("What will"), 8, 112)

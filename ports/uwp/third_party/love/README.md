@@ -5,3 +5,5 @@ These x64 UWP Release binaries were built from [`caorthann-celt/love-xbox-uwp`](
 The build uses LÖVE 11.5, LuaJIT, SDL2, and ANGLE. Keep the DLLs and import libraries together; they are one binary interface.
 
 The normal package build consumes these files directly. Rebuilding the backend is a separate dependency maintenance task.
+
+The ROM picker in commit `3f51bf0` offers `.gb` and `.gbc` only. `scripts/xbox-uwp/rebuild_dependencies.ps1` applies `patches/gba-file-picker.patch` to add the default `.gba` filter and an optional comma-separated extension argument: `love.system.pickFile("rom", "nds")`. Importer callers pass their descriptor's `source.formats`; mod and save picker kinds retain their existing filters. The same patch adds a `cart` kind so `pickFile("cart")` offers `.g1rcart` and stages `picked_cart.g1rcart`. The checked-in `love.dll` is built with this patch. Older bridges ignore the second argument and refuse the cart kind; the launcher then falls back to the save-folder hint.

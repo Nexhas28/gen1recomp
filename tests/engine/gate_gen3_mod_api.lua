@@ -7,8 +7,11 @@ local ModTargets = require("src.mods.ModTargets")
 local Schemas = require("src.mods.Schemas")
 
 T.eq(GameVersion.generation("firered"), 3, "FireRed is Gen 3")
-T.eq(table.concat(ModTargets.expand("gen3"), ","), "firered",
+T.eq(GameVersion.generation("leafgreen"), 3, "LeafGreen is Gen 3")
+T.eq(table.concat(ModTargets.expand("gen3"), ","), "firered,leafgreen,ruby,sapphire,emerald",
   "gen3 is every Gen 3 game")
+T.eq(table.concat(ModTargets.expand("rse"), ","), "ruby,sapphire,emerald",
+  "rse is the Hoenn games")
 
 local function manifest(extra)
   local raw = { id = "fix", name = "Fixture", version = "1.0.0",
@@ -19,8 +22,16 @@ end
 
 T.check(ModTargets.supports(manifest({ games = { "gen3" } }), "firered"),
   "games = [gen3] claims FireRed")
+T.check(ModTargets.supports(manifest({ games = { "gen3" } }), "leafgreen"),
+  "games = [gen3] claims LeafGreen")
 T.check(ModTargets.supports(manifest({ games = { "firered" } }), "firered"),
   "games = [firered] claims FireRed")
+T.check(not ModTargets.supports(manifest({ games = { "firered" } }), "leafgreen"),
+  "games = [firered] does not claim LeafGreen")
+T.check(ModTargets.supports(manifest({ games = { "leafgreen" } }), "leafgreen"),
+  "games = [leafgreen] claims LeafGreen")
+T.check(not ModTargets.supports(manifest({ games = { "leafgreen" } }), "firered"),
+  "games = [leafgreen] does not claim FireRed")
 T.check(not ModTargets.supports(manifest(), "firered"),
   "a manifest that says nothing is not a FireRed mod")
 T.check(not ModTargets.supports(manifest({ gen2compat = true }), "firered"),
@@ -57,14 +68,16 @@ for _, name in ipairs({ "tilesets", "sprites", "type_chart", "statuses",
                         "tokens", "music", "sfx", "cries", "map_songs",
                         "audio", "font", "palettes", "icons", "battle_anims",
                         "held_items", "phone_contacts", "decorations",
-                        "apricorns", "landmarks", "radio_channels",
-                        "rom_text" }) do
+                        "apricorns", "landmarks", "radio_channels" }) do
   local spec = Schemas.REGISTRIES[name]
   T.check(spec ~= nil, "catalog still has registry: " .. name)
   T.eq(Schemas.targetFor(name, spec, 3), nil,
     "gated registry has no Gen 3 target: " .. name)
   T.eq(Schemas.gatedFor(name, 3), true, "gated under Gen 3: " .. name)
 end
+
+T.eq(Schemas.targetFor("rom_text", Schemas.REGISTRIES.rom_text, 3), "gen3RomText",
+  "rom_text overrides FireRed text by its pret name")
 
 for name in pairs(Schemas.GEN3) do
   T.check(Schemas.REGISTRIES[name] ~= nil,
@@ -163,12 +176,14 @@ local GEN3_EVENTS = {
 local GEN3_HOOKS = {
   "encounter.roll", "encounter.species", "encounter.table",
   "movement.collision", "warp.destination", "world.talk", "item.use",
+  "world.follower.spawn",
   "script.command", "save.write", "save.new_game",
-  "ui.start_menu.items", "pokemon.sprite",
+  "ui.start_menu.items", "pokemon.sprite", "pokemon.icon",
   "input.step", "input.key", "input.gamepad", "input.wheel", "render.hud",
   "trainer.party", "catch.rate", "exp.gain", "evolution.check",
   "battle.damage", "battle.crit", "battle.accuracy", "battle.charge_required",
   "battle.run", "battle.turn_order", "battle.enemy_action",
+  "battle.low_health_alarm",
 }
 
 local function assertShared(name, sites, kind)

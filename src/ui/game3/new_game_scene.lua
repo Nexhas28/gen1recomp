@@ -1,6 +1,6 @@
 local Display = require("src.core.game3.display")
 local Audio = require("src.core.game3.audio")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 local Oam = require("src.core.game3.oam")
 local Pal = require("src.core.game3.pal_fade")
 local Fx = require("src.core.game3.gba_fx")
@@ -12,19 +12,20 @@ local Window = require("src.ui.game3.window")
 local Naming = require("src.ui.game3.naming")
 local BallOpen = require("src.core.game3.battle.ball_open")
 local ModRuntime = require("src.mods.Runtime")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Scene = {}
 Scene.__index = Scene
 
 Scene.GBA_HZ = 16777216 / 280896
 
-local MUS_ROUTE24 = 292
-local MUS_NEW_GAME_INSTRUCT = 323
-local MUS_NEW_GAME_INTRO = 324
-local MUS_NEW_GAME_EXIT = 325
-local SE_SELECT = 5
-local SE_WARP_IN = 39
-local SE_BALL_TRADE = 53
+local proxyPressed, proxyInput
+local INPUT_PROXY = {
+  wasPressed = function(_, k) return proxyPressed ~= nil and proxyPressed[k] == true end,
+  isDown = function(_, k) return proxyInput ~= nil and proxyInput.isDown and proxyInput:isDown(k) or false end,
+}
+
+local Song = require("src.core.game3.song_ids")
 local SPECIES_NIDORAN_F = 29
 
 local GUIDE_BLUE = { 0, 15, 24 }
@@ -40,9 +41,8 @@ local OBJ_MON, OBJ_BALL, OBJ_PARTICLES, OBJ_PLATFORM, OBJ_PIKACHU, OBJ_CURSOR = 
 
 local MALE, FEMALE = 0, 1
 
--- pokefirered/src/strings.c:48
-local HINT_NEXT = { { icon = "a_button", w = 8 }, "NEXT" }
-local HINT_NEXT_BACK = { { icon = "a_button", w = 8 }, "NEXT ", { icon = "b_button", w = 8 }, "BACK" }
+local HINT_NEXT = "gText_ABUTTONNext"
+local HINT_NEXT_BACK = "gText_ABUTTONNext_BBUTTONBack"
 
 -- pokefirered/src/text.c:36
 local ARROW_FRAMES = { 0, 1, 2, 1 }
@@ -82,54 +82,36 @@ local AFFINE_EMERGE = { { v = 0x28, dur = 0 }, { v = 0x12, dur = 12 }, "end" }
 local AFFINE_RETURN = { { v = -0x2, dur = 18 }, { v = -0x10, dur = 15 }, "end" }
 local AFFINE_NORMAL = { { v = 0x100, dur = 0 }, "end" }
 
--- CONTROLS_TEXT, PIKA_TEXT and OAK_TEXT hold English sources: they exist
--- before any translation catalog, so each is passed to Strings() when shown.
--- pokefirered/data/text/new_game_intro.inc:127
-local CONTROLS_TEXT = {
-  intro = "The various buttons will be explained in\nthe order of their importance.",
-  "Moves the main character.\nAlso used to choose various data\nheadings.",
-  "Used to confirm a choice, check\nthings, chat, and scroll text.",
-  "Used to exit, cancel a choice,\nand cancel a mode.",
-  "Press this button to open the\nMENU.",
-  "Used to shift items and to use\na registered item.",
-  "If you need help playing the\ngame, or on how to do things,\npress the L or R Button.",
-}
 -- pokefirered/src/oak_speech.c:201
 local CONTROLS_WINDOWS = {
   [2] = { { 6, 3 }, { 6, 10 }, { 6, 15 } },
   [3] = { { 6, 3 }, { 6, 8 }, { 6, 13 } },
 }
--- pokefirered/data/text/new_game_intro.inc:161
-local PIKA_TEXT = {
-  "In the world which you are about to\nenter, you will embark on a grand\nadventure with you as the hero.\n\nSpeak to people and check things\nwherever you go, be it towns, roads,\nor caves. Gather information and\nhints from every source.",
-  "New paths will open to you by helping\npeople in need, overcoming challenges,\nand solving mysteries.\n\nAt times, you will be challenged by\nothers and attacked by wild creatures.\nBe brave and keep pushing on.",
-  "Through your adventure, we hope\nthat you will interact with all sorts\nof people and achieve personal growth.\nThat is our biggest objective.\n\nPress the A Button, and let your\nadventure begin!",
-}
--- pokefirered/data/text/new_game_intro.inc:189
+-- pokefirered/src/oak_speech.c:576
+local CONTROLS_PAGES = "sControlsGuide_Pages2And3_Strings"
+-- pokefirered/src/oak_speech.c:342
+local PIKA_PAGES = "sPikachuIntro_Strings"
 local OAK_TEXT = {
-  welcome = "Hello, there!\nGlad to meet you!\fWelcome to the world of POKéMON!\fMy name is OAK.\fPeople affectionately refer to me\nas the POKéMON PROFESSOR.\f",
-  this_world = "This world…",
-  inhabited = "…is inhabited far and wide by\ncreatures called POKéMON.\f",
-  study = "For some people, POKéMON are pets.\nOthers use them for battling.\fAs for myself…\fI study POKéMON as a profession.\f",
-  tell_me = "But first, tell me a little about\nyourself.\f",
-  ask_gender = "Now tell me. Are you a boy?\nOr are you a girl?",
-  your_name = "Let's begin with your name.\nWhat is it?\f",
-  confirm_player = "Right…\nSo your name is {PLAYER}.",
-  rival_intro = "This is my grandson.\fHe's been your rival since you both\nwere babies.\f…Erm, what was his name now?",
-  rival_name_ask = "Your rival's name, what was it now?",
-  confirm_rival = "…Er, was it {RIVAL}?",
-  remember_rival = "That's right! I remember now!\nHis name is {RIVAL}!\f",
-  lets_go = "{PLAYER}!\fYour very own POKéMON legend is\nabout to unfold!\fA world of dreams and adventures\nwith POKéMON awaits! Let's go!",
+  welcome = "gOakSpeech_Text_WelcomeToTheWorld",
+  this_world = "gOakSpeech_Text_ThisWorld",
+  inhabited = "gOakSpeech_Text_IsInhabitedFarAndWide",
+  study = "gOakSpeech_Text_IStudyPokemon",
+  tell_me = "gOakSpeech_Text_TellMeALittleAboutYourself",
+  ask_gender = "gOakSpeech_Text_AskPlayerGender",
+  your_name = "gOakSpeech_Text_YourNameWhatIsIt",
+  confirm_player = "gOakSpeech_Text_SoYourNameIsPlayer",
+  rival_intro = "gOakSpeech_Text_WhatWasHisName",
+  rival_name_ask = "gOakSpeech_Text_YourRivalsNameWhatWasIt",
+  confirm_rival = "gOakSpeech_Text_ConfirmRivalName",
+  remember_rival = "gOakSpeech_Text_RememberRivalsName",
+  lets_go = "gOakSpeech_Text_LetsGo",
 }
--- pokefirered/src/oak_speech.c:588
-local MALE_NAMES = { "RED", "FIRE", "ASH", "KENE", "GEKI", "JAK", "JANNE", "JONN", "KAMON", "KARL", "TAYLOR", "OSCAR", "HIRO", "MAX", "JON", "RALPH", "KAY", "TOSH", "ROAK" }
-local FEMALE_NAMES = { "RED", "FIRE", "OMI", "JODI", "AMANDA", "HILLARY", "MAKEY", "MICHI", "PAULA", "JUNE", "CASSIE", "REY", "SEDA", "KIKO", "MINA", "NORIE", "SAI", "MOMO", "SUZI" }
-local RIVAL_NAMES = { "GREEN", "GARY", "KAZ", "TORU" }
--- The name lists are the cart's English choices; translations localise them
--- (gNameChoice_*: GREEN is GRÜN in German), so they go through Strings()
--- where they are listed and picked, under a context of their own: FIRE the
--- name is not FIRE the type.
-local NAME_CONTEXT = "intro.nameChoice"
+-- pokefirered/src/oak_speech.c:2128
+local function nameChoices(gender, rival)
+  if rival then return RomText.list("sRivalNameChoices") end
+  return RomText.list(gender == MALE and "sMaleNameChoices" or "sFemaleNameChoices")
+end
+Scene.nameChoices = nameChoices
 
 local function idiv(a, b)
   local q = a / b
@@ -236,7 +218,7 @@ function Printer:render(newAB, heldAB)
       self.arrowIdx = (self.arrowIdx + 1) % 4
     end
     if newAB then
-      Audio.playSe(SE_SELECT)
+      Audio.playSe(Song.SE_SELECT)
       self.page = self.page + 1
       self.revealed = 0
       self.arrowFrame = nil
@@ -283,8 +265,8 @@ function Scene.new(assets, opts)
     section = "controls",
     textSpeedOption = tonumber(opts.textSpeed) or 1,
     gender = MALE,
-    playerName = "RED",
-    rivalName = "GREEN",
+    playerName = nameChoices(MALE, false)[1],
+    rivalName = nameChoices(MALE, true)[1],
     hasPlayerBeenNamed = false,
     coordOffsetX = 0,
     bg2X = 0,
@@ -398,8 +380,8 @@ function Scene:_answered(label, value, saveKey)
 end
 
 function Scene:oakPrint(key, speed)
-  local text = OAK_TEXT[key] and Strings(OAK_TEXT[key]) or key
-  text = text:gsub("{PLAYER}", self.playerName):gsub("{RIVAL}", self.rivalName)
+  local text = RomText.ascii(assert(OAK_TEXT[key], key), { playerName = self.playerName, rivalName = self.rivalName })
+  text = text:gsub("\\p", "\f"):gsub("\\l", "\n")
   if self.section == "oak" then
     self._oakStep = (self._oakStep or 0) + 1
     if ModRuntime.wants("intro.oak_speech.step") then
@@ -681,7 +663,7 @@ function Scene:createTradeBall(mon, x, y, delay, mask)
   local function sendOff(s)
     -- pokefirered/src/pokeball.c:1180
     timer = timer + 1
-    if timer == 11 then Audio.playSe(SE_BALL_TRADE) end
+    if timer == 11 then Audio.playSe(Song.SE_BALL_TRADE) end
     if mon.affineAnimEnded then
       Oam.startAnim(s, 2)
       mon.invisible = true
@@ -716,7 +698,7 @@ end
 
 function Scene:controlsLoadPage1()
   -- pokefirered/src/oak_speech.c:797
-  self:setTopBar("CONTROLS", HINT_NEXT)
+  self:setTopBar("gText_Controls", HINT_NEXT)
   self.win.guide = { page = 1 }
   self.bg1 = { image = self.assets.controlsPage1, topbarSplit = true }
 end
@@ -736,7 +718,7 @@ function Scene.Task_NewGameScene(self, t)
   elseif st == 10 then
     self.pal:beginFade(Pal.ALL, 0, 16, 0, Pal.BLACK)
     self.bgVisible[0], self.bgVisible[1] = true, true
-    Audio.playSong(MUS_NEW_GAME_INSTRUCT, { restart = true })
+    Audio.playSong(Song.MUS_NEW_GAME_INSTRUCT, { restart = true })
     t.func = Scene.Task_ControlsGuide_HandleInput
     t.state = 0
     return
@@ -772,7 +754,7 @@ function Scene.Task_ControlsGuide_HandleInput(self, t)
       t.data.delta = -1
       self.pal:beginFade(GUIDE_FADE_MASK, -1, 0, 16, GUIDE_BLUE)
     end
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     t.func = Scene.Task_ControlsGuide_ChangePage
   end
 end
@@ -813,13 +795,13 @@ function Scene.Task_PikachuIntro_LoadPage1(self, t)
     return
   end
   self.section = "pikachu"
-  Audio.playSong(MUS_NEW_GAME_INTRO, { restart = true })
+  Audio.playSong(Song.MUS_NEW_GAME_INTRO, { restart = true })
   self:setTopBar(nil, HINT_NEXT)
   self.bg1 = { image = self.assets.pikachuBg or self.assets.pikachuIntroBg }
   self.currentPage = 1
   t.state = 0
   d.blendTarget = 16
-  self.win.pika = { text = Strings(PIKA_TEXT[1]) }
+  self.win.pika = { text = RomText.at(PIKA_PAGES, 0) }
   d.cursor = self:createTextCursor(226, 145, 0)
   if d.cursor then d.cursor.objBlend = true end
   self:createPikachuOrPlatform(t, "pikachu")
@@ -845,7 +827,7 @@ function Scene.Task_PikachuIntro_HandleInput(self, t)
         if self.currentPage == 1 then return end
         self.currentPage = self.currentPage - 1
       end
-      Audio.playSe(SE_SELECT)
+      Audio.playSe(Song.SE_SELECT)
       if self.currentPage == 4 then
         t.state = 4
       else
@@ -858,7 +840,7 @@ function Scene.Task_PikachuIntro_HandleInput(self, t)
     d.blendTarget = d.blendTarget - 2
     self.bldAlpha = { eva = d.blendTarget, evb = 16 - d.blendTarget }
     if d.blendTarget <= 0 then
-      self.win.pika = { text = Strings(PIKA_TEXT[self.currentPage]) }
+      self.win.pika = { text = RomText.at(PIKA_PAGES, self.currentPage - 1) }
       if self.currentPage == 1 then
         self:setTopBar(nil, HINT_NEXT)
       else
@@ -877,7 +859,7 @@ function Scene.Task_PikachuIntro_HandleInput(self, t)
   elseif st == 4 then
     destroySprite(d.cursor)
     d.cursor = nil
-    Audio.playSong(MUS_NEW_GAME_EXIT, { restart = true })
+    Audio.playSong(Song.MUS_NEW_GAME_EXIT, { restart = true })
     d.blendTarget = 24
     t.state = 5
   else
@@ -927,7 +909,7 @@ function Scene.Task_OakSpeech_Init(self, t)
   if d.nidoran then d.nidoran.invisible = true end
   self:loadTrainerPic("oak")
   self:createPikachuOrPlatform(t, "platform")
-  Audio.playSong(MUS_ROUTE24, { restart = true })
+  Audio.playSong(Song.MUS_ROUTE24, { restart = true })
   self.pal:beginFade(Pal.ALL, 5, 16, 0, Pal.BLACK)
   d.timer = 80
   self.bgVisible[2] = true
@@ -1048,7 +1030,7 @@ function Scene.Task_OakSpeech_ShowGenderOptions(self, t)
   -- pokefirered/src/oak_speech.c:1291
   self.win.menu = {
     kind = "gender", left = 18, top = 9, width = 9, height = 4,
-    items = { { Strings("BOY"), 8, 1 }, { Strings("GIRL"), 8, 17 } },
+    items = { { RomText.plain("gText_Boy"), 8, 1 }, { RomText.plain("gText_Girl"), 8, 17 } },
     cursorX = 0, cursorY = 1, pitch = 16, cursor = 0, wrap = false,
   }
   t.func = Scene.Task_OakSpeech_HandleGenderInput
@@ -1060,7 +1042,7 @@ function Scene:menuInput(wrap)
   local p = self.input
   if not m then return "none" end
   if p.a then
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     return m.cursor
   end
   if p.b then return "b" end
@@ -1071,10 +1053,10 @@ function Scene:menuInput(wrap)
     local pos = m.cursor + delta
     if wrap then
       if pos < 0 then pos = n - 1 elseif pos > n - 1 then pos = 0 end
-      Audio.playSe(SE_SELECT)
+      Audio.playSe(Song.SE_SELECT)
     else
       pos = math.max(0, math.min(n - 1, pos))
-      if pos ~= old then Audio.playSe(SE_SELECT) end
+      if pos ~= old then Audio.playSe(Song.SE_SELECT) end
     end
     m.cursor = pos
   end
@@ -1148,12 +1130,12 @@ function Scene:printNameChoices()
   -- pokefirered/src/oak_speech.c:2117
   local names
   if not self.hasPlayerBeenNamed then
-    names = self.gender == MALE and MALE_NAMES or FEMALE_NAMES
+    names = nameChoices(self.gender, false)
   else
-    names = RIVAL_NAMES
+    names = nameChoices(self.gender, true)
   end
-  local items = { { Strings("NEW NAME"), 8, 1 } }
-  for i = 1, 4 do items[#items + 1] = { Strings(names[i], NAME_CONTEXT), 8, 16 * i + 1 } end
+  local items = { { RomText.plain("gOtherText_NewName"), 8, 1 } }
+  for i = 1, RomText.count("sRivalNameChoices") do items[#items + 1] = { names[i], 8, 16 * i + 1 } end
   self.win.menu = {
     kind = "names", left = 2, top = 2, width = 12, height = 10,
     items = items, cursorX = 0, cursorY = 1, pitch = 16, cursor = 0,
@@ -1174,12 +1156,12 @@ end
 function Scene:getDefaultName(choice)
   -- pokefirered/src/oak_speech.c:2138
   if not self.hasPlayerBeenNamed then
-    local list = self.gender == MALE and MALE_NAMES or FEMALE_NAMES
+    local list = nameChoices(self.gender, false)
     local r = require("src.core.game3.rng").Random()
-    self.playerName = Strings(list[(r % #list) + 1], NAME_CONTEXT)
+    self.playerName = list[(r % #list) + 1]
     self:_answered("name", self.playerName, "name")
   else
-    self.rivalName = Strings(RIVAL_NAMES[choice + 1], NAME_CONTEXT)
+    self.rivalName = nameChoices(self.gender, true)[choice + 1]
     self:_answered("rivalName", self.rivalName, "rivalName")
   end
 end
@@ -1188,11 +1170,11 @@ function Scene.Task_OakSpeech_HandleRivalNameInput(self, t)
   -- pokefirered/src/oak_speech.c:1413
   local r = self:menuInput(true)
   if r == 0 then
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     self.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.BLACK)
     t.func = Scene.Task_OakSpeech_DoNamingScreen
   elseif type(r) == "number" and r >= 1 and r <= 4 then
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     self.win.menu = nil
     self:getDefaultName(r - 1)
     t.data.nameNotConfirmed = true
@@ -1220,7 +1202,7 @@ function Scene:enterNaming(rival)
   self.naming.pal:blend(Pal.ALL, 16, Pal.BLACK)
   local scene = self
   Naming.open({
-    title = rival and Strings("RIVAL's NAME?") or Strings("YOUR NAME?"),
+    title = RomText.plain(rival and "gText_RivalsName" or "gText_YourName"),
     maxLen = 7,
     seed = rival and self.rivalName or self.playerName,
     template = rival and "RIVAL" or "PLAYER",
@@ -1253,7 +1235,8 @@ function Scene:namingFrame()
     n.pal:updateFade()
     if not n.pal:fadeActive() then n.stage = "input" end
   elseif n.stage == "input" then
-    Naming.update(self.inputProxy, 1 / Scene.GBA_HZ)
+    Naming.handleInput(self.inputProxy)
+    Naming.update(1 / Scene.GBA_HZ)
   elseif n.stage == "fade_out" then
     n.pal:updateFade()
     if not n.pal:fadeActive() then
@@ -1318,9 +1301,10 @@ function Scene.Task_OakSpeech_ConfirmName(self, t)
       d.timer = d.timer - 1
     else
       -- pokefirered/src/menu.c:531
+      local yes, no = RomText.plain("gText_YesNo"):match("^(.-)\n(.*)$")
       self.win.menu = {
         kind = "yesno", left = 2, top = 2, width = 6, height = 4,
-        items = { { Strings("YES"), 8, 2 }, { Strings("NO"), 8, 2 + FrlgFont.LINE_PITCH } },
+        items = { { yes, 8, 2 }, { no, 8, 2 + FrlgFont.LINE_PITCH } },
         cursorX = 0, cursorY = 2, pitch = 16, cursor = 0,
       }
       t.func = Scene.Task_OakSpeech_HandleConfirmNameInput
@@ -1334,7 +1318,7 @@ function Scene.Task_OakSpeech_HandleConfirmNameInput(self, t)
   if r == "none" then return end
   self.win.menu = nil
   if r == 0 then
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     t.data.timer = 40
     if not self.hasPlayerBeenNamed then
       self:clearDialog()
@@ -1345,7 +1329,7 @@ function Scene.Task_OakSpeech_HandleConfirmNameInput(self, t)
       t.func = Scene.Task_OakSpeech_FadeOutRivalPic
     end
   else
-    Audio.playSe(SE_SELECT)
+    Audio.playSe(Song.SE_SELECT)
     if not self.hasPlayerBeenNamed then
       t.func = Scene.Task_OakSpeech_FadeOutForPlayerNamingScreen
     else
@@ -1477,7 +1461,7 @@ function Scene.Task_OakSpeech_ShrinkPlayerPic(self, t)
   local d = t.data
   self.shrinkTimer = self.shrinkTimer + 1
   if self.shrinkTimer % 20 == 0 then
-    if self.shrinkTimer == 40 then Audio.playSe(SE_WARP_IN) end
+    if self.shrinkTimer == 40 then Audio.playSe(Song.SE_WARP_IN) end
     local old = d.scaleDelta
     d.scaleDelta = d.scaleDelta - 32
     self.bg2Affine = { pa = idiv(0x10000, old - 8), pd = idiv(0x10000, d.scaleDelta - 16) }
@@ -1551,11 +1535,8 @@ function Scene:update(input, dt)
     self.input = self.pending
     self.pending = {}
     self.held = held
-    local pressed = self.input
-    self.inputProxy = {
-      wasPressed = function(_, k) return pressed[k] == true end,
-      isDown = function(_, k) return input and input.isDown and input:isDown(k) or false end,
-    }
+    proxyPressed, proxyInput = self.input, input
+    self.inputProxy = INPUT_PROXY
     self:frame()
   end
   return self.result
@@ -1580,25 +1561,10 @@ function Scene:drawTopBar()
   if not tb then return end
   local white = FrlgFont.COLOR.WHITE
   if tb.title then
-    FrlgFont.draw(Strings(tb.title), 4, 1, { colors = white, maxWidth = 120 })
+    FrlgFont.draw(RomText.plain(tb.title), 4, 1, { colors = white, maxWidth = 120 })
   end
   if tb.hint then
-    local w = 0
-    for _, part in ipairs(tb.hint) do
-      w = w + (type(part) == "table" and part.w or FrlgFont.measure(Strings(part), { small = true }))
-    end
-    local x = 236 - w
-    local Pokedex = require("src.ui.game3.pokedex_chrome")
-    for _, part in ipairs(tb.hint) do
-      if type(part) == "table" then
-        Pokedex.drawKeypadIcon(part.icon, x, 1)
-        x = x + part.w
-      else
-        local label = Strings(part)
-        FrlgFont.draw(label, x, 1, { colors = white, maxWidth = 200, small = true })
-        x = x + FrlgFont.measure(label, { small = true })
-      end
-    end
+    require("src.ui.game3.pokedex_chrome").drawControlInfo(RomText.plain(tb.hint), 236, 1)
   end
 end
 
@@ -1608,11 +1574,11 @@ function Scene:drawBg0Text()
   if win.guide then
     -- pokefirered/src/oak_speech.c:803
     if win.guide.page == 1 then
-      FrlgFont.draw(Strings(CONTROLS_TEXT.intro), 2, 7 * 8, { colors = white, maxWidth = 238 })
+      FrlgFont.draw(RomText.plain("gControlsGuide_Text_Intro"), 2, 7 * 8, { colors = white, maxWidth = 238 })
     else
       local base = (win.guide.page - 2) * 3
       for i, w in ipairs(CONTROLS_WINDOWS[win.guide.page]) do
-        FrlgFont.draw(Strings(CONTROLS_TEXT[base + i]), w[1] * 8 + 6, w[2] * 8, { colors = white, maxWidth = 192 })
+        FrlgFont.draw(RomText.at(CONTROLS_PAGES, base + i - 1), w[1] * 8 + 6, w[2] * 8, { colors = white, maxWidth = 192 })
       end
     end
   end
@@ -1645,8 +1611,7 @@ function Scene:layerCanvas(key)
   self._canvases = self._canvases or {}
   local c = self._canvases[key]
   if not c then
-    c = love.graphics.newCanvas(Display.W, Display.H)
-    c:setFilter("nearest", "nearest")
+    c = PixelCanvas.new(Display.W, Display.H, "nearest")
     self._canvases[key] = c
   end
   return c

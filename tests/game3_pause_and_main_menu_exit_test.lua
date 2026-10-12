@@ -2,6 +2,15 @@
 -- Run: luajit tests/game3_pause_and_main_menu_exit_test.lua
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+local ROM_TEXT = { ["sStartMenuActionTable[3]"] = "{PLAYER}" }
+local function romTextKey(n, i, j) return j and (n .. "[" .. i .. "][" .. j .. "]") or (n .. "[" .. i .. "]") end
+local function romTextPlain(key, ctx) return ((ROM_TEXT[key] or key):gsub("{PLAYER}", ctx and ctx.playerName or "")) end
+package.loaded["src.core.game3.rom_text"] = {
+  plain = romTextPlain, box = romTextPlain, ascii = romTextPlain, has = function() return true end,
+  key = romTextKey, at = function(n, i, j, ctx) return romTextPlain(romTextKey(n, i, j), ctx) end,
+  count = function() return 0 end, list = function() return {} end,
+  lazy = function(map) return setmetatable({}, { __index = function(_, k) return map[k] end }) end,
+}
 
 local T = require("tests.harness")
 local check, eq = T.check, T.eq
@@ -15,9 +24,11 @@ local Game3 = require("src.core.Game3")
 -- Test 1: StartMenu EXIT flow and confirmation
 do
   local returnToTitleCalled = false
+  local returnToTitleOptions
   local dummyGame = {
-    returnToTitle = function()
+    returnToTitle = function(_, opts)
       returnToTitleCalled = true
+      returnToTitleOptions = opts
     end,
   }
   local session = { name = "RED", game = dummyGame }
@@ -76,6 +87,7 @@ do
   check(not StartMenu._confirmExit, "Exited confirm mode on YES")
   check(not StartMenu.isOpen(), "StartMenu closed on YES")
   check(returnToTitleCalled, "returnToTitle was called on YES")
+  check(returnToTitleOptions and returnToTitleOptions.skipIntro, "EXIT YES requests direct title")
 end
 
 -- Test 2: Game3:returnToTitle cleans up and sets boot to title phase
@@ -97,10 +109,11 @@ do
   local stateWithContinue = Boot.new()
   Boot.setHasContinue(stateWithContinue, true)
   local items1 = Boot.menuItems(stateWithContinue)
-  eq(#items1, 3, "Main menu has 3 items when continue save exists")
+  eq(#items1, 4, "Main menu has 4 items when continue save exists")
   eq(items1[1], "CONTINUE", "Item 1 is CONTINUE")
   eq(items1[2], "NEW GAME", "Item 2 is NEW GAME")
-  eq(items1[3], "EXIT", "Item 3 is EXIT")
+  eq(items1[3], "MYSTERY GIFT", "Item 3 is MYSTERY GIFT")
+  eq(items1[4], "EXIT", "Item 4 is EXIT")
 
   local stateNoContinue = Boot.new()
   Boot.setHasContinue(stateNoContinue, false)
@@ -115,7 +128,7 @@ do
   local state = Boot.new()
   Boot.setHasContinue(state, true)
   state.phase = Boot.PHASE.MENU
-  state.menuIndex = 3 -- EXIT
+  state.menuIndex = 4 -- EXIT
   state.fadeT, state.fadeTarget = 0, 0
 
   local pressedKey = nil
@@ -174,11 +187,23 @@ do
     badges = 4,
     gender = 0,
   }
-  for idx = 1, 3 do
+  local ListMenu = require("src.ui.game3.list_menu")
+  local realArrow = ListMenu.drawArrow
+  local arrows = {}
+  ListMenu.drawArrow = function(dir) arrows[#arrows + 1] = dir end
+  for idx = 1, 4 do
     stateWith.menuIndex = idx
+    stateWith.menuScroll = idx == 4 and 4 or nil
+    arrows = {}
     local ok, err = pcall(Boot.draw, stateWith)
     check(ok, "drawMainMenu with continue at index " .. idx .. " runs without error: " .. tostring(err))
+    if idx == 4 then
+      eq(#arrows, 0, "no down arrow once EXIT is scrolled into view")
+    else
+      eq(arrows[1], "down", "down arrow flags EXIT below the fold at index " .. idx)
+    end
   end
+  ListMenu.drawArrow = realArrow
 
   local stateWithout = Boot.new()
   Boot.setHasContinue(stateWithout, false)
@@ -247,6 +272,92 @@ do
 
   Field.update = origFieldUpdate
   Runtime.stop(nil, game)
+end
+
+do
+  local Version = require("src.core.GameVersion")
+  local Runtime = require("src.core.game3.runtime")
+  local oldVersion = Version.get()
+  local titlePath = "src.ui.game3.rse.title_rse"
+  local introPath = "src.ui.game3.rse.intro_emerald"
+  local oldTitle, oldIntro = package.loaded[titlePath], package.loaded[introPath]
+  local titleCalls, introCalls, introColdBoot = 0, 0, nil
+  package.loaded[titlePath] = { new = function()
+    titleCalls = titleCalls + 1
+    return { update = function(self) return self.result end }
+  end }
+  package.loaded[introPath] = { new = function(_, opts)
+    introCalls, introColdBoot = introCalls + 1, opts.coldBoot
+    return { update = function() end }
+  end }
+  Version.set("emerald")
+  local game = Game3.new()
+  game.phase = "field"
+  game.session = { version = "emerald", map = "EM_LITTLEROOT_TOWN", x = 5, y = 5, game = game }
+  Runtime.start(nil, game, game.session, { alreadyOnMap = true })
+  StartMenu.show({ session = game.session, game = game })
+  for i, entry in ipairs(StartMenu.ENTRIES) do
+    if entry.id == "exit" then StartMenu.cursor = i break end
+  end
+  StartMenu.confirm()
+  eq(StartMenu._confirmCursor, 2, "Emerald EXIT defaults to NO")
+  StartMenu.cancel()
+  eq(game.phase, "field", "Emerald EXIT B preserves field")
+  StartMenu.confirm()
+  StartMenu.confirm()
+  eq(game.phase, "field", "Emerald EXIT NO preserves field")
+  StartMenu.confirm()
+  StartMenu.move(1)
+  StartMenu.confirm()
+  eq(game.phase, "boot", "Emerald EXIT tears down field")
+  eq(game.session, nil, "Emerald EXIT clears session")
+  check(not Runtime.isActive(), "Emerald EXIT stops runtime")
+  eq(Stack.depth(), 0, "Emerald EXIT clears screen stack")
+  eq(game.boot.phase, Boot.PHASE.TITLE, "Emerald EXIT enters TITLE directly")
+  eq(titleCalls, 1, "Emerald EXIT constructs title")
+  eq(introCalls, 0, "Emerald EXIT bypasses intro constructor")
+  eq(game.boot.custom.coldBoot, false, "Emerald EXIT consumes cold boot")
+  if game.boot.custom.title then
+    game.boot.custom.title.result = "copyright"
+    Boot.update(game.boot, {}, 1 / 60)
+    eq(introColdBoot, false, "Title idle copyright uses noncold intro")
+  end
+  game:returnToTitle()
+  eq(game.boot.phase, Boot.PHASE.INTRO, "Actual soft reset retains Emerald intro")
+  eq(game.boot.custom.coldBoot, true, "Actual soft reset retains cold boot")
+  Boot.update(game.boot, {}, 1 / 60)
+  eq(introColdBoot, true, "Actual soft reset constructs cold intro")
+  package.loaded[titlePath], package.loaded[introPath] = oldTitle, oldIntro
+  Version.set(oldVersion)
+end
+
+do
+  local RsMenu = require("src.ui.game3.rs.main_menu")
+  local Pal = require("src.core.game3.pal_fade")
+  local T3 = RsMenu.TYPE
+  eq(table.concat(RsMenu.items(T3.HAS_NO_SAVED_GAME), ","), "NEW_GAME,OPTION,EXIT", "RS main menu lists EXIT under OPTION")
+  eq(table.concat(RsMenu.items(T3.HAS_SAVED_GAME), ","), "CONTINUE,NEW_GAME,OPTION,EXIT", "RS continue menu lists EXIT")
+  eq(table.concat(RsMenu.items(T3.HAS_MYSTERY_EVENT), ","), "CONTINUE,NEW_GAME,MYSTERY_EVENTS,OPTION,EXIT",
+    "RS mystery events menu lists EXIT last")
+  local items = RsMenu.items(T3.HAS_MYSTERY_EVENT)
+  local m = setmetatable({ menuType = T3.HAS_MYSTERY_EVENT, items = items, cursor = 1, scroll = 0, blink = 0,
+    pal = Pal.new(), state = "input" }, RsMenu)
+  for _ = 1, #items - 1 do
+    m:frame({ new = { down = true } })
+    m.state = "input"
+  end
+  eq(m.cursor, #items, "RS cursor reaches EXIT")
+  check(m.scroll > 0, "RS menu scrolls so EXIT stays on screen")
+  local w = RsMenu.windowFor(m.menuType, m.cursor)
+  check((w.top + w.height + 1) * 8 - m.scroll <= 160, "RS EXIT window fits after scroll")
+  m.state = "pressed_a"
+  local r = m:frame({ new = {} })
+  eq(type(r) == "table" and r.action, "exit", "A on RS EXIT returns to the launcher")
+end
+
+do
+  local Data = require("src.ui.game3.rs.start_menu_data")
+  check(Data.exitConfirms == true, "RS start menu EXIT offers return to title like Emerald")
 end
 
 T.finish("game3_pause_and_main_menu_exit_test")

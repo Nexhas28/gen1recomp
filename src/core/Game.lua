@@ -3,6 +3,7 @@
 
 local Data = require("src.core.Data")
 local FixedStep = require("src.core.FixedStep")
+local DeferredWrite = require("src.core.DeferredWrite")
 local Input = require("src.core.Input")
 local Logger = require("src.core.Logger")
 local Renderer = require("src.render.Renderer")
@@ -72,7 +73,7 @@ function Game:load(opts)
   require("src.battle.TypeChart").load(Data)
 
   self.input = Input
-  Input:init()
+  Input:init(false)
 
   self.touchControls = TouchControls
   TouchControls:init()
@@ -101,7 +102,10 @@ function Game:load(opts)
   -- apply the persisted audio + display options before anything plays
   self:applyOptions(self.save.options)
 
-  FixedStep:init(function(step) self:step(step) end)
+  FixedStep:init(function(step)
+    self:step(step)
+    self:_speedLockEdge()
+  end)
   self.fixedStep = FixedStep
 
   local OverworldState = require("src.world.OverworldController")
@@ -306,6 +310,10 @@ function Game:breakLink(err, source)
 end
 
 function Game:step(dt)
+  -- A monotonic count of fixed logic steps, for presentation counters that
+  -- are sampled from draw code but must advance at the 60Hz step rate
+  -- rather than the display refresh (Player:pose's surf bob).
+  Game.logicStep = (Game.logicStep or 0) + 1
   -- Tool mods (autoplay, accessibility drivers, input visualizers) act on
   -- the same fixed-step boundary as a physical controller.  Run them before
   -- Input:step promotes queued edges so a button chosen here is visible to
@@ -348,6 +356,7 @@ function Game:step(dt)
   else
     self.stack:update(dt)
   end
+  if self.unionPresence then self.unionPresence:tick() end
   -- play time for the trainer card / save screen
   self.save.playTime = (self.save.playTime or 0) + dt
   -- Music.update is NOT serviced here: it decrements fade counters and
@@ -369,12 +378,7 @@ function Game:_resolveLogicSpeed()
   return GameSpeed.clamp(opts and opts[key] or GameSpeed.DEFAULT)
 end
 
--- The logic multiplier for this frame. Read live rather than cached so the
--- Options rows take effect immediately; speedOverride is the --speed /
--- POKEPORT_SPEED run argument, which wins over the saved option so a bot
--- or screenshot run does not depend on whatever the player last chose.
-function Game:logicSpeed()
-  local GameSpeed = require("src.core.GameSpeed")
+function Game:speedLocked()
   -- Link play is always 1X on both machines, and this wins over every other
   -- source including POKEPORT_SPEED and every per-category option.
   -- Fast-forward multiplies the logic clock, so a peer at 10X burned a
@@ -384,11 +388,27 @@ function Game:logicSpeed()
   -- either player set this to -- checked here, before the core.logic_speed
   -- hook ever runs, so a mod cannot defeat it either.
   if self.linkSession or (self.linkNet and not self.linkNet.closed) then
-    return 1
+    return true, "link"
   end
   if Game.isFixedSpeedInStack and Game.isFixedSpeedInStack(self.stack) then
-    return 1
+    return true, "minigame"
   end
+  return false
+end
+
+function Game:_speedLockEdge()
+  if (self._frameSpeed or 1) > 1 and self:speedLocked() then
+    FixedStep:endFrame()
+  end
+end
+
+-- The logic multiplier for this frame. Read live rather than cached so the
+-- Options rows take effect immediately; speedOverride is the --speed /
+-- POKEPORT_SPEED run argument, which wins over the saved option so a bot
+-- or screenshot run does not depend on whatever the player last chose.
+function Game:logicSpeed()
+  if self:speedLocked() then return 1 end
+  local GameSpeed = require("src.core.GameSpeed")
   if self.speedOverride then return GameSpeed.clamp(self.speedOverride) end
   -- Clamp here too, not just in _resolveLogicSpeed's vanilla path: a mod's
   -- core.logic_speed hook can return anything (0, negative, nil, NaN) and
@@ -399,12 +419,21 @@ function Game:logicSpeed()
     resolveLogicSpeedVanilla, self))
 end
 
+-- Discord Rich Presence tick, pcall'd by Game:update: a named function so
+-- the per-frame call builds no closure (the require stays inside the pcall,
+-- so a missing/broken module still soft-fails exactly as before)
+local function discordPresenceUpdate(dt)
+  require("src.core.DiscordPresence").update(dt)
+end
+
 function Game:update(dt)
   -- Fast-forward scales only the logic clock (see src/core/GameSpeed.lua).
   -- Give the accumulator room for one full frame at the current speed,
   -- or the anti-spiral clamp quietly caps every level above ~15X.
+  DeferredWrite.tick()
   local speed = self:logicSpeed()
-  FixedStep.maxAccum = FixedStep.catchupLimit(speed)
+  self._frameSpeed = speed
+  FixedStep.maxAccum = FixedStep.catchupLimit(speed, dt)
   FixedStep:update(dt, speed)
   -- Audio runs off real time at a fixed 60Hz regardless of game speed or
   -- display refresh, so fades and chip synthesis keep their intended tempo
@@ -422,7 +451,7 @@ function Game:update(dt)
   -- mod render pipelines tween on the same real-frame clock, for the same
   -- reason: they are presentational, so fast-forward must not speed them up
   require("src.render.Pipelines").update(dt)
-  pcall(function() require("src.core.DiscordPresence").update(dt) end)
+  pcall(discordPresenceUpdate, dt)
   self:updateSync(dt)
   -- Steady-state memory backstop: advance the incremental collector one
   -- small step every few rendered frames.  The heavy GPU objects are now
@@ -495,8 +524,7 @@ end
 -- Asked of the WHOLE stack, not just the top.  For BATTLE SIZE "fill" that is
 -- because the party menu, bag and text boxes a battle opens must not snap the
 -- surface back to the fixed scale for a frame; the title screen and intro want
--- it unconditionally, since neither has a world behind it and neither has any
--- reason to sit in a small box in the middle of a large window.
+-- it unless a skin or FAITHFUL RATIO frames the picture.
 function Game.fillScaleInStack(stack)
   for i = #(stack and stack.states or {}), 1, -1 do
     local state = stack.states[i]
@@ -520,22 +548,11 @@ function Game.wideBattleInStack(stack)
   return nil
 end
 
--- Which of "battle"/"overworld"/"menu" per-category GAME SPEED (RFC 0007)
--- applies right now. Whole-stack, the same idiom as fillScaleInStack/
--- wideBattleInStack above: an overlay with neither marker (PartyMenu,
--- ChoiceBox, a NamingScreen, a text box) is transparent to the walk and
--- inherits whatever is under it, making the category a property of the
--- STACK POSITION the overlay sits over, not of the overlay itself. A
--- scripted sequence (script.started/ended) never pushes a state of its
--- own either -- it runs through the owning overworld/battle state's own
--- script runner or message queue -- so it inherits the same way. Nothing
--- identifying as either (the title screen, credits, an intro cutscene
--- with nothing under it) falls to "menu", the bucket every non-gameplay
--- screen gets; see the RFC's Decisions section for the full reasoning.
 function Game.speedCategoryInStack(stack)
   local states = stack and stack.states
   for i = #(states or {}), 1, -1 do
     local state = states[i]
+    if state and state.isMenu then return "menu" end
     if state and state.isBattle then return "battle" end
     if state and state.isOverworld then return "overworld" end
   end
@@ -763,7 +780,7 @@ function Game:zoomStep(delta)
   local offset = Zoom.step(delta, Renderer:fitScale())
   if self.save and self.save.options then
     self.save.options.zoom = offset
-    self:writeOptions()
+    DeferredWrite.schedule("options", function() self:writeOptions() end)
   end
 end
 
@@ -784,6 +801,7 @@ end
 
 function Game:_cycleSpeed(dir)
   if not (self.save and self.save.options) then return end
+  if self:speedLocked() then return end
   local busy
   local ow = self.overworld
   if ow then
@@ -795,15 +813,12 @@ function Game:_cycleSpeed(dir)
         or ow.engaging or ow.emote))
   end
   if busy then return end
-  -- Cycles whichever category Game.speedCategoryInStack says is active
-  -- right now (RFC 0007) -- pressing the hotkey during a battle speeds up
-  -- just the battle, on the overworld just the walk, in a menu just the
-  -- menu. A single physical control that means "speed up whatever I'm
-  -- looking at right now" needs no new UI and matches what a player
-  -- pressing it mid-battle almost certainly wants.
   local GameSpeed = require("src.core.GameSpeed")
   local key = GameSpeed.optionKey(Game.speedCategoryInStack(self.stack))
-  self.save.options[key] = GameSpeed.cycle(self.save.options[key], dir)
+  local nextSpeed = GameSpeed.cycle(self.save.options[key], dir)
+  for _, c in ipairs(GameSpeed.CATEGORIES) do
+    self.save.options[GameSpeed.optionKey(c)] = nextSpeed
+  end
   self:writeOptions()
 end
 
@@ -845,6 +860,7 @@ function Game:keypressed(key)
       end
       return
     end
+    local hk = Input.hotkeyKey(key)
     if key == "f1" then
       if not self:quickSaveAllowed() then return end
       self:writeSave()
@@ -865,12 +881,15 @@ function Game:keypressed(key)
     elseif key == "=" then
       self:zoomStep(1)
       return
-    elseif key == "1" then
+    elseif hk == "1" then
       -- cycle GAME SPEED (0.25X → 200X, logic only; audio unaffected);
       -- shoulders/triggers on gamepad do the same (see gamepadpressed)
       self:_cycleSpeed(1)
       return
-    elseif key == "2" then
+    elseif hk == "0" then
+      self:_cycleSpeed(-1)
+      return
+    elseif hk == "2" then
       -- cycle COLORS (GBC / OG / OG INV / GBC INV / CLASSIC); the pack change
       -- forces Game.overworld:reloadMap, which rebuilds the live NPC array, so
       -- hold it while a warp/transition or an on-screen scripted cutscene is
@@ -888,7 +907,7 @@ function Game:keypressed(key)
         self:writeOptions()
       end
       return
-    elseif key == "3" then
+    elseif hk == "3" then
       -- cycle TILT OFF → 15 → 35 → 50 → OFF (mnemonic: 3D), free-roam only
       local Tilt = require("src.render.Tilt")
       if Tilt.gateOK(self.stack:top(), self.overworld) then
@@ -896,7 +915,7 @@ function Game:keypressed(key)
         self:writeOptions()
       end
       return
-    elseif key == "4" then
+    elseif hk == "4" then
       -- cycle ZOOM through every integer level (survey → FIT → close-up → wrap)
       local Zoom = require("src.render.Zoom")
       if Zoom.gateOK(self.stack:top(), self.overworld) then
@@ -1003,6 +1022,7 @@ end
 -- Game:keypressed; see its comment and RFC 0020 for the precedent this
 -- restores.
 function Game:gamepadpressed(joystick, button)
+  Input:padEventSeen(button)
   local function vanilla()
     padPressedBody(self, joystick, button)
   end
@@ -1033,6 +1053,18 @@ function Game:gamepadaxis(joystick, axis, value)
       end
       return
     end
+    local stickEvents = Input.stickAxisEvents and Input:stickAxisEvents(axis, value)
+    if stickEvents then
+      for i = 1, #stickEvents do
+        local ev = stickEvents[i]
+        if ev.phase == "pressed" then
+          padPressedBody(self, joystick, ev.button)
+        elseif ev.phase == "released" then
+          padReleasedBody(self, joystick, ev.button)
+        end
+      end
+      return
+    end
     Input:gamepadaxis(joystick, axis, value)
   end
   if not ModRuntime.wantsHook("input.gamepad") then return vanilla() end
@@ -1054,6 +1086,7 @@ local function isRawStick(joystick)
 end
 
 function Game:joystickpressed(joystick, button)
+  if GamepadMap.ignoreRawForJoystick(joystick) then return end
   if isAccelerometer(joystick) then return end
   TouchControls:noteGamepad()
   local top = self.stack and self.stack:top()
@@ -1109,6 +1142,8 @@ function Game:focus(f)
     Input:reconcile()
     local eng = self:syncEngine()
     if eng then pcall(eng.noteResumed, eng) end
+  else
+    DeferredWrite.flush("options")
   end
   TouchControls:reset()
   self:cancelPointers()
@@ -1118,6 +1153,7 @@ function Game:visible(v)
   if v then
     self:onResume()
   else
+    DeferredWrite.flush("options")
     Input:reset()
     TouchControls:reset()
     self:cancelPointers()
@@ -1328,7 +1364,7 @@ function Game:writeSave()
   if ModRuntime.wants("save.writing") then
     ModRuntime.emit("save.writing", { save = self.save, meta = self.save.meta })
   end
-  local written = SaveData.save(self.save)
+  local written = require("src.world.gen1.UnionSafety").write(self.save, self.data, SaveData.save)
   if written then
     local eng = self:syncEngine()
     if eng then pcall(eng.noteSaveWritten, eng) end
@@ -1475,6 +1511,7 @@ function Game:restoreSave(loaded, recovered, opts)
     local Pokemon = require("src.pokemon.Pokemon")
     for _, mon in ipairs(loaded.party or {}) do Pokemon.heal(mon) end
   end
+  require("src.world.gen1.UnionSafety").settle(loaded, self.data)
   local modsDiff = SaveData.modsDiff(loaded, activeMods)
   local report = SaveData.validate(loaded, self.data)
   report.recovered = recovered
@@ -1494,14 +1531,22 @@ function Game:restoreSave(loaded, recovered, opts)
   end
   -- rebuild the state stack from the save
   while self.stack:top() do self.stack:pop() end
-  -- freshBoot threads through from the caller (onContinue and F2 both set
-  -- it); a future caller that doesn't ask for it keeps the ordinary
-  -- crossfade by default.
+  local continued = opts and opts.continued
   -- engine/menus/main_menu.asm:110 (CONTINUE forces PLAYER_DIR_DOWN)
-  local facing = (opts and opts.continued) and "down" or loaded.player.facing
+  local facing = continued and "down" or loaded.player.facing
+  local Music = require("src.core.Music")
+  local titleSong = continued and Music.current() or nil
   self.stack:push(self.overworld, loaded.player.map,
                   loaded.player.x, loaded.player.y, facing,
-                  { via = "boot", freshBoot = opts and opts.freshBoot })
+                  { via = "boot", freshBoot = opts and opts.freshBoot,
+                    keepMusic = titleSong ~= nil })
+  if titleSong and Music.current() == titleSong then
+    -- home/overworld.asm:2347, home/audio.asm:11
+    Music.playMap(self.data, loaded.player.map, self.save.onBike,
+                  self.overworld.player and self.overworld.player.surfing,
+                  Music.MAP_FADE)
+  end
+  require("src.online.union.TradeTxn").resumePending(self)
   self.saveReport = report
   if not SaveData.emptyReport(report) then
     -- the report screen is a Screens id so mods (or the ui milestone) own
@@ -1567,6 +1612,7 @@ end
 -- been observed to leave Game.load nil after EXIT GAME on Android.
 -- Explicit GPU owners are released below; everything else is just dropped.
 function Game:reset()
+  DeferredWrite.flush("options")
   if self.stack and self.stack.clear then
     pcall(function() self.stack:clear() end)
   end

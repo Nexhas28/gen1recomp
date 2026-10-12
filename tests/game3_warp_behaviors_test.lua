@@ -127,6 +127,10 @@ else
   end
   check(Collision.arrivalFacing(MB.LADDER, "left") == "left",
     "a ladder keeps the direction the player left with")
+  check(Collision.arrivalFacing(MB.LADDER, "up") == "up",
+    "a ladder reached walking up keeps facing up")
+  check(Collision.arrivalFacing(MB.LADDER, nil) == "down",
+    "a ladder with no stored direction faces south")
   check(Collision.arrivalFacing(0x00, "left") == "down",
     "hasDirectionSet is cleared, so a plain cell faces south")
   check(Collision.arrivalFacing(MB.FALL, "up") == "down",

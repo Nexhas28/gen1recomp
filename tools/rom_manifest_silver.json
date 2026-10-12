@@ -16152,6 +16152,10 @@
       105,
       19724
     ],
+    "OutdoorSprites": [
+      5,
+      18060
+    ],
     "OverworldSprites": [
       5,
       18398
@@ -17511,6 +17515,10 @@
     "Tilesets": [
       5,
       22206
+    ],
+    "TimeCapsule_CatchRateItems": [
+      10,
+      18134
     ],
     "TimeFishGroups": [
       36,

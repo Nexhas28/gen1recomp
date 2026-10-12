@@ -5,6 +5,7 @@ love = love or require("tests.love_stub")
 
 local T = require("tests.harness")
 local Convert = require("src.online.Convert")
+local TeamPick = require("src.online.TeamPick")
 
 --------------------------------------------------------------------------
 -- Synthetic datasets
@@ -75,9 +76,13 @@ local gen2Data = {
     SHADOW_BALL = { id = "SHADOW_BALL", name = "SHADOW BALL", pp = 15 },
   },
   items = {
-    LEFTOVERS = { id = "LEFTOVERS", name = "LEFTOVERS" },
-    METAL_COAT = { id = "METAL_COAT", name = "METAL COAT" },
-    FLOWER_MAIL = { id = "FLOWER_MAIL", name = "FLOWER MAIL" },
+    LEFTOVERS = { id = "LEFTOVERS", name = "LEFTOVERS", index = 0x92 },
+    METAL_COAT = { id = "METAL_COAT", name = "METAL COAT", index = 0x8f },
+    FLOWER_MAIL = { id = "FLOWER_MAIL", name = "FLOWER MAIL", index = 0x9e },
+    BITTER_BERRY = { id = "BITTER_BERRY", name = "BITTER BERRY", index = 0x53 },
+    BERRY = { id = "BERRY", name = "BERRY", index = 0xad },
+    TM_DOUBLE_TEAM = { id = "TM_DOUBLE_TEAM", name = "TM32", index = 0xe1 },
+    timeCapsule = { [0x19] = "LEFTOVERS", [0x2d] = "BITTER_BERRY", [0xbe] = "BERRY", [0xff] = "BERRY" },
   },
 }
 
@@ -149,6 +154,47 @@ local function kinds(list)
   return out
 end
 
+do
+  local source1, source2 = { pokemon = {}, moves = gen1Data.moves },
+    { pokemon = {}, moves = gen2Data.moves }
+  source1.pokemon.FARFETCHD = {
+    id = "FARFETCHD", dex = 83, name = "FARFETCH'D", types = { "NORMAL", "FLYING" },
+    baseStats = { hp = 52, attack = 65, defense = 55, speed = 60, special = 58 },
+    catchRate = 45, growthRate = "MEDIUM_FAST",
+  }
+  source2.pokemon.FARFETCH_D = {
+    id = "FARFETCH_D", dex = 83, name = "FARFETCH'D", types = { "NORMAL", "FLYING" },
+    baseStats = { hp = 52, attack = 65, defense = 55, speed = 60,
+      specialAttack = 58, specialDefense = 58 },
+    growthRate = "GROWTH_MEDIUM_FAST", genderRatio = 0x7f,
+  }
+  source2.pokemon.growthRates = gen2Data.pokemon.growthRates
+  local from1 = gen1Mon("TESTMON", 25)
+  from1.species, from1.nickname = "FARFETCHD", "DUCK"
+  from1.catchRate = 45
+  local up = Convert.toGen2(from1, source1, source2)
+  T.eq(up and up.species, "FARFETCH_D", "cross-generation lookup uses destination Gen 2 key")
+  local preview, allowed = Convert.preview(from1, 1, 2, source1, source2)
+  T.check(allowed and #preview > 0, "renamed species is allowed in conversion preview")
+  local converted, _, refusals = TeamPick.convert({ generation = 1, party = { from1 } },
+    2, source1, source2)
+  T.eq(converted["party|1"] and converted["party|1"].species, "FARFETCH_D",
+    "trade preview converts to destination species key")
+  T.eq(next(refusals), nil, "trade preview does not refuse renamed species")
+
+  local from2 = gen2Mon("TESTMON", 25)
+  from2.species = "FARFETCH_D"
+  local down = Convert.toGen1(from2, source2, source1)
+  T.eq(down and down.species, "FARFETCHD", "reverse conversion uses destination Gen 1 key")
+  local arrival, arrivalWhy = Convert.validateArrival(
+    { species = "FARFETCH_D", level = 25, types = { "NORMAL", "FLYING" } },
+    source1, source2)
+  T.check(arrival, "arrival validation resolves renamed species by National Dex")
+  T.eq(arrivalWhy, nil, "renamed species arrival has no refusal")
+  T.check(Convert.toGen2({ species = "UNKNOWN" }, source1, source2) == nil,
+    "unmatched species remains refused")
+end
+
 --------------------------------------------------------------------------
 -- Gen 1 -> Gen 2
 --------------------------------------------------------------------------
@@ -165,7 +211,7 @@ do
   T.eq(out.dvs.hp, Mon.hpDV(src.dvs), "1->2 derives the HP DV")
   T.eq(out.happiness, 70, "1->2 stamps happiness 70")
   T.eq(out.pokerus, 0, "1->2 zeroes pokerus")
-  T.eq(out.item, nil, "1->2 carries no held item")
+  T.eq(out.item, "BITTER_BERRY", "1->2 reads catch rate 45 through the Teru-sama table")
   T.eq(out.caughtLevel, 30, "1->2 meets at the current level")
   T.eq(out.isEgg, false, "1->2 is never an egg")
   T.eq(out.nickname, "SPROUT", "1->2 keeps the nickname")
@@ -182,6 +228,13 @@ do
     "1->2 splits one Special into two equal stats when the bases agree")
   T.eq(out.moves[1].maxPp, 35, "1->2 gives moves a maxPp from move data")
   T.eq(#report.lost, 0, "1->2 loses nothing")
+  T.eq(kinds(report.changed).item.to, "BITTER_BERRY", "1->2 reports the held item")
+  T.eq(Convert.toGen2(gen1Mon("TESTMON", 30, { catchRate = 0xe1 }), gen1Data, gen2Data).item,
+    "TM_DOUBLE_TEAM", "1->2 keeps a catch rate outside the table as that item id")
+  T.eq(Convert.toGen2(gen1Mon("TESTMON", 30, { catchRate = 0x19 }), gen1Data, gen2Data).item,
+    "LEFTOVERS", "1->2 maps catch rate 25 to LEFTOVERS")
+  T.eq(Convert.toGen2(gen1Mon("TESTMON", 30, { catchRate = 0 }), gen1Data, gen2Data).item,
+    nil, "1->2 catch rate 0 holds nothing")
   T.check(kinds(report.changed).happiness ~= nil, "1->2 reports the friendship")
 end
 
@@ -263,8 +316,8 @@ do
   T.eq(out.level, 30, "2->1 keeps the level")
   T.eq(out.exp, Growth.expForLevel("MEDIUM_SLOW", 30),
     "2->1 recomputes exp on the Gen 1 curve")
-  T.eq(out.catchRate, 45,
-    "2->1 stamps the Gen 1 species' own catch rate")
+  T.eq(out.catchRate, 0,
+    "2->1 writes the empty held item byte into the catch rate slot")
   T.eq(out.stats.special,
     Stats.calc(gen1Data.pokemon.TESTMON, 30, out.dvs, out.statExp).special,
     "2->1 folds Special back through the Gen 1 base Special")
@@ -283,13 +336,16 @@ do
   local src = gen2Mon("TESTMON", 40, { item = "LEFTOVERS", pokerus = 0xf1 })
   local out, report = Convert.toGen1(src, gen2Data, gen1Data)
   T.check(out ~= nil, "2->1 accepts a mon holding an ordinary item")
-  T.eq(out.item, nil, "2->1 drops the held item")
-  T.eq(out.catchRate, 45,
-    "2->1 does not put the item byte in the catch rate slot")
+  T.eq(out.item, nil, "2->1 has no held item field")
+  T.eq(out.catchRate, 0x92,
+    "2->1 puts the held item byte in the catch rate slot")
+  T.eq(kinds(report.changed).item.text, "HELD ITEM KEPT AS CATCH RATE 146: LEFTOVERS",
+    "2->1 names the item it kept")
   local lost = kinds(report.lost)
-  T.eq(lost.item.text, "HELD ITEM LOST: LEFTOVERS",
-    "2->1 names the item it dropped")
+  T.check(lost.item == nil, "2->1 does not report the item as lost")
   T.check(lost.pokerus ~= nil, "2->1 reports pokerus lost")
+  local back = Convert.toGen2(out, gen1Data, gen2Data)
+  T.eq(back.item, "LEFTOVERS", "2->1->2 round trip returns the held item")
 end
 
 do
@@ -372,7 +428,7 @@ do
   T.check(back ~= nil, "round trip comes back")
   T.eq(back.level, src.level, "round trip keeps the level")
   T.eq(back.exp, src.exp, "round trip keeps the exp")
-  T.eq(back.catchRate, src.catchRate, "round trip keeps the catch rate")
+  T.eq(back.catchRate, 0x53, "round trip stores the Teru-sama replacement item as the catch rate")
   for _, key in ipairs({ "hp", "attack", "defense", "speed", "special" }) do
     T.eq(back.stats[key], src.stats[key], "round trip keeps stat " .. key)
     T.eq(back.dvs[key], src.dvs[key], "round trip keeps DV " .. key)
@@ -434,8 +490,8 @@ do
   local lines, ok = Convert.preview(gen2Mon("TESTMON", 30,
     { item = "LEFTOVERS" }), 2, 1, gen2Data, gen1Data)
   T.check(ok, "preview of a legal 2->1 mon is ok")
-  T.check(has(lines, "HELD ITEM LOST: LEFTOVERS"),
-    "preview names the lost held item")
+  T.check(has(lines, "HELD ITEM KEPT AS CATCH RATE 146: LEFTOVERS"),
+    "preview names the kept held item")
 
   local bad, badOk = Convert.preview(gen2Mon("JOHTOMON", 30), 2, 1,
     gen2Data, gen1Data)
@@ -494,9 +550,9 @@ do
   T.eq(results[2].index, 2, "slot 2 carries its index")
   T.eq(results[3].reason, "move_too_new", "slot 3 refusal reason")
   T.eq(results[3].info.move, "SHADOW_BALL", "slot 3 names the move")
-  T.check(results[4].ok, "slot 4 is legal with the item dropped")
-  T.check(has(results[4].preview, "HELD ITEM LOST: METAL COAT"),
-    "slot 4 preview names the dropped METAL COAT")
+  T.check(results[4].ok, "slot 4 is legal with the item kept")
+  T.check(has(results[4].preview, "HELD ITEM KEPT AS CATCH RATE 143: METAL COAT"),
+    "slot 4 preview names the kept METAL COAT")
   T.eq(#Convert.refusals(results), 2, "two refusals collected")
 
   local up, upResults = Convert.partyToGen2(
@@ -547,6 +603,21 @@ if red and gold then
   T.check(down ~= nil, "real BULBASAUR converts down")
   T.eq(down.catchRate, red.pokemon.BULBASAUR.catchRate,
     "real BULBASAUR takes Red's catch rate")
+
+  local redFarfetch = red.pokemon.FARFETCHD
+  local goldFarfetch = gold.pokemon.FARFETCH_D
+  if redFarfetch and goldFarfetch then
+    T.eq(redFarfetch.dex, goldFarfetch.dex,
+      "real Red and Gold Farfetch'd records share National Dex number")
+    T.check(redFarfetch.id ~= goldFarfetch.id,
+      "real Farfetch'd identifiers differ across generations")
+    local realDown = Convert.toGen1(goldMon("FARFETCH_D", 25), gold, red)
+    T.eq(realDown and realDown.species, redFarfetch.id,
+      "real Farfetch'd converts to Red's species key")
+    local realUp = realDown and Convert.toGen2(realDown, red, gold)
+    T.eq(realUp and realUp.species, goldFarfetch.id,
+      "real Farfetch'd converts back to Gold's species key")
+  end
 
   local magnemite = goldMon("MAGNEMITE", 30)
   local mDown = Convert.toGen1(magnemite, gold, red)

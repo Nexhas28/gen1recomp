@@ -17,6 +17,27 @@ local WARP_SLOT_FIELD = {
   setholewarp = "holeWarp",
 }
 
+-- pokefirered/src/script_menu.c:574
+local STD_STRING_COUNT = 29
+
+local function stdString(id)
+  id = tonumber(id)
+  if not id or id < 0 or id >= STD_STRING_COUNT then return nil end
+  return require("src.core.game3.rom_text").plain("stdstring:" .. id)
+end
+Adapters.stdString = stdString
+
+-- pokeemerald/src/scrcmd.c:1599 StringCopy(..., gDecorations[decorId].name)
+local function decorationName(src)
+  local ok, DecorInv = pcall(require, "src.core.game3.rse.decoration_inventory")
+  if not ok or type(DecorInv) ~= "table" or not DecorInv.info then return nil end
+  local okInfo, info = pcall(DecorInv.info, src)
+  if okInfo and type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+    return info.name
+  end
+  return nil
+end
+
 -- pokefirered/src/event_object_movement.c:5208 GetOppositeDirection
 local OPPOSITE_DIR = { down = "up", up = "down", left = "right", right = "left" }
 
@@ -106,6 +127,7 @@ function Adapters.stub(opts)
   end
   a.nurseHeal = opts.nurseHeal or function(done) if done then done() end end
   a.openPc = opts.openPc or function(done) if done then done() end end
+  a.hallOfFamePc = opts.hallOfFamePc or function(done) if done then done() end end
   a.openShop = opts.openShop or function(_items, done) if done then done() end end
   a.askYesNo = opts.askYesNo or function(cb) if cb then cb(true) end end
   a.fadeScreen = opts.fadeScreen or function(_mode, _speed, done) if done then done() end end
@@ -123,6 +145,17 @@ function Adapters.stub(opts)
   a.openEasyChat = opts.openEasyChat or function(o, done)
     local def = { 2601, 4128, 526, 2611 }
     if done then done(true, (o and o.words) or def) end
+  end
+  a.openTrendyPhrase = opts.openTrendyPhrase or function(o, done)
+    if done then done(false, o and o.words) end
+  end
+  a.openRsEasyChat = opts.openRsEasyChat or function(o, done)
+    if done then done(false, o and o.words) end
+  end
+  a.rsFieldMessageBoxMode = opts.rsFieldMessageBoxMode or function() return 0 end
+  a.openRsFieldAutoScrollMessage = opts.openRsFieldAutoScrollMessage or function()
+    a.log("[game3] native RS field auto-scroll host unavailable")
+    return false
   end
   a.hallOfFame = opts.hallOfFame or function(done)
     local HallOfFame = require("src.ui.game3.hall_of_fame")
@@ -148,14 +181,10 @@ function Adapters.stub(opts)
       end
     end
     if op == "bufferstdstring" then
-      local STD = {
-        [24] = Strings("ITEMS POCKET"),
-        [25] = Strings("KEY ITEMS POCKET"),
-        [26] = Strings("POKé BALLS POCKET"),
-        [27] = Strings("TM CASE"),
-        [28] = Strings("BERRY POUCH"),
-      }
-      return STD[tonumber(src) or -1]
+      return stdString(src)
+    end
+    if op == "bufferdecorationname" then
+      return decorationName(src)
     end
     return nil
   end
@@ -193,7 +222,8 @@ end
 function Adapters.resolveNpcColor(ctx, store)
   local Ctx = require("src.core.game3.scripting.ctx")
   local sv = ctx and ctx.specialVars or {}
-  local tc = sv[Ctx.VAR_TEXT_COLOR]
+  local layout = ctx and ctx.specialLayout or Ctx.specialLayout()
+  local tc = layout.textColor and sv[layout.textColor] or nil
   if tc == nil then tc = Ctx.TEXT_COLOR_DEFAULT end
   -- src/field_specials.c:1548
   if tc ~= Ctx.TEXT_COLOR_DEFAULT then return tc end
@@ -407,6 +437,18 @@ function Adapters.host(mod, game, world)
     openMessage = function(text)
       boxOpen = true
     end,
+    rsFieldMessageBoxMode = function()
+      return require("src.ui.game3.message").rsFieldMessageBoxMode()
+    end,
+    openRsFieldAutoScrollMessage = function(presentation, onPrinted)
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      if not (Runtime and Runtime.isActive and Runtime.isActive()) then return false end
+      local Message = require("src.ui.game3.message")
+      if Message.rsFieldMessageBoxMode() ~= 0 then return false end
+      if not Message.showRsFieldAutoScroll(presentation, onPrinted) then return false end
+      boxOpen = true
+      return true
+    end,
     openMessageAsync = function(text, done)
       boxOpen = true
       local Runtime = package.loaded["src.core.game3.runtime"]
@@ -507,7 +549,8 @@ function Adapters.host(mod, game, world)
           -- explicitly dismissed; without this they persist after the script ends.
           local Message = package.loaded["src.ui.game3.message"]
           if Message and Message.isOpen and Message.isOpen() then
-            Message.close()
+            -- pokeruby/src/scrcmd.c:1263
+            if not (Message.isRsFieldAutoScroll and Message.isRsFieldAutoScroll()) then Message.close() end
           end
           if cb then cb() end
           tick_vm()
@@ -710,27 +753,37 @@ function Adapters.host(mod, game, world)
       end
     end,
     openPc = function(done, pcOpts)
-      local function finish()
+      local function finish(result)
         local okMsg, Message = pcall(require, "src.ui.game3.message")
         if okMsg and Message and Message.close then Message.close() end
-        if done then done() end
+        if done then done(result) end
         tick_vm()
       end
       local Runtime = package.loaded["src.core.game3.runtime"]
       if Runtime and Runtime.isActive and Runtime.isActive() then
-        if a.closeMessage then a.closeMessage() end
         local okMsg, Message = pcall(require, "src.ui.game3.message")
+        local prompt = okMsg and Message and Message.isOpen and Message.isOpen()
+          and Message.currentPage() or nil
+        if a.closeMessage then a.closeMessage() end
         if okMsg and Message and Message.close then Message.close() end
         local okHud, Hud = pcall(require, "src.ui.game3.hud")
         if okHud and Hud and Hud.clearWaitButton then Hud.clearWaitButton() end
         a.log("[game3] openPc via game3 PcMenu")
         local PcMenu = require("src.ui.game3.pc_menu")
         local bedroom = type(pcOpts) == "table" and pcOpts.bedroom == true
+        local mode = type(pcOpts) == "table" and pcOpts.mode or nil
+        local startMode = bedroom and "player_pc" or nil
+        if mode == "select" then startMode = "select" end
+        if mode == "storage" then startMode = "storage" end
+        if mode == "player" then startMode = "player_pc" end
         PcMenu.show({
           session = Runtime.getSession(),
           onClose = finish,
-          startMode = bedroom and "player_pc" or nil,
-          closeOnExit = bedroom,
+          startMode = startMode,
+          bedroom = bedroom,
+          closeOnExit = bedroom or mode == "storage" or mode == "player",
+          silentClose = mode ~= nil,
+          prompt = prompt,
         })
         return
       end
@@ -817,7 +870,9 @@ function Adapters.host(mod, game, world)
     onFlagChanged = function(flagId, hidden)
       local G3 = useGame3Objects()
       if G3 and G3.syncFlagVisibility then
-        G3.syncFlagVisibility(flagId, hidden and true or false)
+        local Space = package.loaded["src.core.game3.scripting.space"]
+        G3.syncFlagVisibility(flagId, hidden and true or false,
+          Space and Space._inTransition and true or nil)
       end
     end,
     hideObject = function(localId)
@@ -989,7 +1044,8 @@ function Adapters.host(mod, game, world)
           local tmOk, TownMap = pcall(require, "src.core.game3.town_map_stub")
           if tmOk and TownMap.unlockSeviiMap then TownMap.unlockSeviiMap(mod) end
         end
-        if ok and ItemsData.pocketOf(storeId)=="KEY_ITEMS" then
+        if ok and ItemsData.pocketOf(storeId)=="KEY_ITEMS"
+          and require("src.core.game3.field_modules").enabled("questLog", session) then
           local Q=require("src.core.game3.quest_log_recorder")
           Q.event(session,"ObtainedItemInLocation",{Q.location(resolveGame(),session),ItemsData.displayName(storeId)})
         end
@@ -1068,7 +1124,9 @@ function Adapters.host(mod, game, world)
       if op == "opendoor" then
         Doors.open(mapId, x, y)
       elseif op == "closedoor" then
-        Doors.close(mapId, x, y)
+        -- pokefirered/src/scrcmd.c:2131
+        -- pokeemerald/src/scrcmd.c:2063
+        Doors.close(mapId, x, y, { playSound = false })
       end
     end,
     fadeScreen = function(mode, speed, done)
@@ -1110,6 +1168,19 @@ function Adapters.host(mod, game, world)
       end
       if Message.isOpen and Message.isOpen() and Message.close then
         Message.close()
+      end
+      if chooseOpts.nativeModule == "src.ui.game3.rs.daycare_party" then
+        assert(require("src.core.game3.constants").versionOf(session) == "ruby"
+          or require("src.core.game3.constants").versionOf(session) == "sapphire", "native RS daycare host used by another edition")
+        local Fade = require("src.ui.game3.fade")
+        local restore = Fade.mode == Fade.MODE.TO_BLACK and not Fade.isActive() and (tonumber(Fade.t) or 0) >= 16
+        if restore then Fade.clear() end
+        require(chooseOpts.nativeModule).show(session, function(index)
+          if restore then Fade.begin(Fade.MODE.FROM_BLACK, 1, function() end) end
+          local function resume() if done then done(index) end; tick_vm() end
+          if not Runtime.defer(resume) then resume() end
+        end)
+        return
       end
       local picked = nil
       local function resume()
@@ -1185,11 +1256,41 @@ function Adapters.host(mod, game, world)
       Fade.clear()
       EasyChat.open(opts)
     end,
-    warp = function(group, num, warpId, x, y, done)
+    openTrendyPhrase = function(opts, done)
+      local Trend = require("src.ui.game3.rs.trendy_phrase")
+      local Fade = require("src.ui.game3.fade")
+      local Message = require("src.ui.game3.message")
+      opts = opts or {}
+      opts.onDone = function(confirmed, words)
+        if done then done(confirmed, words) end
+        tick_vm()
+      end
+      if Message.isOpen and Message.isOpen() and Message.close then Message.close() end
+      Fade.clear()
+      Trend.show(opts)
+    end,
+    openRsEasyChat = function(opts, done)
+      local Editor = require("src.ui.game3.rs.easy_chat_editor")
+      local Fade = require("src.ui.game3.fade")
+      local Message = require("src.ui.game3.message")
+      opts = opts or {}
+      opts.onDone = function(confirmed, words)
+        if done then done(confirmed, words) end
+        tick_vm()
+      end
+      if Message.isOpen and Message.isOpen() and Message.close then Message.close() end
+      Fade.clear()
+      Editor.show(opts)
+    end,
+    warp = function(group, num, warpId, x, y, done, kind)
       local Versions = require("src.import.gba.versions")
       -- Prefer FR standalone ids; fall back to Sevii ferry maps.
-      local mapId = (Versions.frMapFor and Versions.frMapFor(group, num))
-        or Versions.seviiMapFor(group, num)
+      local mapId
+      if Versions.frMapFor then
+        mapId = Versions.frMapFor(group, num) or Versions.seviiMapFor(group, num)
+      else
+        mapId = warp_map_id(group, num)
+      end
       local w = resolveWorld()
       local finish = function()
         moveTracks = {}
@@ -1213,6 +1314,12 @@ function Adapters.host(mod, game, world)
         return v
       end
       local cx, cy = as_coord(x), as_coord(y)
+      local Plaza = require("src.core.game3.link.union_plaza_map")
+      if require("src.core.game3.capabilities").has(nil, "unionRoom") and mapId == Plaza.SOURCE_ID then
+        Plaza.ensure(resolveGame())
+        mapId = Plaza.MAP_ID
+        cx, cy = Plaza.entry()
+      end
       local wid = tonumber(warpId)
       if (not cx or not cy) and wid and wid ~= 0xFF and wid >= 0 then
         local def = w and w.data and w.data.maps and w.data.maps[mapId]
@@ -1251,16 +1358,26 @@ function Adapters.host(mod, game, world)
       end
       -- Sevii destinations: game3 Map.load rebinds collision + EventObjects
       -- (localIds are per-map; town Bill lid1 ≠ PC Nurse lid1).
+      local function settle()
+        if w and w.mapSetup then
+          a._warpPoll = function()
+            if w.mapSetup then return false end
+            a._warpPoll = nil
+            finish()
+            return true
+          end
+          return
+        end
+        finish()
+      end
       if type(mapId) == "string" and MapIds.isGame3Map(mapId) then
         local Map = require("src.core.game3.map")
         local Runtime = package.loaded["src.core.game3.runtime"]
         local mod = Runtime and Runtime._mod
-        Map.load(mod, resolveGame(), mapId, {
-          x = cx,
-          y = cy,
-          facing = facing,
-          depth1Connections = true,
-        })
+        local game = resolveGame()
+        -- src/scrcmd.c:719
+        require("src.core.game3.warp").scripted(mod, game, kind, mapId, cx, cy, facing, settle)
+        return
       elseif w and w.warpToMapId then
         w:warpToMapId(mapId, cx, cy, facing)
       elseif w and w.setMap then
@@ -1271,17 +1388,7 @@ function Adapters.host(mod, game, world)
           OC.loadMap(w, mapId)
         end
       end
-      -- Hold waitstate until Gen2 mapSetup fade-in finishes (avoids white+text).
-      if w and w.mapSetup then
-        a._warpPoll = function()
-          if w.mapSetup then return false end
-          a._warpPoll = nil
-          finish()
-          return true
-        end
-        return
-      end
-      finish()
+      settle()
     end,
     playSe = function(id, fanfare)
       local Audio = require("src.core.game3.audio")
@@ -1323,7 +1430,7 @@ function Adapters.host(mod, game, world)
         -- multichoicedefault left, top, listId, default, ignoreBPress
         -- multichoicegrid left, top, listId, numColumns, ignoreBPress
         listId = tonumber(row.listId or row[3] or row[1]) or 0
-        n = tonumber(row.count or row[4]) or n
+        n = tonumber(row.count) or n
       end
       local opts, layout = Multi.resolve(listId, n)
       layout = layout or {}
@@ -1428,6 +1535,20 @@ function Adapters.host(mod, game, world)
         end,
       })
     end,
+    -- pokefirered/src/hof_pc.c:23
+    hallOfFamePc = function(done)
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local session = (Runtime and Runtime.getSession and Runtime.getSession()) or (resolveGame() and resolveGame().session)
+      local okMsg, Message = pcall(require, "src.ui.game3.message")
+      if okMsg and Message and Message.close then Message.close() end
+      require("src.ui.game3.hall_of_fame_pc").show({
+        session = session,
+        onDone = function()
+          if done then done() end
+          tick_vm()
+        end,
+      })
+    end,
     startTrainerBattle = function(foe, done, battleOpts)
       local BattleBridge = require("src.core.game3.battle_bridge")
       battleOpts = battleOpts or {}
@@ -1483,20 +1604,10 @@ function Adapters.host(mod, game, world)
         return ItemsData.displayName(src)
       end
       if op == "bufferstdstring" then
-        -- pret constants/menu.h STDSTRING_*
-        local STD = {
-          [10] = Strings("ITEMS"),
-          [11] = Strings("KEY ITEMS"),
-          [12] = Strings("POKé BALLS"),
-          [13] = Strings("TMs & HMs"),
-          [14] = Strings("BERRIES"),
-          [24] = Strings("ITEMS POCKET"),
-          [25] = Strings("KEY ITEMS POCKET"),
-          [26] = Strings("POKé BALLS POCKET"),
-          [27] = Strings("TM CASE"),
-          [28] = Strings("BERRY POUCH"),
-        }
-        return STD[tonumber(src) or -1] or tostring(src)
+        return stdString(src) or tostring(src)
+      end
+      if op == "bufferdecorationname" then
+        return decorationName(src)
       end
       if op == "bufferpartymonnick" then
         local Runtime = package.loaded["src.core.game3.runtime"]

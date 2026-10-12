@@ -4,8 +4,28 @@ local Bag = require("src.core.game3.bag")
 local Storage = require("src.core.game3.storage")
 local Mons = require("src.core.game3.save_mon")
 
+local GameVersion = require("src.core.GameVersion")
+
 local M = {}
 local pockets = { "ITEMS", "KEY_ITEMS", "POKE_BALLS", "TM_CASE", "BERRY_POUCH" }
+M.PC_ITEMS_COUNT = 30 -- include/constants/global.h:35
+
+local function rse()
+  return GameVersion.layout(GameVersion.get()) == "rse"
+end
+
+-- pokeemerald/include/constants/global.h:50
+function M.pcItemsCount()
+  if rse() then return require("src.save_convert.Gen3Layout").forVersion(GameVersion.get()).PC_ITEMS.count end
+  return M.PC_ITEMS_COUNT
+end
+
+-- pokeemerald/src/item.c:263
+function M.slotMax(pocket, pc)
+  if not rse() then return 999 end
+  if pc then return Items.BAG_MODEL.pcSlotMax or 999 end
+  return Items.slotMax(pocket) or 99
+end
 
 function M.itemId(data, id)
   local def = data and data.items and data.items[id]
@@ -122,9 +142,10 @@ end
 local function set(data, save, pc, id, qty)
   if type(qty) ~= "number" or qty ~= math.floor(qty) or qty < 0 or qty > 999 then return false end
   id = M.itemId(data, id)
+  if rse() and qty > M.slotMax(Items.pocketOf(id), pc) then return false end
   local slots, cap
   if pc then
-    slots, cap = save.storage.items, Storage.PC_ITEMS_COUNT
+    slots, cap = save.storage.items, M.pcItemsCount()
   else
     for _, p in ipairs(pockets) do
       local list = save.bag.pockets[p]
@@ -161,6 +182,7 @@ local function set(data, save, pc, id, qty)
     if not pc then
       local pocket = Items.pocketOf(id)
       local container = pocket == "TM_CASE" and Items.ITEM_TM_CASE or pocket == "BERRY_POUCH" and Items.ITEM_BERRY_POUCH
+      if rse() then container = Items.CONTAINERS[pocket] and Items.CONTAINERS[pocket].item or nil end
       if container and not locate(data, save.bag.pockets.KEY_ITEMS or {}, container) then
         if not set(data, save, false, container, 1) then return false end
       end
@@ -180,6 +202,23 @@ function M.change(data, save, pc, changes)
   for _, change in ipairs(changes) do
     if not set(data, staged, pc, change.id, change.qty) then return false end
   end
+  save.bag, save.storage = staged.bag, staged.storage
+  M.ensureStorage(save)
+  M.project(data, save)
+  return true
+end
+
+-- src/item_menu.c:2004 Task_TryDoItemDeposit / src/item.c:385 AddPCItem
+function M.transfer(data, save, toPc, id, qty)
+  if type(qty) ~= "number" or qty <= 0 or qty ~= math.floor(qty) then return false end
+  local fromQty = M.quantity(data, save, not toPc, id)
+  local toQty = M.quantity(data, save, toPc, id)
+  if qty > fromQty or toQty + qty > 999 then return false end
+  local staged = { bag = Copy(save.bag), storage = {} }
+  for k, value in pairs(save.storage) do staged.storage[k] = value end
+  staged.storage.items = Copy(save.storage.items)
+  if not set(data, staged, toPc, id, toQty + qty) then return false end
+  if not set(data, staged, not toPc, id, fromQty - qty) then return false end
   save.bag, save.storage = staged.bag, staged.storage
   M.ensureStorage(save)
   M.project(data, save)
